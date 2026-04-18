@@ -12,6 +12,9 @@ export {
   SemanticRuleSchema,
   formatAnswerKeyForPrompt,
   formatFailureForPrompt,
+  OutcomeWriter,
+  RuleBasedClassifier,
+  newEpisodicId,
 } from "./memory/index.js";
 export type {
   AnswerKey,
@@ -22,6 +25,12 @@ export type {
   MemoryReadQuery,
   MemoryRetrieval,
   FsStoreOptions,
+  WriteReviewInput,
+  RecordOutcomeInput,
+  RecordOutcomeOutput,
+  Classifier,
+  ClassificationOutput,
+  OutcomeResult,
 } from "./memory/index.js";
 
 // Efficiency Gate (decision #22: first-class from day 1) — every LLM call

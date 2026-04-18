@@ -97,3 +97,26 @@
     happy path + missing-owner throw, git-diff with/without remote, file
     diff), and output rendering (all verdicts, severity sort, no-consensus
     tag, metrics formatting, exit-code mapping).
+- **Outcome writer — self-evolve loop closure** (decision #17, write side):
+  - `OutcomeWriter.writeReview(...)` persists an `EpisodicEntry` with
+    `outcome: "pending"` at the end of every `conclave review` call.
+  - `OutcomeWriter.recordOutcome({ episodicId, outcome })` updates the
+    stored episodic entry (merged / rejected / reworked) and invokes a
+    `Classifier` to produce `AnswerKey` (on merge) or `FailureEntry[]`
+    (on reject/rework — one per unique blocker, nits excluded).
+  - `RuleBasedClassifier` — deterministic extraction without an LLM.
+    Pattern = `by-repo/<repo>`; tags derived from blocker categories;
+    free-form category strings normalized to the 11 allowed enum values.
+    Haiku-backed classifier is a future drop-in behind the same interface.
+  - `MemoryStore.findEpisodic(id)` + FS walker so outcome can be recorded
+    in a fresh process (review → close PR → merge can span sessions).
+  - **CLI wired**: `conclave review` now prints the episodic id + a copy-paste
+    `conclave record-outcome --id ... --result merged` instruction. New
+    `conclave record-outcome` command closes the loop end-to-end.
+  - 16 test cases: merged → single answer-key; rejected/reworked → one
+    failure per unique blocker; nit exclusion; cross-agent dedup;
+    category normalization (`"Type Error"` → `type-error`, `"a11y"` →
+    `accessibility`, `"UNUSED IMPORT"` → `dead-code`); tag derivation;
+    stable ids for same input; round-trip through disk; fresh-process
+    reconstruction via `findEpisodic`; unknown-id throw; idempotent
+    re-writes with caller-provided `episodicId`.

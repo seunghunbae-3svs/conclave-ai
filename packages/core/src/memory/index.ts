@@ -22,3 +22,13 @@ export type { RetrievalFieldExtractor, RetrievalOptions, ScoredDoc } from "./ret
 
 export { FileSystemMemoryStore } from "./fs-store.js";
 export type { FsStoreOptions } from "./fs-store.js";
+
+export { OutcomeWriter } from "./outcome-writer.js";
+export type {
+  WriteReviewInput,
+  RecordOutcomeInput,
+  RecordOutcomeOutput,
+} from "./outcome-writer.js";
+
+export { RuleBasedClassifier, newEpisodicId } from "./classifier.js";
+export type { Classifier, ClassificationOutput, OutcomeResult } from "./classifier.js";

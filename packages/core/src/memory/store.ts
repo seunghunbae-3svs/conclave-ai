@@ -39,6 +39,8 @@ export interface MemoryStore {
   listAnswerKeys(domain?: "code" | "design"): Promise<AnswerKey[]>;
   listFailures(domain?: "code" | "design"): Promise<FailureEntry[]>;
   listRules(): Promise<SemanticRule[]>;
+  /** Find a single episodic entry by id. Returns null if not found. */
+  findEpisodic(id: string): Promise<EpisodicEntry | null>;
 }
 
 /**

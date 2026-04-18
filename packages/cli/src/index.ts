@@ -1,7 +1,8 @@
 import { init } from "./commands/init.js";
 import { review } from "./commands/review.js";
+import { recordOutcome } from "./commands/record-outcome.js";
 
-const HELP = `conclave — Ai-Conclave CLI (skeleton)
+const HELP = `conclave — Ai-Conclave CLI
 
 Usage:
   conclave <command> [options]
@@ -9,12 +10,14 @@ Usage:
 Commands:
   init                  Set up conclave in the current repo (config + skeleton)
   review                Run a council review on the current branch
+  record-outcome        Record a PR's merge/reject/rework outcome (closes self-evolve loop)
   --help, -h            Show this
   --version, -v         Show version
 
 Examples:
   conclave init
   conclave review --pr 42
+  conclave record-outcome --id ep-... --result merged
 `;
 
 export async function run(argv: string[]): Promise<void> {
@@ -36,6 +39,9 @@ export async function run(argv: string[]): Promise<void> {
       return;
     case "review":
       await review(rest);
+      return;
+    case "record-outcome":
+      await recordOutcome(rest);
       return;
     default:
       process.stderr.write(`Unknown command: ${cmd}\n\n${HELP}`);

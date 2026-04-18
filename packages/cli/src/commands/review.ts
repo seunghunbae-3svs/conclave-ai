@@ -3,6 +3,7 @@ import {
   Council,
   EfficiencyGate,
   FileSystemMemoryStore,
+  OutcomeWriter,
   formatAnswerKeyForPrompt,
   formatFailureForPrompt,
   type ReviewContext,
@@ -106,7 +107,17 @@ export async function review(argv: string[]): Promise<void> {
 
   const outcome = await council.deliberate(reviewCtx);
 
-  // 6. Render + exit with a verdict-derived code
+  // 6. Persist the episodic entry (outcome: "pending") so `conclave
+  //    record-outcome` can classify it later into answer-keys / failures.
+  const writer = new OutcomeWriter({ store });
+  const episodic = await writer.writeReview({
+    ctx: reviewCtx,
+    reviews: outcome.results,
+    councilVerdict: outcome.verdict,
+    costUsd: gate.metrics.summary().totalCostUsd,
+  });
+
+  // 7. Render + exit with a verdict-derived code
   process.stdout.write(
     renderReview({
       repo: loaded.repo,
@@ -118,6 +129,11 @@ export async function review(argv: string[]): Promise<void> {
       results: outcome.results,
       metrics: gate.metrics.summary(),
     }),
+  );
+  process.stdout.write(
+    `\nepisodic: ${episodic.id}\n` +
+      `  when the PR lands, close the loop with:\n` +
+      `    conclave record-outcome --id ${episodic.id} --result merged\n`,
   );
 
   process.exit(verdictToExitCode(outcome.verdict));

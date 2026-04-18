@@ -143,6 +143,26 @@ export class FileSystemMemoryStore implements MemoryStore {
     return out;
   }
 
+  async findEpisodic(id: string): Promise<EpisodicEntry | null> {
+    const episRoot = path.join(this.root, "episodic");
+    const days = await safeReaddir(episRoot);
+    for (const day of days) {
+      const dir = path.join(episRoot, day);
+      const files = await safeReaddir(dir);
+      for (const f of files) {
+        if (!f.includes(id) || !f.endsWith(".json")) continue;
+        try {
+          const raw = await fs.readFile(path.join(dir, f), "utf8");
+          const parsed = EpisodicEntrySchema.safeParse(JSON.parse(raw));
+          if (parsed.success && parsed.data.id === id) return parsed.data;
+        } catch {
+          continue;
+        }
+      }
+    }
+    return null;
+  }
+
   async listRules(): Promise<SemanticRule[]> {
     const file = path.join(this.root, "semantic", "rules.jsonl");
     try {
