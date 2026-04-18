@@ -1,0 +1,30 @@
+{
+  "name": "ai-conclave",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Ai-Conclave monorepo — AI drafted. Council refined.",
+  "license": "MIT",
+  "author": "Seunghun Bae",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/seunghunbae-3svs/ai-conclave.git"
+  },
+  "homepage": "https://github.com/seunghunbae-3svs/ai-conclave#readme",
+  "packageManager": "pnpm@9.15.0",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "turbo run build",
+    "dev": "turbo run dev",
+    "test": "turbo run test",
+    "lint": "turbo run lint",
+    "typecheck": "turbo run typecheck",
+    "clean": "turbo run clean && rm -rf node_modules"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "turbo": "^2.3.0",
+    "typescript": "^5.7.0"
+  }
+}

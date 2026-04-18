@@ -1,0 +1,34 @@
+{
+  "name": "@ai-conclave/cli",
+  "version": "0.0.0",
+  "description": "Ai-Conclave CLI — the `conclave` binary.",
+  "license": "MIT",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "bin": {
+    "conclave": "./dist/bin/conclave.js"
+  },
+  "files": [
+    "dist",
+    "src",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "dev": "tsc -p tsconfig.json --watch",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "node --test --experimental-test-coverage test/*.test.mjs",
+    "clean": "rm -rf dist .tsbuildinfo"
+  },
+  "dependencies": {
+    "@ai-conclave/agent-claude": "workspace:*",
+    "@ai-conclave/core": "workspace:*"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.0"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}
