@@ -72,3 +72,28 @@
     k respect, empty cases), and FS store round-trip (answer-keys, failures,
     rules JSONL append, episodic day-bucketing, missing-dir tolerance, domain
     filter, default k = 8).
+- **`conclave review` is now end-to-end functional** — glues core + gate +
+  memory + agent-claude through the CLI:
+  - `conclave review --pr N` — fetches the PR diff + metadata via `gh pr diff`
+    and `gh pr view`; review context includes the real repo slug, PR number,
+    head SHA, and base SHA.
+  - `conclave review --diff <file>` — reviews a local unified-diff file.
+  - `conclave review` (no flag) — `git diff <base>..HEAD` (default base
+    `origin/main`), parses the repo slug from `git remote get-url origin`.
+  - Config auto-discovery: walks up from cwd looking for `.conclaverc.json`,
+    validates with Zod, merges over defaults. Memory root resolved relative
+    to the config directory unless absolute.
+  - RAG wired: retrieves top-K answer-keys + failures from
+    `FileSystemMemoryStore`, formats via `formatAnswerKeyForPrompt` /
+    `formatFailureForPrompt`, threads them into `ReviewContext`.
+  - Efficiency gate uses config-driven `budget.perPrUsd`; warning callback
+    prints to stderr at 80% cap.
+  - Output: pretty-printed per-agent verdict + blockers (severity-sorted) +
+    summary + metrics block (calls / tokens / cost / latency / cache hit rate).
+  - Exit codes: 0 (approve) / 1 (rework) / 2 (reject) for CI-friendly
+    scripting.
+  - 22 test cases across config loading (defaults, walk-up, malformed JSON,
+    schema-invalid), diff-source (https/ssh/no-git URL parsing, gh pr
+    happy path + missing-owner throw, git-diff with/without remote, file
+    diff), and output rendering (all verdicts, severity sort, no-consensus
+    tag, metrics formatting, exit-code mapping).

@@ -23,7 +23,8 @@
   },
   "dependencies": {
     "@ai-conclave/agent-claude": "workspace:*",
-    "@ai-conclave/core": "workspace:*"
+    "@ai-conclave/core": "workspace:*",
+    "zod": "^3.24.0"
   },
   "devDependencies": {
     "typescript": "^5.7.0"
