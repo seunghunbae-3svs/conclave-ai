@@ -2,6 +2,28 @@ export type { Agent, ReviewContext, ReviewResult, Blocker, Severity } from "./ag
 export { Council } from "./council.js";
 export { ReviewResultSchema, BlockerSchema } from "./schema.js";
 
+// Memory substrate (decision #17: 정답지 + 오답지 duality as core primitive).
+// Re-exported here for convenience; dedicated subpath at @ai-conclave/core/memory.
+export {
+  FileSystemMemoryStore,
+  AnswerKeySchema,
+  EpisodicEntrySchema,
+  FailureEntrySchema,
+  SemanticRuleSchema,
+  formatAnswerKeyForPrompt,
+  formatFailureForPrompt,
+} from "./memory/index.js";
+export type {
+  AnswerKey,
+  EpisodicEntry,
+  FailureEntry,
+  SemanticRule,
+  MemoryStore,
+  MemoryReadQuery,
+  MemoryRetrieval,
+  FsStoreOptions,
+} from "./memory/index.js";
+
 // Efficiency Gate (decision #22: first-class from day 1) — every LLM call
 // routes through `EfficiencyGate.run(...)`. Re-exported here for convenience;
 // the dedicated subpath export lives at @ai-conclave/core/efficiency.

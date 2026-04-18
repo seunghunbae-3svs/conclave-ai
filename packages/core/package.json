@@ -14,6 +14,10 @@
     "./efficiency": {
       "types": "./dist/efficiency/index.d.ts",
       "import": "./dist/efficiency/index.js"
+    },
+    "./memory": {
+      "types": "./dist/memory/index.d.ts",
+      "import": "./dist/memory/index.js"
     }
   },
   "files": [

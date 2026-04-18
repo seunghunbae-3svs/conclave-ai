@@ -52,3 +52,23 @@
     blockers), invalid response shapes, budget enforcement, cache_control
     wire-format, tool_choice wire-format, missing-key constructor guard,
     metrics aggregation on shared gate.
+- **Memory substrate** (`@ai-conclave/core/memory`) per decision #17 —
+  정답지 / 오답지 dualism as the core primitive.
+  - Zod schemas for `EpisodicEntry`, `AnswerKey`, `FailureEntry`, `SemanticRule`
+    with enum-validated domains (code / design), severity, and 11 failure categories.
+  - `MemoryStore` interface (read + write + list) with a `FileSystemMemoryStore`
+    implementation. Layout: `episodic/YYYY-MM-DD/pr-{n}.json` + `answer-keys/{domain}/{id}.json` +
+    `failure-catalog/{domain}/{id}.json` + `semantic/rules.jsonl`. Lazy mkdir on
+    write; missing dirs return `[]` on read.
+  - Lightweight BM25-ish retrieval (keyword overlap + tag boost + repo boost)
+    for the RAG path. No vector DB — corpus is O(100s), short text, keyword + tag
+    ranking is sufficient to pilot the self-evolve loop. Vector embeddings slot
+    in later as a pluggable scoring backend.
+  - `formatAnswerKeyForPrompt` / `formatFailureForPrompt` helpers produce the
+    short string form that agent-claude's `ReviewContext.answerKeys` / `failureCatalog`
+    arrays expect — integration is already wired (no agent-claude change needed).
+  - 23 test cases across schema validation (enum domains + categories), retrieval
+    (query match, tag boost, repo boost, stop-word filter, Korean tokens,
+    k respect, empty cases), and FS store round-trip (answer-keys, failures,
+    rules JSONL append, episodic day-bucketing, missing-dir tolerance, domain
+    filter, default k = 8).
