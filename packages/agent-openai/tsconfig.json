@@ -7,8 +7,6 @@
   "include": ["src/**/*"],
   "exclude": ["dist", "node_modules"],
   "references": [
-    { "path": "../core" },
-    { "path": "../agent-claude" },
-    { "path": "../agent-openai" }
+    { "path": "../core" }
   ]
 }

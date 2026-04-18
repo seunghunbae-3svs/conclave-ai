@@ -120,3 +120,29 @@
     stable ids for same input; round-trip through disk; fresh-process
     reconstruction via `findEpisodic`; unknown-id throw; idempotent
     re-writes with caller-provided `episodicId`.
+- **`@ai-conclave/agent-openai`** — second council voice (decision #28 —
+  v2.0 launch council = Claude + OpenAI + Gemini):
+  - `OpenAIAgent` wraps the `openai` SDK via a minimal `OpenAILike`
+    client interface; default factory lazy-loads `openai` so tests never
+    pay the SDK cost.
+  - Strict `json_schema` response format (`name: "conclave_review"`,
+    `strict: true`) per decision #12 — structured output is guaranteed
+    well-formed without tool-use parsing.
+  - Same efficiency-gate contract as agent-claude: pre-flight
+    `budget.reserve`, cache-liveness mark, `actualCost(model, usage)`
+    post-call, per-call metric recorded.
+  - Pricing table for `gpt-4.1` / `gpt-4.1-mini` / `gpt-5` / `gpt-5-mini`
+    / `o5`. Cached-input discount applied via
+    `prompt_tokens_details.cached_tokens`.
+  - Parser handles refusals, non-JSON content, invalid verdicts, and
+    tolerates malformed blocker items (drops individually).
+  - CLI `conclave review` now instantiates the agents listed in
+    `config.agents`. Missing credentials for any agent skips that agent
+    with a stderr warning rather than failing the review. At least one
+    agent must resolve.
+  - 15 test cases (`pricing.test.mjs` + `openai-agent.test.mjs`):
+    pricing table coverage, cached-token discount vs fresh,
+    unknown-model throw, pre-flight estimate; parse approve + rework
+    flows, response_format shape assertion, refusal throw, invalid-JSON
+    throw, invalid-verdict throw, no-key constructor throw, metrics
+    aggregation, pre-flight budget short-circuits the network call.

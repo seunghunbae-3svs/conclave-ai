@@ -9,6 +9,7 @@ import {
   type ReviewContext,
 } from "@ai-conclave/core";
 import { ClaudeAgent } from "@ai-conclave/agent-claude";
+import { OpenAIAgent } from "@ai-conclave/agent-openai";
 import { loadConfig, resolveMemoryRoot } from "../lib/config.js";
 import { loadPrDiff, loadGitDiff, loadFileDiff, type LoadedDiff } from "../lib/diff-source.js";
 import { renderReview, verdictToExitCode } from "../lib/output.js";
@@ -53,12 +54,6 @@ export async function review(argv: string[]): Promise<void> {
     process.stdout.write(HELP);
     return;
   }
-  if (!process.env["ANTHROPIC_API_KEY"]) {
-    process.stderr.write("conclave review: ANTHROPIC_API_KEY not set. Export the key and retry.\n");
-    process.exit(1);
-    return;
-  }
-
   const { config, configDir } = await loadConfig();
   const memoryRoot = resolveMemoryRoot(config, configDir);
 
@@ -90,9 +85,30 @@ export async function review(argv: string[]): Promise<void> {
   });
   const gate = new EfficiencyGate({ budget });
 
-  // 4. Instantiate the council (agent-claude only for now; openai + gemini land in later PRs)
-  const agent = new ClaudeAgent({ gate });
-  const council = new Council({ agents: [agent] });
+  // 4. Instantiate the council. Agents enabled in config.agents. An agent
+  //    is only included if its credentials are available; others are skipped
+  //    with a warning so a missing key doesn't block review.
+  const agents = [];
+  for (const id of config.agents) {
+    if (id === "claude") {
+      if (!process.env["ANTHROPIC_API_KEY"]) continue;
+      agents.push(new ClaudeAgent({ gate }));
+    } else if (id === "openai") {
+      if (!process.env["OPENAI_API_KEY"]) {
+        process.stderr.write("conclave review: OPENAI_API_KEY not set — skipping OpenAI agent\n");
+        continue;
+      }
+      agents.push(new OpenAIAgent({ gate }));
+    } else if (id === "gemini") {
+      process.stderr.write("conclave review: gemini agent not yet implemented — skipping\n");
+    }
+  }
+  if (agents.length === 0) {
+    process.stderr.write("conclave review: no agents available. Set at least ANTHROPIC_API_KEY.\n");
+    process.exit(1);
+    return;
+  }
+  const council = new Council({ agents });
 
   // 5. Deliberate
   const reviewCtx: ReviewContext = {
