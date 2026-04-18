@@ -10,6 +10,10 @@
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
+    },
+    "./efficiency": {
+      "types": "./dist/efficiency/index.d.ts",
+      "import": "./dist/efficiency/index.js"
     }
   },
   "files": [
