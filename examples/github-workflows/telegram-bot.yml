@@ -1,0 +1,58 @@
+# Copy into `.github/workflows/telegram-bot.yml` on the repo that runs
+# conclave review. Requires repo secrets:
+#   - TELEGRAM_BOT_TOKEN : the bot that integration-telegram posts as
+#   - ORCHESTRATOR_PAT   : a PAT with actions:write on this repo (used by
+#     gh CLI to fire the repository_dispatch events for conclave-rework /
+#     conclave-merge / conclave-reject)
+name: conclave-telegram-bot
+
+on:
+  schedule:
+    - cron: '*/1 * * * *'
+  workflow_dispatch: {}
+
+concurrency:
+  group: conclave-telegram-bot
+  cancel-in-progress: false
+
+jobs:
+  poll:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      # Persist the Telegram getUpdates offset between runs so we don't
+      # double-process callbacks. The cache key is static — GH Actions
+      # cache writes are eventually consistent, which is acceptable here
+      # because Telegram is happy to repeat an already-answered update
+      # (answerCallbackQuery is idempotent within a short window).
+      - name: Restore offset
+        uses: actions/cache/restore@v4
+        with:
+          path: .telegram-bot-offset.json
+          key: conclave-telegram-bot-offset
+
+      - name: Poll Telegram + dispatch
+        run: |
+          npx -y -p @conclave-ai/telegram-bot-runner@latest \
+            conclave-telegram-bot \
+              --repo ${{ github.repository }} \
+              --offset-file .telegram-bot-offset.json \
+              --poll-timeout 25
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          GH_TOKEN: ${{ secrets.ORCHESTRATOR_PAT }}
+
+      - name: Save offset
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: .telegram-bot-offset.json
+          key: conclave-telegram-bot-offset

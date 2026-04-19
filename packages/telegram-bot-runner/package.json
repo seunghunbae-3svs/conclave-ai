@@ -1,0 +1,36 @@
+{
+  "name": "@conclave-ai/telegram-bot-runner",
+  "version": "0.2.2",
+  "description": "Conclave AI Telegram bot-runner — long-polls Telegram callback_query events and dispatches repository_dispatch actions back to the target repo's GH Actions workflows.",
+  "license": "MIT",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "bin": {
+    "conclave-telegram-bot": "./dist/bin/bot.js"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "src",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "dev": "tsc -p tsconfig.json --watch",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "node --test test/*.test.mjs",
+    "clean": "rm -rf dist .tsbuildinfo"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.0"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}
