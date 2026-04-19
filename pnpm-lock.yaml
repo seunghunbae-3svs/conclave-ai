@@ -129,6 +129,9 @@ importers:
       '@conclave-ai/agent-openai':
         specifier: workspace:*
         version: link:../agent-openai
+      '@conclave-ai/agent-worker':
+        specifier: workspace:*
+        version: link:../agent-worker
       '@conclave-ai/core':
         specifier: workspace:*
         version: link:../core
