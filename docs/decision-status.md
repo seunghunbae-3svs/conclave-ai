@@ -23,7 +23,7 @@ Legend:
 | 4 | Target persona | 📄 | `ARCHITECTURE.md`, `README.md` |
 | 5 | Name registration plan | 📄 | `ARCHITECTURE.md` |
 | 6 | License + repo | 📄 | `package.json`, GitHub repo |
-| 7 | 3-round debate (Mastra label) | ✅ | `packages/core/src/council.ts` |
+| 7 | 3-round debate (Mastra label) | 🔄 | superseded by 2-tier council (reopened 2026-04-19 by Bae, see below) |
 | 8 | Claude agent loop → `@anthropic-ai/claude-agent-sdk` | 🔄 | see below |
 | 9 | OpenAI agent loop → `@openai/agents` | 🔄 | see below |
 | 10 | Gemini SDK → `@google/genai` | ✅ | `packages/agent-gemini` |
@@ -42,9 +42,9 @@ Legend:
 | 23 | Vision judge (semantic classification) | ✅ | `packages/visual-review/src/judge.ts` |
 | 24 | Equal-weight notifiers | ✅ | `integration-{telegram,discord,slack,email}` |
 | 25 | Cost per PR target | 📄 | `ARCHITECTURE.md`; `BudgetTracker` enforces |
-| 26 | Council verdicts (approve/rework/reject) | ✅ | `packages/core/src/agent.ts` |
+| 26 | Council verdicts (approve/rework/reject) | 🔄 | verdict enum unchanged, but tier-1 verdict is no longer binding — tier-2 (Opus 4.7 + GPT-5.4) produces the authoritative verdict after escalation |
 | 27 | v2.0 launch scope | 📄 | `ARCHITECTURE.md` |
-| 28 | v2.0 agent set (Claude + OpenAI + Gemini) | ✅ | 3 `agent-*` packages |
+| 28 | v2.0 agent set (Claude + OpenAI + Gemini) | 🔄 | retained at tier-1; tier-2 cross-review couple (Opus 4.7 + GPT-5.4) is the new authoritative layer. Grok / Ollama optional at tier-1 |
 | 29 | Architecture coherence > feature novelty | 📄 | `ARCHITECTURE.md` |
 | 30 | Migration path from solo-cto-agent | ✅ | `conclave migrate` |
 | 31 | v2.0 platform set (5/5) | ✅ | 5 `platform-*` packages |
@@ -99,6 +99,71 @@ The lock on #8/#9 is respected: we did not revisit the tradeoff
 casually. We implemented the use case they anticipated (one-shot
 structured review, with multi-round debate handled at the Council
 layer) and found the SDKs don't fit that shape.
+
+---
+
+## 🔄 #7 + #26 + #28 — 2-tier council (reopened 2026-04-19 by Bae)
+
+**Locked text (2026-04-19):**
+- #7: Council (Mastra graph, N pluggable agents) — 3-round debate
+- #26: Council verdicts `approve / rework / reject`
+- #28: v2.0 agent set = Claude + OpenAI + Gemini
+
+**Reopen rationale** (explicit, per Bae 2026-04-19):
+Flat 3-round debate made every review pay top-tier cost. Dogfood runs
+showed a typo-fix PR burning the same spend as a schema migration
+review. Moving to a tiered council keeps the cheap agents doing the
+bulk of the drafting and reserves the expensive cross-review (Opus
+4.7 ↔ GPT-5.4) for escalated cases.
+
+**New shape:**
+
+```
+Tier 1 (draft, 1-round, parallel):
+  Claude Sonnet 4.6  +  GPT-5 mini  +  Gemini 2.5 Pro
+  (+ Grok and/or Ollama opt-in when keys/daemon are available)
+                      │
+                      ▼
+Escalation rule:
+  - code:   blockers >= MAJOR present → escalate; else tier-1 verdict ships
+  - design: always escalate (mid-tier misses visual polish per research)
+                      │
+                      ▼
+Tier 2 (authoritative, up to 2-round cross-review):
+  Claude Opus 4.7  +  GPT-5.4
+  Final verdict is binding.
+```
+
+**What survives unchanged:**
+- The verdict enum (`approve / rework / reject`) — semantics preserved.
+- The memory substrate (answer-keys + failure-catalog) — tier-2's final
+  verdict is what gets written.
+- Agent scoring (#19) — weights unchanged; per-tier attribution via
+  `ReviewContext.tier` landing in PR 1.
+- Per-agent prompt caching and efficiency gate — every call still
+  routes through the gate.
+
+**What's new:**
+- `ReviewDomain = "code" | "design"` on `ReviewContext`
+- `config.council.domains.{code,design}` — per-domain tier-1 / tier-2
+  agent lists, maxRounds, always-escalate flag, optional model overrides
+- `TieredCouncil` class (PR 2, following this one)
+- CLI `--domain` flag (PR 3)
+
+**Explicitly dropped (also 2026-04-19, Bae):**
+- **Idea domain.** Not in scope for the review council. If idea/
+  brainstorm workflow lands it ships as a separate skill/package, not
+  part of `conclave review`.
+- **Deepseek from default agent list.** Still published at
+  `@conclave-ai/agent-deepseek@0.1.0` (npm 72-hour window passed,
+  can't unpublish and don't need to), but removed from the default
+  tier-1 config. User can opt back in via explicit `agents` entry.
+
+**Trigger for a future reopen:**
+If tier-2 gets called on >60% of reviews (meaning tier-1 isn't
+catching enough), rebalance — either stronger tier-1 models, or
+a third intermediate tier. If tier-2 gets called on <10% (tier-1 is
+too permissive), tighten the escalation rule.
 
 ---
 

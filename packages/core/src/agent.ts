@@ -21,6 +21,13 @@ export interface PriorReview {
   summary?: string;
 }
 
+/**
+ * Domain of the review. Drives tier-aware routing in `TieredCouncil`
+ * (design always escalates to tier-2; code escalates conditionally).
+ * Absent ≡ "code" for backward compat with legacy `Council` callers.
+ */
+export type ReviewDomain = "code" | "design";
+
 export interface ReviewContext {
   diff: string;
   repo: string;
@@ -33,6 +40,14 @@ export interface ReviewContext {
   round?: number;
   /** Other agents' results from the previous round. Used only in Round 2+. */
   priors?: PriorReview[];
+  /** "code" (default) or "design" — see `ReviewDomain`. */
+  domain?: ReviewDomain;
+  /**
+   * Tier number, 1-indexed. Set by `TieredCouncil` when it calls agents
+   * so prompts + agent scoring can attribute results to the correct tier.
+   * Legacy flat-Council callers leave this undefined.
+   */
+  tier?: 1 | 2;
 }
 
 export interface ReviewResult {
