@@ -3,6 +3,14 @@
 ## Unreleased
 
 ### Added
+- **Vision judge for visual review** — semantic classification of
+  before/after diff (intentional / regression / accessibility / mixed /
+  unreviewable) via Claude multimodal. `VisionJudge` interface +
+  `ClaudeVisionJudge` default ship in `@ai-conclave/visual-review`.
+  `runVisualReview` takes optional `judge` + `judgeContext`; CLI
+  `--visual` flag auto-enables when `ANTHROPIC_API_KEY` is present.
+  Judgment + structured concerns printed in review output. 15 test
+  cases (judge parsing + orchestrator integration).
 - **CLI `conclave migrate`** (decision #27) — brings an existing
   solo-cto-agent install over to ai-conclave without deleting the
   legacy install:

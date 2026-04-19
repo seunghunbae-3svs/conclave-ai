@@ -327,8 +327,9 @@ export async function review(argv: string[]): Promise<void> {
         if (platforms.length === 0) {
           process.stderr.write("conclave review: visual enabled but no platforms available — skipping\n");
         } else {
-          const { runVisualReview } = await import("@ai-conclave/visual-review");
-          const vResult = await runVisualReview({
+          const visualMod = await import("@ai-conclave/visual-review");
+          const { runVisualReview } = visualMod;
+          const visualInput: Parameters<typeof runVisualReview>[0] = {
             repo: loaded.repo,
             beforeSha: loaded.prevSha,
             afterSha: loaded.newSha,
@@ -340,7 +341,20 @@ export async function review(argv: string[]): Promise<void> {
             },
             diffOptions: { threshold: config.visual?.diffThreshold ?? 0.1 },
             waitSeconds: config.visual?.waitSeconds ?? 60,
-          });
+          };
+          // Vision judge (semantic "regression vs intentional") auto-runs
+          // when ANTHROPIC_API_KEY is available. Uses Claude vision.
+          if (process.env["ANTHROPIC_API_KEY"]) {
+            visualInput.judge = new visualMod.ClaudeVisionJudge();
+            visualInput.judgeContext = {
+              codeReviewContext: {
+                repo: loaded.repo,
+                pullNumber: loaded.pullNumber,
+                diff: loaded.diff,
+              },
+            };
+          }
+          const vResult = await runVisualReview(visualInput);
           process.stdout.write(
             `\n── visual review ──\n` +
               `  severity:   ${vResult.severity}\n` +
@@ -353,6 +367,19 @@ export async function review(argv: string[]): Promise<void> {
               `    after:    ${vResult.paths.after}\n` +
               `    diff:     ${vResult.paths.diff}\n`,
           );
+          if (vResult.judgment) {
+            const j = vResult.judgment;
+            process.stdout.write(
+              `  judgment:   ${j.category} (conf ${(j.confidence * 100).toFixed(0)}%)\n` +
+                `    ${j.summary}\n`,
+            );
+            if (j.concerns.length > 0) {
+              process.stdout.write(`  concerns:\n`);
+              for (const c of j.concerns) {
+                process.stdout.write(`    [${c.severity.toUpperCase()}] (${c.kind}) ${c.message}\n`);
+              }
+            }
+          }
         }
       } catch (err) {
         process.stderr.write(`conclave review: visual diff failed — ${(err as Error).message}\n`);

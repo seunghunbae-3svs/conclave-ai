@@ -9,6 +9,7 @@ import {
   type ScreenshotCapture,
 } from "./capture.js";
 import { PixelmatchDiff, classifyDiffRatio, type DiffOptions, type DiffResult, type VisualDiff } from "./diff.js";
+import type { VisionJudge, VisionJudgeContext, VisualJudgment } from "./judge.js";
 
 export interface VisualReviewInput {
   repo: string;
@@ -21,6 +22,10 @@ export interface VisualReviewInput {
   /** Override capture + diff engines. */
   capture?: ScreenshotCapture;
   diff?: VisualDiff;
+  /** Optional semantic judge. When supplied, result includes `judgment`. */
+  judge?: VisionJudge;
+  /** Hint + code-review context for the judge. */
+  judgeContext?: VisionJudgeContext;
   /** Capture options (viewport / timeouts / etc.). */
   captureOptions?: CaptureOptions;
   /** Diff options (threshold / anti-alias handling). */
@@ -41,6 +46,8 @@ export interface VisualReviewResult {
   diff: DiffResult;
   /** Coarse severity label. */
   severity: ReturnType<typeof classifyDiffRatio>;
+  /** Optional semantic judgment. Populated only when `input.judge` is provided. */
+  judgment?: VisualJudgment;
 }
 
 /**
@@ -98,7 +105,7 @@ export async function runVisualReview(input: VisualReviewInput): Promise<VisualR
     await fs.writeFile(afterPath, afterCap.png);
     await fs.writeFile(diffPath, diffResult.diffPng);
 
-    return {
+    const out: VisualReviewResult = {
       before: beforeRes,
       after: afterRes,
       paths: { before: beforePath, after: afterPath, diff: diffPath },
@@ -106,6 +113,19 @@ export async function runVisualReview(input: VisualReviewInput): Promise<VisualR
       diff: diffResult,
       severity: classifyDiffRatio(diffResult.diffRatio),
     };
+
+    // Optional semantic judgment. Failure never corrupts the rest of
+    // the review — log + continue with just the pixel-diff layer.
+    if (input.judge) {
+      try {
+        const judgment = await input.judge.judge(beforeCap.png, afterCap.png, input.judgeContext ?? {});
+        out.judgment = judgment;
+      } catch (err) {
+        process.stderr.write(`[visual-review:judge] failed — ${(err as Error).message}\n`);
+      }
+    }
+
+    return out;
   } finally {
     // Close only if WE created the capture; user-supplied instances are their responsibility.
     if (!input.capture) await capture.close();

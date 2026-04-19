@@ -15,3 +15,16 @@ export type { DiffOptions, DiffResult, VisualDiff } from "./diff.js";
 
 export { runVisualReview } from "./orchestrator.js";
 export type { VisualReviewInput, VisualReviewResult } from "./orchestrator.js";
+
+export { ClaudeVisionJudge } from "./judge.js";
+export type {
+  VisionJudge,
+  VisualJudgment,
+  VisualJudgmentCategory,
+  VisualConcern,
+  VisionJudgeContext,
+  ClaudeVisionJudgeOptions,
+  AnthropicVisionLike,
+  AnthropicVisionParams,
+  AnthropicVisionResponse,
+} from "./judge.js";

@@ -30,9 +30,13 @@
     "pngjs": "^7.0.0"
   },
   "peerDependencies": {
+    "@anthropic-ai/sdk": "^0.65.0",
     "playwright": "^1.49.0"
   },
   "peerDependenciesMeta": {
+    "@anthropic-ai/sdk": {
+      "optional": true
+    },
     "playwright": {
       "optional": true
     }
