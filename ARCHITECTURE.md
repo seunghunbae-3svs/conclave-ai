@@ -13,9 +13,15 @@ truth for scaffolding.
 - **Tagline**: *A multi-agent council reviews your AI-generated code and
   design, debates issues, auto-fixes blockers, and learns your preferences
   over time. Built for solo makers who ship with AI.*
-- **Target persona**: users of Cursor / Claude Code / Windsurf / v0 /
-  Lovable / Bolt whose AI-generated output is mediocre, off-style, or
-  needs human polish. Not seasoned engineers polishing their own code.
+- **Target persona**: anyone shipping AI-generated output without a
+  dedicated reviewer. Three concentric circles:
+  1. **AI coding assistants** (Cursor / Claude Code / Windsurf /
+     Copilot) — review AI-written diffs alongside human-written ones.
+  2. **App-from-prompt builders** (v0 / Lovable / Bolt / Base44) —
+     the output is an entire app; council reviews each generated PR.
+  3. **Autonomous agents** (Manus AI / Devin / general task-runners) —
+     the output is a task result with code + config side-effects.
+  Not seasoned engineers polishing their own code.
 
 ## 7-Layer Architecture
 

@@ -12,9 +12,16 @@ learns your preferences over time. Built for solo makers who ship with AI.
 
 ## Who this is for
 
-Users of Cursor, Claude Code, Windsurf, v0, Lovable, or Bolt whose
-AI-generated output is mediocre, off-style, or needs human polish — but
-who don't want to hire a reviewer.
+Anyone who ships AI-generated code or AI-built apps but doesn't want
+to hire a reviewer. Concretely:
+
+- **AI coding assistants** — Cursor, Claude Code, Windsurf, Copilot
+- **App-from-prompt builders** — v0, Lovable, Bolt, Base44
+- **Autonomous agents** — Manus AI, Devin, Cognition-style task runners
+
+If the output is often mediocre, off-style, or needs human polish — and
+the reviewer's job is "catch the blockers, ignore the nits" — the
+council sits in that seat.
 
 This is **not** a tool for seasoned engineers polishing code they wrote
 themselves. It is a council for code that came out of an AI.
