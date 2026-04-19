@@ -27,6 +27,7 @@
     { "path": "../platform-vercel" },
     { "path": "../visual-review" },
     { "path": "../observability-langfuse" },
-    { "path": "../scm-github" }
+    { "path": "../scm-github" },
+    { "path": "../secret-guard" }
   ]
 }

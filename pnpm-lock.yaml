@@ -171,6 +171,9 @@ importers:
       '@conclave-ai/scm-github':
         specifier: workspace:*
         version: link:../scm-github
+      '@conclave-ai/secret-guard':
+        specifier: workspace:*
+        version: link:../secret-guard
       '@conclave-ai/visual-review':
         specifier: workspace:*
         version: link:../visual-review
@@ -316,6 +319,12 @@ importers:
       '@conclave-ai/core':
         specifier: workspace:*
         version: link:../core
+    devDependencies:
+      typescript:
+        specifier: ^5.7.0
+        version: 5.9.3
+
+  packages/secret-guard:
     devDependencies:
       typescript:
         specifier: ^5.7.0

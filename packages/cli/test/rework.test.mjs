@@ -37,6 +37,12 @@ test("parseArgv: flags", () => {
   assert.equal(a.loopThreshold, 2);
 });
 
+test("parseArgv: --allow-secret is repeatable and --skip-secret-guard toggles", () => {
+  const a = parseArgv(["--allow-secret", "openai-key", "--allow-secret", "aws-access-key", "--skip-secret-guard"]);
+  assert.deepEqual(a.allowSecrets, ["openai-key", "aws-access-key"]);
+  assert.equal(a.skipSecretGuard, true);
+});
+
 test("parseArgv: --help", () => {
   assert.equal(parseArgv(["--help"]).help, true);
   assert.equal(parseArgv(["-h"]).help, true);
@@ -190,6 +196,8 @@ const baseArgs = {
   loopThreshold: 5,
   loopWindowMs: 3600_000,
   breakerThreshold: 3,
+  allowSecrets: [],
+  skipSecretGuard: false,
   help: false,
 };
 
@@ -478,6 +486,150 @@ test("runRework: missing blocker file is noted on stderr but worker still runs",
   assert.ok(stderr.join("").includes("could not read src/x.ts"));
   // Worker was still invoked, but with zero snapshots
   assert.equal(worker.calls[0].fileSnapshots.length, 0);
+});
+
+test("runRework: secret-guard blocks when worker patch contains a secret", async () => {
+  const store = makeStore([makeEpisodic()]);
+  const writer = makeWriter();
+  const worker = makeWorker();
+  const git = makeGit();
+  const stderr = [];
+
+  // Return a "blocked" scan result regardless of patch contents.
+  const fakeScan = (_patch, _opts) => ({
+    blocked: true,
+    findings: [{
+      ruleId: "openai-key",
+      ruleName: "OpenAI API Key",
+      confidence: "high",
+      line: 3,
+      column: 12,
+      preview: "sk-a…89AB",
+      file: "src/x.ts",
+    }],
+  });
+
+  const code = await runRework(
+    { ...baseArgs, pr: 1 },
+    {
+      loadConfig: async () => fakeConfig,
+      store,
+      writer,
+      worker,
+      gh: makeGh(),
+      git: git.exec,
+      readFile: async () => "x",
+      writeTempPatch: async () => {},
+      removeTempPatch: async () => {},
+      secretScan: fakeScan,
+      stdout: () => {},
+      stderr: (s) => stderr.push(s),
+    },
+  );
+
+  assert.equal(code, 1);
+  assert.equal(git.calls.length, 0, "git should never run when secret-guard blocks");
+  assert.equal(writer.recorded.length, 0, "no outcome should be recorded when blocked");
+  const err = stderr.join("");
+  assert.ok(err.includes("secret-guard blocked"));
+  assert.ok(err.includes("openai-key"));
+  assert.ok(err.includes("--allow-secret"));
+});
+
+test("runRework: --allow-secret forwards to the scanner", async () => {
+  const store = makeStore([makeEpisodic()]);
+  const writer = makeWriter();
+  const worker = makeWorker();
+  const git = makeGit();
+  const seenAllow = [];
+  const fakeScan = (_patch, opts) => {
+    seenAllow.push(opts?.allow ?? []);
+    return { blocked: false, findings: [] };
+  };
+
+  const code = await runRework(
+    { ...baseArgs, pr: 1, allowSecrets: ["openai-key", "aws-access-key"] },
+    {
+      loadConfig: async () => fakeConfig,
+      store,
+      writer,
+      worker,
+      gh: makeGh(),
+      git: git.exec,
+      readFile: async () => "x",
+      writeTempPatch: async () => {},
+      removeTempPatch: async () => {},
+      secretScan: fakeScan,
+      stdout: () => {},
+      stderr: () => {},
+    },
+  );
+
+  assert.equal(code, 0);
+  assert.deepEqual([...seenAllow[0]], ["openai-key", "aws-access-key"]);
+});
+
+test("runRework: --skip-secret-guard does not invoke the scanner at all", async () => {
+  const store = makeStore([makeEpisodic()]);
+  const writer = makeWriter();
+  const worker = makeWorker();
+  const git = makeGit();
+  let scanCalls = 0;
+  const fakeScan = () => { scanCalls += 1; return { blocked: true, findings: [] }; };
+
+  const code = await runRework(
+    { ...baseArgs, pr: 1, skipSecretGuard: true },
+    {
+      loadConfig: async () => fakeConfig,
+      store,
+      writer,
+      worker,
+      gh: makeGh(),
+      git: git.exec,
+      readFile: async () => "x",
+      writeTempPatch: async () => {},
+      removeTempPatch: async () => {},
+      secretScan: fakeScan,
+      stdout: () => {},
+      stderr: () => {},
+    },
+  );
+
+  assert.equal(code, 0);
+  assert.equal(scanCalls, 0, "scanner must NOT be invoked when --skip-secret-guard is set");
+});
+
+test("runRework: low-confidence-only scan findings do NOT block", async () => {
+  const store = makeStore([makeEpisodic()]);
+  const writer = makeWriter();
+  const worker = makeWorker();
+  const git = makeGit();
+  const stdout = [];
+  const fakeScan = () => ({
+    blocked: false,
+    findings: [{ ruleId: "generic-password-assignment", ruleName: "x", confidence: "low", line: 1, column: 1, preview: "[redacted]" }],
+  });
+
+  const code = await runRework(
+    { ...baseArgs, pr: 1 },
+    {
+      loadConfig: async () => fakeConfig,
+      store,
+      writer,
+      worker,
+      gh: makeGh(),
+      git: git.exec,
+      readFile: async () => "x",
+      writeTempPatch: async () => {},
+      removeTempPatch: async () => {},
+      secretScan: fakeScan,
+      stdout: (s) => stdout.push(s),
+      stderr: () => {},
+    },
+  );
+
+  assert.equal(code, 0);
+  assert.ok(stdout.join("").includes("low/medium finding"));
 });
 
 test("runRework: commit is authored as conclave-worker[bot]", async () => {

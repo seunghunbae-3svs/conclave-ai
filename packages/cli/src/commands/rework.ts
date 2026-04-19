@@ -17,6 +17,7 @@ import {
 } from "@conclave-ai/core";
 import { ClaudeWorker, type ClaudeWorkerOptions, type FileSnapshot, type WorkerOutcome } from "@conclave-ai/agent-worker";
 import { fetchPrState, type GhRunner, type PullRequestState } from "@conclave-ai/scm-github";
+import { formatFinding, scanPatch, type ScanResult } from "@conclave-ai/secret-guard";
 import { loadConfig, resolveMemoryRoot, type ConclaveConfig } from "../lib/config.js";
 
 const execFile = promisify(execFileCallback);
@@ -36,6 +37,8 @@ Options:
   --loop-threshold N    Max rework attempts on the same head sha before giving up (default 5).
   --loop-window-ms MS   Rolling window for the loop guard (default 3600000 = 1h).
   --breaker-threshold N Consecutive worker failures before the circuit opens (default 3).
+  --allow-secret <id>   Allow-list a secret-guard rule id (repeatable). Use only after human review.
+  --skip-secret-guard   Disable the pre-apply secret scan (discouraged — use --allow-secret instead).
 
 Environment:
   ANTHROPIC_API_KEY     required — the worker uses Claude.
@@ -58,6 +61,8 @@ export interface ReworkArgs {
   loopThreshold: number;
   loopWindowMs: number;
   breakerThreshold: number;
+  allowSecrets: string[];
+  skipSecretGuard: boolean;
   help: boolean;
 }
 
@@ -69,6 +74,8 @@ export function parseArgv(argv: string[]): ReworkArgs {
     loopThreshold: 5,
     loopWindowMs: 3600_000,
     breakerThreshold: 3,
+    allowSecrets: [],
+    skipSecretGuard: false,
     help: false,
   };
   for (let i = 0; i < argv.length; i += 1) {
@@ -98,6 +105,11 @@ export function parseArgv(argv: string[]): ReworkArgs {
       const n = Number.parseInt(argv[i + 1]!, 10);
       if (!Number.isNaN(n) && n > 0) out.breakerThreshold = n;
       i += 1;
+    } else if (a === "--allow-secret" && argv[i + 1]) {
+      out.allowSecrets.push(argv[i + 1]!);
+      i += 1;
+    } else if (a === "--skip-secret-guard") {
+      out.skipSecretGuard = true;
     }
   }
   return out;
@@ -136,6 +148,8 @@ export interface ReworkDeps {
   breaker?: CircuitBreaker;
   /** Factory for a real ClaudeWorker when `worker` is not injected. */
   workerFactory?: (opts: ClaudeWorkerOptions) => { work: (ctx: Parameters<ClaudeWorker["work"]>[0]) => Promise<WorkerOutcome> };
+  /** Patch scanner — defaults to `scanPatch` from @conclave-ai/secret-guard. */
+  secretScan?: (patch: string, opts?: { allow?: readonly string[] }) => ScanResult;
 }
 
 const defaultGit: Exec = async (bin, args, opts) => {
@@ -290,6 +304,23 @@ export async function runRework(args: ReworkArgs, deps: ReworkDeps = {}): Promis
     }, ${outcome.patch.length} bytes)\n`,
   );
   stdout(`rework: commit message: ${outcome.message}\n`);
+
+  if (!args.skipSecretGuard) {
+    const scan = (deps.secretScan ?? scanPatch)(outcome.patch, { allow: args.allowSecrets });
+    if (scan.blocked) {
+      stderr(
+        `rework: secret-guard blocked the patch — ${scan.findings.length} high-confidence finding(s):\n`,
+      );
+      for (const f of scan.findings) stderr(`  ${formatFinding(f)}\n`);
+      stderr(
+        `rework: run with --allow-secret <ruleId> only after a human confirms the match is a false positive\n`,
+      );
+      return 1;
+    }
+    if (scan.findings.length > 0) {
+      stdout(`rework: secret-guard saw ${scan.findings.length} low/medium finding(s), not blocking\n`);
+    }
+  }
 
   if (args.dryRun) {
     stdout(`---\n${outcome.patch}\n---\n`);
