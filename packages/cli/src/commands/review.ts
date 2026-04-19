@@ -14,6 +14,8 @@ import { ClaudeAgent } from "@ai-conclave/agent-claude";
 import { OpenAIAgent } from "@ai-conclave/agent-openai";
 import { GeminiAgent } from "@ai-conclave/agent-gemini";
 import { LangfuseMetricsSink } from "@ai-conclave/observability-langfuse";
+import { TelegramNotifier } from "@ai-conclave/integration-telegram";
+import type { Notifier } from "@ai-conclave/core";
 import { loadConfig, resolveMemoryRoot } from "../lib/config.js";
 import { loadPrDiff, loadGitDiff, loadFileDiff, type LoadedDiff } from "../lib/diff-source.js";
 import { renderReview, verdictToExitCode } from "../lib/output.js";
@@ -177,6 +179,48 @@ export async function review(argv: string[]): Promise<void> {
       `  when the PR lands, close the loop with:\n` +
       `    conclave record-outcome --id ${episodic.id} --result merged\n`,
   );
+
+  // 8. Optional integrations — equal-weight per decision #24. Missing
+  //    credentials skip with stderr warning; integration failures never
+  //    kill the review exit code.
+  const notifiers: Notifier[] = [];
+  const tg = config.integrations?.telegram;
+  if (tg?.enabled !== false) {
+    const hasToken = !!process.env["TELEGRAM_BOT_TOKEN"];
+    const hasChat = tg?.chatId !== undefined || !!process.env["TELEGRAM_CHAT_ID"];
+    if (tg?.enabled === true && !hasToken) {
+      process.stderr.write("conclave review: TELEGRAM_BOT_TOKEN not set — skipping Telegram notifier\n");
+    } else if (hasToken && hasChat) {
+      const opts: ConstructorParameters<typeof TelegramNotifier>[0] = {};
+      if (tg?.chatId !== undefined) opts.chatId = tg.chatId;
+      if (tg?.includeActionButtons !== undefined) opts.includeActionButtons = tg.includeActionButtons;
+      try {
+        notifiers.push(new TelegramNotifier(opts));
+      } catch (err) {
+        process.stderr.write(`conclave review: Telegram notifier init failed — ${(err as Error).message}\n`);
+      }
+    }
+  }
+  if (notifiers.length > 0) {
+    const notifyInput = {
+      outcome,
+      ctx: reviewCtx,
+      episodicId: episodic.id,
+      totalCostUsd: gate.metrics.summary().totalCostUsd,
+      ...(loaded.pullNumber && loaded.source === "gh-pr"
+        ? { prUrl: `https://github.com/${loaded.repo}/pull/${loaded.pullNumber}` }
+        : {}),
+    };
+    await Promise.all(
+      notifiers.map(async (n) => {
+        try {
+          await n.notifyReview(notifyInput);
+        } catch (err) {
+          process.stderr.write(`conclave review: ${n.id} notifier failed — ${(err as Error).message}\n`);
+        }
+      }),
+    );
+  }
 
   if (langfuseSink) {
     await langfuseSink.shutdown();

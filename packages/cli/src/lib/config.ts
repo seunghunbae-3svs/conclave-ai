@@ -38,6 +38,17 @@ export const ConclaveConfigSchema = z.object({
         .optional(),
     })
     .optional(),
+  integrations: z
+    .object({
+      telegram: z
+        .object({
+          enabled: z.boolean().default(true),
+          chatId: z.union([z.number(), z.string()]).optional(),
+          includeActionButtons: z.boolean().default(true),
+        })
+        .optional(),
+    })
+    .optional(),
 });
 
 export type ConclaveConfig = z.infer<typeof ConclaveConfigSchema>;

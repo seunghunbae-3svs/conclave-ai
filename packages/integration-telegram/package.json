@@ -1,13 +1,16 @@
 {
-  "name": "@ai-conclave/cli",
+  "name": "@ai-conclave/integration-telegram",
   "version": "0.0.0",
-  "description": "Ai-Conclave CLI — the `conclave` binary.",
+  "description": "Ai-Conclave Telegram notifier — posts review outcomes to a Telegram chat via Bot API.",
   "license": "MIT",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
-  "bin": {
-    "conclave": "./dist/bin/conclave.js"
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
   },
   "files": [
     "dist",
@@ -22,14 +25,7 @@
     "clean": "rm -rf dist .tsbuildinfo"
   },
   "dependencies": {
-    "@ai-conclave/agent-claude": "workspace:*",
-    "@ai-conclave/agent-gemini": "workspace:*",
-    "@ai-conclave/agent-openai": "workspace:*",
-    "@ai-conclave/core": "workspace:*",
-    "@ai-conclave/integration-telegram": "workspace:*",
-    "@ai-conclave/observability-langfuse": "workspace:*",
-    "@ai-conclave/scm-github": "workspace:*",
-    "zod": "^3.24.0"
+    "@ai-conclave/core": "workspace:*"
   },
   "devDependencies": {
     "typescript": "^5.7.0"

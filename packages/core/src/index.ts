@@ -1,6 +1,8 @@
 export type { Agent, ReviewContext, ReviewResult, Blocker, Severity } from "./agent.js";
 export { Council } from "./council.js";
+export type { CouncilOutcome } from "./council.js";
 export { ReviewResultSchema, BlockerSchema } from "./schema.js";
+export type { Notifier, NotifyReviewInput } from "./notifier.js";
 
 // Memory substrate (decision #17: 정답지 + 오답지 duality as core primitive).
 // Re-exported here for convenience; dedicated subpath at @ai-conclave/core/memory.

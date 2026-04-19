@@ -146,6 +146,40 @@
     flows, response_format shape assertion, refusal throw, invalid-JSON
     throw, invalid-verdict throw, no-key constructor throw, metrics
     aggregation, pre-flight budget short-circuits the network call.
+- **`@ai-conclave/integration-telegram`** — first notification surface
+  (decision #24 — Telegram / Discord / Slack / Email are equal-weight;
+  none is hero):
+  - `Notifier` interface added to `@ai-conclave/core`
+    (`notifyReview(input)` contract). Pluggable — any future integration
+    package implements this.
+  - `TelegramClient`: thin native-fetch wrapper over Bot API sendMessage.
+    No SDK dep; sub-200 lines; injectable `fetch` for tests.
+  - `TelegramNotifier`: implements `Notifier`. Builds HTML-mode message
+    with per-agent verdict + top-3 blockers (severity-sorted) + summary
+    + footer (cost + episodic id). Inline action buttons emit
+    `callback_data = "ep:<id>:<outcome>"` — future callback handler can
+    call `OutcomeWriter.recordOutcome` directly.
+  - Message formatter (`formatReviewForTelegram`): HTML-escapes `& < >`,
+    links to PR URL when supplied, truncates to 4090 chars, shows
+    `+N more` when blocker count exceeds 3.
+  - CLI integration: new `.conclaverc.json` `integrations.telegram.{enabled, chatId, includeActionButtons}` block.
+    `conclave review` fires the notifier after deliberation. Failures
+    never affect the verdict exit code.
+  - Env: `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`. Missing credentials
+    skip with stderr warning unless `integrations.telegram.enabled: true`
+    is explicitly set — then it errors.
+  - 21 test cases (`format`, `client`, `notifier`): HTML emoji header,
+    PR URL anchor, HTML-special-char escaping (`<never>` → `&lt;never&gt;`,
+    `a & b` → `a &amp; b`), severity-sorted top-3 + "+N more" counter,
+    no-consensus tag, footer cost+id, 4096-char truncation, (no
+    blockers) placeholder; `TelegramClient` rejects empty token, POST
+    request shape assertion, `ok:false` throws with description + code,
+    non-JSON response throws with status + snippet, baseUrl override;
+    `TelegramNotifier` missing-token + missing-chatId throws,
+    numeric-string chat id coercion, HTML parse_mode + disable_web_page_preview,
+    inline keyboard present by default, includeActionButtons:false
+    omits reply_markup, env fallback for TELEGRAM_BOT_TOKEN +
+    TELEGRAM_CHAT_ID, `Notifier` interface conformance.
 - **`@ai-conclave/observability-langfuse`** — first observability sink
   (decision #13 — self-hosted Langfuse):
   - `LangfuseMetricsSink` implements core's `MetricsSink`. Each per-call
