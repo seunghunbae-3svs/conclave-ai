@@ -146,6 +146,36 @@
     flows, response_format shape assertion, refusal throw, invalid-JSON
     throw, invalid-verdict throw, no-key constructor throw, metrics
     aggregation, pre-flight budget short-circuits the network call.
+- **`@ai-conclave/scm-github`** — GitHub SCM adapter + automatic outcome
+  capture (closes the manual `record-outcome` gap):
+  - `fetchPrState(repo, prNumber)` wraps `gh pr view` to resolve current
+    state / merge SHA / head SHA / updatedAt. No GitHub token needed in
+    conclave's config — relies on `gh auth login` which `conclave
+    review --pr N` already requires.
+  - `classifyTransition(state, reviewedSha)` maps live PR state to the
+    outcome vocabulary used by `OutcomeWriter.recordOutcome`:
+    merged → `merged`, closed w/o merge → `rejected`, open with new head
+    commits since review → `reworked`, open with unchanged head →
+    `pending`.
+  - `pollOutcomes({ store, writer })` walks pending episodic entries,
+    fetches each PR's state, applies classification + writes catalog
+    records. gh errors per-PR are counted and surfaced without aborting
+    the scan.
+  - `MemoryStore.listEpisodic()` added; FS implementation walks
+    `episodic/*/` buckets. Required by the pending-entry filter so
+    polling is a single pass over disk.
+  - **New CLI command `conclave poll-outcomes`** — cron-friendly
+    auto-classification. Prints a summary line (scanned / merged /
+    rejected / reworked / pending / errors) plus per-PR detail for
+    anything that transitioned.
+  - 20 test cases across `pr-state.test.mjs` (open / merged / closed
+    mapping, merge-commit sha capture, unknown-state throw, missing
+    headRefOid throw, gh arg shape assertion, all 4 classifyTransition
+    rules) and `poll-runner.test.mjs` (empty store, merged → AnswerKey,
+    closed → FailureEntry, reworked with advanced head → FailureEntry,
+    same-head no-op, pullNumber=0 local review skipped, gh errors
+    counted but scan continues, already-resolved entries not re-polled,
+    listPendingEpisodics correctness).
 - **`@ai-conclave/agent-gemini`** — third council voice, long-context slot
   (decision #10: Gemini 2.5 Pro as the >50K input tokens handler, flash
   as triage. Deep Think skipped as Ultra-tier overkill):

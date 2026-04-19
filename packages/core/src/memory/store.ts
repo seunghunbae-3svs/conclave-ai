@@ -41,6 +41,8 @@ export interface MemoryStore {
   listRules(): Promise<SemanticRule[]>;
   /** Find a single episodic entry by id. Returns null if not found. */
   findEpisodic(id: string): Promise<EpisodicEntry | null>;
+  /** List every episodic entry (mostly for outcome polling + admin tools). */
+  listEpisodic(): Promise<EpisodicEntry[]>;
 }
 
 /**

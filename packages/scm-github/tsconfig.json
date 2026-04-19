@@ -7,10 +7,6 @@
   "include": ["src/**/*"],
   "exclude": ["dist", "node_modules"],
   "references": [
-    { "path": "../core" },
-    { "path": "../agent-claude" },
-    { "path": "../agent-gemini" },
-    { "path": "../agent-openai" },
-    { "path": "../scm-github" }
+    { "path": "../core" }
   ]
 }
