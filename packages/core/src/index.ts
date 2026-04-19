@@ -12,7 +12,7 @@ export type { Platform, PreviewResolution, ResolvePreviewInput } from "./platfor
 export { computeAgentScore, computeAllAgentScores, AGENT_SCORE_WEIGHTS } from "./scoring.js";
 export type { AgentScore, AgentScoreComponents } from "./scoring.js";
 
-// Memory substrate (decision #17: 정답지 + 오답지 duality as core primitive).
+// Memory substrate (decision #17: answer-keys + failure-catalog duality as core primitive).
 // Re-exported here for convenience; dedicated subpath at @conclave-ai/core/memory.
 export {
   FileSystemMemoryStore,

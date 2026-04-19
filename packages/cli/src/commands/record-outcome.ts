@@ -6,8 +6,8 @@ const HELP = `conclave record-outcome — close the self-evolve loop
 Usage:
   conclave record-outcome --id <episodic-id> --result merged|rejected|reworked
 
-On merged PRs, a new answer-key (정답지) is derived from the review summary.
-On rejected / reworked PRs, a failure-catalog entry (오답지) is derived per
+On merged PRs, a new answer-key is derived from the review summary.
+On rejected / reworked PRs, a failure-catalog entry is derived per
 unique blocker (ignoring nits).
 `;
 

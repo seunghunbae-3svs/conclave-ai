@@ -60,7 +60,7 @@ truth for scaffolding.
 ┌────────────────────────┐  ┌────────────────────────────────┐
 │  Layer 6 —             │  │  Layer 7 — OBSERVABILITY       │
 │  SELF-EVOLVE           │  │  Langfuse self-hosted          │
-│  (정답지 + 오답지)     │  │  per-PR trace                  │
+│  (success + failure)   │  │  per-PR trace                  │
 │  episodic (90d)        │  │  cache hit rate                │
 │  answer-keys (∞)       │  │  cost + tokens per call        │
 │  failure-catalog (∞)   │  │  precision/recall per category │
@@ -71,16 +71,16 @@ truth for scaffolding.
 └────────────────────────┘  └────────────────────────────────┘
 ```
 
-## Self-Evolve Substrate (정답지/오답지 duality — the moat)
+## Self-Evolve Substrate (answer-keys/failure-catalog duality — the moat)
 
 ```
 packages/core/src/memory/
 ├── episodic/                      # raw event log, 90d TTL
 │   └── YYYY-MM-DD/pr-{n}.json
-├── answer-keys/ (정답지)          # ★ SUCCESS PATTERNS
+├── answer-keys/          # ★ SUCCESS PATTERNS
 │   ├── code/{by-pattern,by-user,by-repo}/
 │   └── design/{by-pattern,by-component}/
-├── failure-catalog/ (오답지)      # ★ FAILURE PATTERNS
+├── failure-catalog/      # ★ FAILURE PATTERNS
 │   ├── code/by-category/{type-errors,missing-tests,regression,security,...}
 │   └── design/{accessibility-fails,contrast-fails,...}
 ├── semantic/rules.json            # extracted rules (nightly Haiku compression)
@@ -165,7 +165,7 @@ conclave-ai/
 │   │       ├── agent.ts          # Agent interface
 │   │       ├── council.ts        # Mastra-based N-agent graph
 │   │       ├── schema/           # Zod schemas
-│   │       ├── memory/           # self-evolve 정답지/오답지
+│   │       ├── memory/           # self-evolve answer-keys/failure-catalog
 │   │       ├── efficiency/       # cache/triage/budget/compact/route
 │   │       ├── scoring/          # ported from solo-cto-agent
 │   │       ├── guards.ts         # anti-loop + circuit breaker
@@ -224,12 +224,12 @@ solo-cto-agent 1.4.x stays on npm in maintenance (security fixes only).
 
 - Individual features: 4.5/10 (prior art exists)
 - Architectural sophistication: **8.5/10**
-- Self-evolve as moat (정답지/오답지 duality + federated): **9/10**
+- Self-evolve as moat (answer-keys/failure-catalog duality + federated): **9/10**
 - Overall product thesis: **8.5/10**
 - Execution risk pulls shipped value: TBD
 
 **Differentiators (priority order):**
-1. 정답지 + 오답지 dual catalog as RLHF-like substrate without fine-tuning
+1. answer-keys + failure-catalog dual catalog as RLHF-like substrate without fine-tuning
 2. Efficiency gate built in from day 1 (most multi-agent systems die from cost)
 3. Architectural coherence (all 7 layers woven, not bolted-on)
 4. Pluggable agents including self-hosted Triton-based + local Ollama

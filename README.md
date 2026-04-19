@@ -39,14 +39,14 @@ Council — up to 3 rounds of debate across N agents
   Round 2: each agent sees the others' blockers, can revise
   Round 3: final vote; early-exit the moment all approve OR any reject
   ↓
-Merged  → success pattern → answer-keys  (정답지)
-Rejected → failure pattern → failure-catalog (오답지)
+Merged  → success pattern → answer-keys 
+Rejected → failure pattern → failure-catalog
   ↓
 Next review reads BOTH catalogs as RAG context → the council gets smarter
 ```
 
 Both signals are first-class. Most ML systems use one (positive OR
-negative); here `정답지 ∥ 오답지` is the primitive — decision #17.
+negative); here `answer-keys ∥ failure-catalog` is the primitive — decision #17.
 
 ## The numbers
 
@@ -68,7 +68,7 @@ negative); here `정답지 ∥ 오답지` is the primitive — decision #17.
 
 | Package | Purpose |
 |---|---|
-| `@conclave-ai/core` | Agent interface, Council (3-round debate), efficiency gate, memory substrate (정답지 + 오답지), scoring (decision #19), federated sync (decision #21) |
+| `@conclave-ai/core` | Agent interface, Council (3-round debate), efficiency gate, memory substrate (answer-keys + failure-catalog), scoring (decision #19), federated sync (decision #21) |
 | `@conclave-ai/agent-claude` | Claude reviewer — tool-use with `submit_review` + prompt caching |
 | `@conclave-ai/agent-openai` | OpenAI reviewer — strict JSON schema + cached-token discount |
 | `@conclave-ai/agent-gemini` | Gemini reviewer — long-context routing tier |

@@ -33,7 +33,7 @@ Legend:
 | 14 | Workflow engine → GitHub Actions | ✅ | `.github/workflows/` |
 | 15 | Native pixel diff → odiff | ✅ | `packages/visual-review/src/odiff-diff.ts` (opt-in) |
 | 16 | Config loader → cosmiconfig | ✅ | `packages/cli/src/lib/config.ts` |
-| 17 | Memory dual substrate (정답지 + 오답지) | ✅ | `packages/core/src/memory/` |
+| 17 | Memory dual substrate (answer-keys + failure-catalog) | ✅ | `packages/core/src/memory/` |
 | 18 | Seed from solo-cto-agent catalog | ✅ | `packages/core/src/memory/seeder.ts` |
 | 19 | Agent scoring weights | ✅ | `packages/core/src/scoring.ts` |
 | 20 | Visual review CLI flag | ✅ | `conclave review --visual` |

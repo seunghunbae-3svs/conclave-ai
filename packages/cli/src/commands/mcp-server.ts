@@ -76,7 +76,7 @@ export async function mcpServer(argv: string[]): Promise<void> {
     {
       title: "Retrieve answer-keys and failures",
       description:
-        "BM25-style retrieval over the local memory substrate. Returns the top-K answer-keys (정답지) and failures (오답지) matching `query`.",
+        "BM25-style retrieval over the local memory substrate. Returns the top-K answer-keys and failures matching `query`.",
       inputSchema: {
         query: z.string().min(1).describe("Free-text query — typically a diff summary or blocker category"),
         k: z.number().int().positive().max(32).optional().describe("Max per bucket, default 8"),

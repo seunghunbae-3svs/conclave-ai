@@ -21,7 +21,7 @@ export const EpisodicEntrySchema = z.object({
 export type EpisodicEntry = z.infer<typeof EpisodicEntrySchema>;
 
 /**
- * AnswerKey (정답지) — a SUCCESS PATTERN. Written when a PR merges.
+ * AnswerKey — a SUCCESS PATTERN. Written when a PR merges.
  * Retrieved at review time so future reviews match the repo's tolerance
  * for what counts as a blocker and what counts as polish.
  */
@@ -44,7 +44,7 @@ export const AnswerKeySchema = z.object({
 export type AnswerKey = z.infer<typeof AnswerKeySchema>;
 
 /**
- * FailureEntry (오답지) — a FAILURE PATTERN. Written on reject or rework.
+ * FailureEntry — a FAILURE PATTERN. Written on reject or rework.
  * Seeded from solo-cto-agent's failure-catalog.json (ERR-001~) per
  * decision #18 — do not start from zero.
  */
