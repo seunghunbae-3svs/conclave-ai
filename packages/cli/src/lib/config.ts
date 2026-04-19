@@ -47,6 +47,14 @@ export const ConclaveConfigSchema = z.object({
           includeActionButtons: z.boolean().default(true),
         })
         .optional(),
+      discord: z
+        .object({
+          enabled: z.boolean().default(true),
+          webhookUrl: z.string().url().optional(),
+          username: z.string().optional(),
+          avatarUrl: z.string().url().optional(),
+        })
+        .optional(),
     })
     .optional(),
 });

@@ -146,6 +146,31 @@
     flows, response_format shape assertion, refusal throw, invalid-JSON
     throw, invalid-verdict throw, no-key constructor throw, metrics
     aggregation, pre-flight budget short-circuits the network call.
+- **`@ai-conclave/integration-discord`** — second notification surface
+  (decision #24, same `Notifier` pattern as Telegram):
+  - `DiscordNotifier` implements `Notifier`. Posts to an incoming
+    webhook — simpler than bot API (no token, no chat id — just the
+    webhook URL).
+  - URL validation: only accepts
+    `https://discord.com/api/webhooks/…` or `discordapp.com` hosts.
+  - Embed payload with color-coded verdict (green approve / amber
+    rework / red reject), per-agent field showing top-3
+    severity-sorted blockers + summary, footer with cost + episodic id,
+    ISO timestamp. Auto-truncates title (256), description (4096),
+    per-field value (1024), and caps at 24 agent-fields to stay under
+    Discord's 25-field limit.
+  - CLI `integrations.discord.{enabled, webhookUrl, username, avatarUrl}`.
+    Env fallback: `DISCORD_WEBHOOK_URL`. Missing URL with explicit
+    `enabled: true` → hard error. Otherwise skip with stderr warning.
+  - 22 test cases across `format` (color per verdict, PR URL link,
+    no-consensus tag, severity-sorted top-3 + `+N more`, file:line
+    rendering, field-value truncation, footer cost+id, timestamp,
+    no-blockers placeholder, 24-field cap with overflow) and `notifier`
+    (missing URL throw, non-Discord URL throw, both discord.com /
+    discordapp.com accepted, POST + JSON content-type shape, default
+    username Ai-Conclave, username override, avatarUrl propagation,
+    non-200 throws with status + snippet, DISCORD_WEBHOOK_URL env
+    fallback, Notifier interface conformance).
 - **Legacy failure-catalog seeding** (decision #18: port solo-cto-agent's
   `failure-catalog.json` directly; do not start from zero):
   - `LegacyCatalogSchema` + `LegacyEntrySchema` (Zod) validate the

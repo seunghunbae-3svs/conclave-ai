@@ -15,6 +15,7 @@ import { OpenAIAgent } from "@ai-conclave/agent-openai";
 import { GeminiAgent } from "@ai-conclave/agent-gemini";
 import { LangfuseMetricsSink } from "@ai-conclave/observability-langfuse";
 import { TelegramNotifier } from "@ai-conclave/integration-telegram";
+import { DiscordNotifier } from "@ai-conclave/integration-discord";
 import type { Notifier } from "@ai-conclave/core";
 import { loadConfig, resolveMemoryRoot } from "../lib/config.js";
 import { loadPrDiff, loadGitDiff, loadFileDiff, type LoadedDiff } from "../lib/diff-source.js";
@@ -198,6 +199,25 @@ export async function review(argv: string[]): Promise<void> {
         notifiers.push(new TelegramNotifier(opts));
       } catch (err) {
         process.stderr.write(`conclave review: Telegram notifier init failed — ${(err as Error).message}\n`);
+      }
+    }
+  }
+  const dc = config.integrations?.discord;
+  if (dc?.enabled !== false) {
+    const hasUrl = !!(dc?.webhookUrl || process.env["DISCORD_WEBHOOK_URL"]);
+    if (dc?.enabled === true && !hasUrl) {
+      process.stderr.write(
+        "conclave review: DISCORD_WEBHOOK_URL not set — skipping Discord notifier\n",
+      );
+    } else if (hasUrl) {
+      const opts: ConstructorParameters<typeof DiscordNotifier>[0] = {};
+      if (dc?.webhookUrl) opts.webhookUrl = dc.webhookUrl;
+      if (dc?.username) opts.username = dc.username;
+      if (dc?.avatarUrl) opts.avatarUrl = dc.avatarUrl;
+      try {
+        notifiers.push(new DiscordNotifier(opts));
+      } catch (err) {
+        process.stderr.write(`conclave review: Discord notifier init failed — ${(err as Error).message}\n`);
       }
     }
   }
