@@ -46,8 +46,10 @@ test("compact: summarizer collapses dropped tail", async () => {
     msg("user", "middle", 40),
     msg("user", "newest", 40),
   ];
+  // Budget 50 fits only the newest message (40) + small summary (~few tokens).
+  // Both `oldest` and `middle` get dropped → summarized count = 2.
   const out = await compact(messages, {
-    targetTokens: 90, // enough for newest + small summary
+    targetTokens: 50,
     summarize: async (dropped) => `summary of ${dropped.length}`,
   });
   assert.equal(out.summarizedCount, 2);
