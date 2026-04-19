@@ -149,10 +149,8 @@ Requires Node ≥ 20 and pnpm ≥ 9. Monorepo is [Turbo](https://turbo.build/rep
 
 ## Roadmap
 
-See [CHANGELOG.md](CHANGELOG.md) for what's shipped. Remaining v2.0+
-work: Agent SDK migrations (cosmetic), MCP tool protocol, odiff native
-adapter, cosmiconfig, live federation endpoint + retrieval-side merge,
-v2.1 agent set (Grok/Deepseek/Qwen/Bedrock/Vertex/Cheetah/Ollama).
+See [CHANGELOG.md](CHANGELOG.md) for what's shipped. Current state per
+locked decision: [docs/decision-status.md](docs/decision-status.md).
 
 Locked design decisions (do not reopen without explicit reason) live in
 `ARCHITECTURE.md`.
