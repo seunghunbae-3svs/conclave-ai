@@ -95,6 +95,9 @@ importers:
       '@ai-conclave/platform-netlify':
         specifier: workspace:*
         version: link:../platform-netlify
+      '@ai-conclave/platform-railway':
+        specifier: workspace:*
+        version: link:../platform-railway
       '@ai-conclave/platform-vercel':
         specifier: workspace:*
         version: link:../platform-vercel
@@ -196,6 +199,16 @@ importers:
         version: 5.9.3
 
   packages/platform-netlify:
+    dependencies:
+      '@ai-conclave/core':
+        specifier: workspace:*
+        version: link:../core
+    devDependencies:
+      typescript:
+        specifier: ^5.7.0
+        version: 5.9.3
+
+  packages/platform-railway:
     dependencies:
       '@ai-conclave/core':
         specifier: workspace:*

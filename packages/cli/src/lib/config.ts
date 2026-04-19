@@ -80,8 +80,8 @@ export const ConclaveConfigSchema = z.object({
     .object({
       enabled: z.boolean().default(false),
       platforms: z
-        .array(z.enum(["vercel", "netlify", "cloudflare", "deployment-status"]))
-        .default(["vercel", "netlify", "cloudflare", "deployment-status"]),
+        .array(z.enum(["vercel", "netlify", "cloudflare", "railway", "deployment-status"]))
+        .default(["vercel", "netlify", "cloudflare", "railway", "deployment-status"]),
       width: z.number().int().positive().default(1280),
       height: z.number().int().positive().default(800),
       fullPage: z.boolean().default(true),

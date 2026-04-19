@@ -18,6 +18,7 @@
     { "path": "../platform-cloudflare" },
     { "path": "../platform-deployment-status" },
     { "path": "../platform-netlify" },
+    { "path": "../platform-railway" },
     { "path": "../platform-vercel" },
     { "path": "../visual-review" },
     { "path": "../observability-langfuse" },

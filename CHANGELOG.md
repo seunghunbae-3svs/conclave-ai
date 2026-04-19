@@ -3,6 +3,46 @@
 ## Unreleased
 
 ### Added
+- **`@ai-conclave/platform-railway`** — completes decision #31 v2.0
+  platform set (Vercel + Netlify + Railway + Cloudflare Pages +
+  `deployment-status`).
+  - Resolves preview URL for a commit SHA via Railway's GraphQL API
+    (`POST https://backboard.railway.com/graphql/v2`).
+  - Fetches the latest 20 deployments for a project (optionally
+    narrowed by `RAILWAY_ENVIRONMENT_ID`), filters client-side by
+    `meta.commitHash === sha` AND `status === "SUCCESS"`, picks newest
+    by `createdAt`.
+  - Prefers `staticUrl` (`*.up.railway.app`); falls back to `url` for
+    custom domains; returns null when neither is present.
+  - 404 → null, 401/403 → throws (auth), 5xx → throws, GraphQL
+    `errors[]` → throws with the message.
+  - Env: `RAILWAY_API_TOKEN` + `RAILWAY_PROJECT_ID` required;
+    `RAILWAY_ENVIRONMENT_ID` optional.
+  - Wired into `buildPlatforms` factory as `PlatformId = "railway"`
+    and into the CLI default visual platform list.
+  - 12 test cases mirror the Cloudflare adapter shape: missing envs,
+    newest-SUCCESS-wins, non-matching commit, non-SUCCESS status,
+    GraphQL errors, bearer auth + POST body shape, environmentId
+    forwarding, 401/404/500 handling, staticUrl fallback, no-URL
+    deployments → null.
+
+### Fixed
+- **Four test failures surfaced by fresh `pnpm build && pnpm test`
+  runs after PR #25 landed:**
+  - `core/memory/retrieval`: tag-only matches (text overlap = 0) now
+    contribute a base score so the tag boost can promote them past
+    `minScore`.
+  - `core/test/scoring`: tolerance compare for
+    `AGENT_SCORE_WEIGHTS` sum — IEEE 754 returns `0.9999999999999999`
+    for `0.4 + 0.3 + 0.2 + 0.1`, so strict equality was wrong.
+  - `visual-review/diff`: pad mismatched canvas with opaque magenta,
+    not transparent black — pixelmatch blends transparent pixels
+    against a white background and was reporting zero diff for any
+    size-mismatched pair.
+  - `visual-review/test orchestrator helper`: `fixedPlatform` stub now
+    filters by `input.sha`, matching the real `Platform` contract so
+    the preview-metadata test surfaces the correct before/after URLs.
+
 - **Agent scoring (decision #19)** — rolling weighted per-agent
   performance metrics from memory. Weights ported from solo-cto-agent
   where they were validated in production:
