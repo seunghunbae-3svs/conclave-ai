@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+### Fixed
+- **Agents' default `maxTokens` 2,048 → 8,192** across Claude, OpenAI, and Gemini. Surfaced during the first real `conclave review` run against PR #37 — OpenAI returned `finish_reason=length` because a medium-sized review prompt + structured JSON output + reasoning tokens exceeded the old cap. 2k was a fixture-friendly default that never tripped in unit tests (mocks don't emit real tokens). Budget reservation math still fits comfortably under the default `$1.00/PR` cap even at 8k × 3 agents × 3 rounds.
+
 ### Ops
 - **`.github/workflows/release.yml` — automated release pipeline.** Two triggers: (1) `workflow_dispatch` with a `patch | minor | major` bump input, runs build + test, bumps every `packages/*` version in lockstep, commits + tags + pushes, then publishes via `pnpm publish -r --access public` with npm provenance. (2) `push: tags: ["v*"]` — skips the bump step (tag is truth) and goes straight to publish. `docs/release-process.md` covers both paths, the one-time secrets setup (`NPM_TOKEN`), and the lockstep-versioning pre-1.0 policy.
 

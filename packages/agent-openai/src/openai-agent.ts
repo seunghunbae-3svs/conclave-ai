@@ -58,7 +58,7 @@ export interface OpenAIAgentOptions {
 }
 
 const DEFAULT_MODEL = "gpt-5-mini";
-const DEFAULT_MAX_TOKENS = 2_048;
+const DEFAULT_MAX_TOKENS = 8_192;
 
 async function defaultClientFactory(apiKey: string): Promise<OpenAILike> {
   const mod = (await import("openai")) as unknown as {
