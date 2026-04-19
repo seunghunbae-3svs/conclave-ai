@@ -54,7 +54,7 @@ export interface GeminiAgentOptions {
 }
 
 const DEFAULT_MODEL = "gemini-2.5-pro";
-const DEFAULT_MAX_TOKENS = 2_048;
+const DEFAULT_MAX_TOKENS = 8_192;
 
 async function defaultClientFactory(apiKey: string): Promise<GenAILike> {
   const mod = (await import("@google/genai")) as unknown as {

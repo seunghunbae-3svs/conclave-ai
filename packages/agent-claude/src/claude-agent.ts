@@ -58,7 +58,7 @@ export interface ClaudeAgentOptions {
 }
 
 const DEFAULT_MODEL = "claude-sonnet-4-6";
-const DEFAULT_MAX_TOKENS = 2_048;
+const DEFAULT_MAX_TOKENS = 8_192;
 
 async function defaultClientFactory(apiKey: string): Promise<AnthropicLike> {
   // Dynamic import so tests that inject a client never pay the SDK load cost.
