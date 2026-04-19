@@ -1,0 +1,31 @@
+# @ai-conclave/agent-openai
+
+OpenAI agent for Ai-Conclave council review. Implements the `Agent`
+interface from `@ai-conclave/core`. Uses strict JSON Schema response
+format (decision #12) for guaranteed well-formed `ReviewResult` output.
+
+## Install
+
+```bash
+pnpm add @ai-conclave/agent-openai @ai-conclave/core
+```
+
+## Usage
+
+```ts
+import { OpenAIAgent } from "@ai-conclave/agent-openai";
+import { ClaudeAgent } from "@ai-conclave/agent-claude";
+import { Council, EfficiencyGate } from "@ai-conclave/core";
+
+const gate = new EfficiencyGate();
+const council = new Council({
+  agents: [new ClaudeAgent({ gate }), new OpenAIAgent({ gate })],
+});
+```
+
+## Models
+
+Default: `gpt-5-mini`. Override via `new OpenAIAgent({ model: "gpt-5" })`.
+
+Pricing table covers `gpt-4.1` / `gpt-4.1-mini` / `gpt-5` / `gpt-5-mini` /
+`o5` — revisit on publish in case OpenAI changes prices.
