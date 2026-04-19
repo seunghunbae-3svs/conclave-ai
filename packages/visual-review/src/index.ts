@@ -13,6 +13,9 @@ export type {
 export { PixelmatchDiff, classifyDiffRatio } from "./diff.js";
 export type { DiffOptions, DiffResult, VisualDiff } from "./diff.js";
 
+export { OdiffDiff } from "./odiff-diff.js";
+export type { OdiffAdapterOptions } from "./odiff-diff.js";
+
 export { runVisualReview } from "./orchestrator.js";
 export type { VisualReviewInput, VisualReviewResult } from "./orchestrator.js";
 
