@@ -3,6 +3,8 @@
 ## Unreleased
 
 ### Added
+- **`@conclave-ai/agent-ollama` — local inference agent (decision #32).** Routes reviews to a local Ollama daemon via its OpenAI-compatible endpoint at `http://localhost:11434/v1`. Zero API key (placeholder "ollama" string satisfies the SDK), zero wire cost (`actualCost` returns 0). Default model `llama3.3`, override via constructor or pick any model `ollama list` shows. `OLLAMA_BASE_URL` env var supports self-hosted / remote Ollama instances. CLI factory adds `"ollama"` with no credential gating — user is responsible for the daemon being up. 11 unit tests use a stub client (no network).
+
 - **`@conclave-ai/agent-deepseek` — first v2.1 agent (decision #32).** OpenAI-wire-compatible; reuses the `openai` SDK pointed at `https://api.deepseek.com`. Supports `deepseek-chat` (V3, general) and `deepseek-reasoner` (R1, chain-of-thought). Pricing ~20× cheaper than GPT-5 input (0.27/M vs 5.0/M) with a deep cache discount (0.07/M — ~26% of standard). Wired into the CLI factory alongside `"claude" / "openai" / "gemini"`; missing `DEEPSEEK_API_KEY` skips cleanly like the others. `docs/configuration.md` + Zod config enum both updated. 18 tests mirror the agent-openai suite (16 agent + 8 pricing).
 
 ### Docs
