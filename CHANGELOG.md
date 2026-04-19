@@ -3,6 +3,27 @@
 ## Unreleased
 
 ### Added
+- **CLI `conclave migrate`** (decision #27) — brings an existing
+  solo-cto-agent install over to ai-conclave without deleting the
+  legacy install:
+  - Auto-detects the legacy root by walking up from cwd or checking
+    sibling `solo-cto-agent/` folder. `--from <path>` override.
+  - Ports `failure-catalog.json` into ai-conclave's memory store (same
+    heuristic mapper as `conclave seed`); tags entries with
+    `["legacy", "solo-cto-agent", "migrated"]`.
+  - Reads `.solo-cto/tracked.json` if present and prints tracked repo
+    names for manual migration (tokens are NOT copied — audit required).
+  - Writes `.conclaverc.json` with defaults if none exists.
+  - Prints an env checklist (ANTHROPIC_API_KEY / OPENAI_API_KEY /
+    GOOGLE_API_KEY / Telegram / Discord / Slack / Email / platform
+    tokens / Langfuse) so users know what to carry over.
+  - `--dry-run` flag to preview without writing.
+  - 11 test cases: arg parsing (3), detectLegacy (3: happy / empty dir
+    / tracked.json surfacing), findLegacyUpwards (2: sibling folder
+    detection, null on isolated tree), buildPlan (3: willWriteConfig
+    true on fresh cwd, false when config exists, trackedRepoNames
+    surfaced), applyPlan (3: writes config + seeds 2 failures, skips
+    config write when present, seeded=0 when no legacy catalog).
 - **CLI `--visual` / `--no-visual` on `conclave review`** — completes the
   visual-diff story end-to-end from the CLI.
   - Config block `visual.{enabled, platforms[], width, height, fullPage,
