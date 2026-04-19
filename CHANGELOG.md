@@ -146,3 +146,33 @@
     flows, response_format shape assertion, refusal throw, invalid-JSON
     throw, invalid-verdict throw, no-key constructor throw, metrics
     aggregation, pre-flight budget short-circuits the network call.
+- **`@ai-conclave/agent-gemini`** — third council voice, long-context slot
+  (decision #10: Gemini 2.5 Pro as the >50K input tokens handler, flash
+  as triage. Deep Think skipped as Ultra-tier overkill):
+  - `GeminiAgent` wraps `@google/genai` via a minimal `GenAILike` client
+    interface. Lazy-loaded default factory.
+  - Structured output via `config.responseMimeType: "application/json"`
+    + `config.responseSchema` in OpenAPI-3-subset shape (Gemini
+    specifics: no `additionalProperties`; nullable via `nullable: true`).
+  - Cacheable prefix sent as `systemInstruction` — Gemini's context
+    cache bills the system part separately (75% discount on 2.5 family).
+  - Same efficiency-gate contract: pre-flight reserve, cache-liveness
+    mark, `actualCost(model, usage)` via `usageMetadata.cachedContentTokenCount`,
+    per-call metric.
+  - Env resolution: `GOOGLE_API_KEY` first, `GEMINI_API_KEY` fallback.
+  - Pricing table for `gemini-2.5-pro`, `gemini-2.5-flash`, `gemini-3.0-flash`
+    with max-context-tokens metadata for router use.
+  - Parser handles empty content with finishReason surfaced, invalid
+    JSON, invalid verdict, malformed blockers dropped individually.
+  - CLI `conclave review` instantiates Gemini when `config.agents`
+    includes `"gemini"` and `GOOGLE_API_KEY` / `GEMINI_API_KEY` is set;
+    otherwise skips with a stderr warning.
+  - 17 test cases across `pricing.test.mjs` (tiers present, baseline,
+    75% cached discount on 2.5-pro, 8× flash/pro ratio, unknown-model
+    throw, pre-flight estimate, `maxContextTokens` populated) and
+    `gemini-agent.test.mjs` (approve + rework flows, malformed blocker
+    drops, responseMimeType + responseSchema wire assertions,
+    systemInstruction parts shape, cached-token cost discount,
+    empty-text-with-finishReason throw, invalid-JSON throw,
+    invalid-verdict throw, no-key constructor throw, GEMINI_API_KEY
+    fallback when GOOGLE_API_KEY unset, pre-flight budget short-circuit).

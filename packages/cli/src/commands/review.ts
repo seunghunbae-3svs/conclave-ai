@@ -10,6 +10,7 @@ import {
 } from "@ai-conclave/core";
 import { ClaudeAgent } from "@ai-conclave/agent-claude";
 import { OpenAIAgent } from "@ai-conclave/agent-openai";
+import { GeminiAgent } from "@ai-conclave/agent-gemini";
 import { loadConfig, resolveMemoryRoot } from "../lib/config.js";
 import { loadPrDiff, loadGitDiff, loadFileDiff, type LoadedDiff } from "../lib/diff-source.js";
 import { renderReview, verdictToExitCode } from "../lib/output.js";
@@ -100,7 +101,12 @@ export async function review(argv: string[]): Promise<void> {
       }
       agents.push(new OpenAIAgent({ gate }));
     } else if (id === "gemini") {
-      process.stderr.write("conclave review: gemini agent not yet implemented — skipping\n");
+      const hasKey = !!(process.env["GOOGLE_API_KEY"] || process.env["GEMINI_API_KEY"]);
+      if (!hasKey) {
+        process.stderr.write("conclave review: GOOGLE_API_KEY / GEMINI_API_KEY not set — skipping Gemini agent\n");
+        continue;
+      }
+      agents.push(new GeminiAgent({ gate }));
     }
   }
   if (agents.length === 0) {
