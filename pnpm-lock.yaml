@@ -20,12 +20,25 @@ importers:
 
   packages/agent-claude:
     dependencies:
-      '@conclave-ai/core':
-        specifier: workspace:*
-        version: link:../core
       '@anthropic-ai/sdk':
         specifier: ^0.65.0
         version: 0.65.0(zod@3.25.76)
+      '@conclave-ai/core':
+        specifier: workspace:*
+        version: link:../core
+    devDependencies:
+      typescript:
+        specifier: ^5.7.0
+        version: 5.9.3
+
+  packages/agent-deepseek:
+    dependencies:
+      '@conclave-ai/core':
+        specifier: workspace:*
+        version: link:../core
+      openai:
+        specifier: ^4.76.0
+        version: 4.104.0(ws@8.20.0)(zod@3.25.76)
     devDependencies:
       typescript:
         specifier: ^5.7.0
@@ -62,6 +75,9 @@ importers:
       '@conclave-ai/agent-claude':
         specifier: workspace:*
         version: link:../agent-claude
+      '@conclave-ai/agent-deepseek':
+        specifier: workspace:*
+        version: link:../agent-deepseek
       '@conclave-ai/agent-gemini':
         specifier: workspace:*
         version: link:../agent-gemini
@@ -246,12 +262,12 @@ importers:
 
   packages/visual-review:
     dependencies:
-      '@conclave-ai/core':
-        specifier: workspace:*
-        version: link:../core
       '@anthropic-ai/sdk':
         specifier: ^0.65.0
         version: 0.65.0(zod@3.25.76)
+      '@conclave-ai/core':
+        specifier: workspace:*
+        version: link:../core
       odiff-bin:
         specifier: ^4.3.0
         version: 4.3.8

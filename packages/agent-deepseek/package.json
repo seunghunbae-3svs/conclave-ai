@@ -1,0 +1,37 @@
+{
+  "name": "@conclave-ai/agent-deepseek",
+  "version": "0.1.0",
+  "description": "Conclave AI Deepseek agent — OpenAI-wire-compatible, routes to api.deepseek.com with strict-JSON-schema structured output.",
+  "license": "MIT",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "src",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "dev": "tsc -p tsconfig.json --watch",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "node --test --experimental-test-coverage test/*.test.mjs",
+    "clean": "rm -rf dist .tsbuildinfo"
+  },
+  "dependencies": {
+    "@conclave-ai/core": "workspace:*",
+    "openai": "^4.76.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.0"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}

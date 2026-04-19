@@ -3,7 +3,8 @@
   "agents": [
     "claude",
     "openai",
-    "gemini"
+    "gemini",
+    "deepseek"
   ],
   "budget": {
     "perPrUsd": 1.0
