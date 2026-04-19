@@ -352,11 +352,14 @@ export async function runRework(args: ReworkArgs, deps: ReworkDeps = {}): Promis
   await git("git", ["apply", "--recount", patchPath], { cwd: args.cwd });
   await removeTemp(patchPath).catch(() => undefined);
 
-  if (outcome.appliedFiles.length > 0) {
-    await git("git", ["add", "--", ...outcome.appliedFiles], { cwd: args.cwd });
-  } else {
-    await git("git", ["add", "-A"], { cwd: args.cwd });
-  }
+  // `git add -A` stages every change the apply actually produced — tracked
+  // modifications AND untracked new files. Using `outcome.appliedFiles`
+  // as the pathspec was fragile: the worker can report a file it meant
+  // to create whose hunk `git apply --recount` didn't actually materialise
+  // (common with new-file hunks), and `git add -- <missing>` then fails
+  // with "did not match any files". Trusting git's view of the workspace
+  // post-apply is more robust than the worker's self-report.
+  await git("git", ["add", "-A"], { cwd: args.cwd });
 
   await git(
     "git",
