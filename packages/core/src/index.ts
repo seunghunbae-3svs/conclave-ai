@@ -1,6 +1,6 @@
-export type { Agent, ReviewContext, ReviewResult, Blocker, Severity } from "./agent.js";
+export type { Agent, ReviewContext, ReviewResult, Blocker, Severity, PriorReview } from "./agent.js";
 export { Council } from "./council.js";
-export type { CouncilOutcome } from "./council.js";
+export type { CouncilOutcome, CouncilOptions, RoundOutcome } from "./council.js";
 export { ReviewResultSchema, BlockerSchema } from "./schema.js";
 export type { Notifier, NotifyReviewInput } from "./notifier.js";
 export { resolveFirstPreview } from "./platform.js";
