@@ -55,6 +55,15 @@ export const ConclaveConfigSchema = z.object({
           avatarUrl: z.string().url().optional(),
         })
         .optional(),
+      slack: z
+        .object({
+          enabled: z.boolean().default(true),
+          webhookUrl: z.string().url().optional(),
+          username: z.string().optional(),
+          iconUrl: z.string().url().optional(),
+          iconEmoji: z.string().optional(),
+        })
+        .optional(),
     })
     .optional(),
 });

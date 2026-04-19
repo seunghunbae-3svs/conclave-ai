@@ -27,6 +27,7 @@
     "@ai-conclave/agent-openai": "workspace:*",
     "@ai-conclave/core": "workspace:*",
     "@ai-conclave/integration-discord": "workspace:*",
+    "@ai-conclave/integration-slack": "workspace:*",
     "@ai-conclave/integration-telegram": "workspace:*",
     "@ai-conclave/observability-langfuse": "workspace:*",
     "@ai-conclave/scm-github": "workspace:*",

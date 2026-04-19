@@ -146,6 +146,31 @@
     flows, response_format shape assertion, refusal throw, invalid-JSON
     throw, invalid-verdict throw, no-key constructor throw, metrics
     aggregation, pre-flight budget short-circuits the network call.
+- **`@ai-conclave/integration-slack`** — third notification surface
+  (decision #24, Block Kit format, webhook-based same as Discord):
+  - `SlackNotifier` implements `Notifier`. Posts to a Slack incoming
+    webhook using Block Kit layout (section + context + divider blocks).
+  - URL validation restricts to `https://hooks.slack.com/services/...`.
+  - Header section links to PR URL with Slack mrkdwn `<url|text>`
+    syntax when supplied.
+  - Per-agent sections show top-3 severity-sorted blockers + summary.
+  - Footer context block carries cost + episodic id.
+  - Fallback top-level `text` mirrors verdict + repo for mobile push
+    notifications (where Block Kit won't render).
+  - Slack-specific escaping for `< > &` on user-supplied strings.
+  - Auto-truncates at Slack limits: block text 2900 chars, top-level
+    text 1000 chars, ≤ 50 blocks total.
+  - CLI `integrations.slack.{enabled, webhookUrl, username, iconUrl,
+    iconEmoji}`. Env fallback: `SLACK_WEBHOOK_URL`. `iconUrl` wins over
+    `iconEmoji` when both supplied.
+  - 19 test cases across `format` (text fallback, mrkdwn link, no-
+    consensus context, special-char escape, severity-sorted top-3 +
+    `+N more`, footer cost+id, dividers bracket sections, 50-block cap,
+    no-blockers placeholder, 2900-char truncation) and `notifier`
+    (missing URL throws, non-Slack URL throws, POST + JSON shape,
+    default username, iconUrl wins + iconEmoji alone, non-200 throw
+    with body, SLACK_WEBHOOK_URL env fallback, Notifier interface
+    conformance).
 - **`@ai-conclave/integration-discord`** — second notification surface
   (decision #24, same `Notifier` pattern as Telegram):
   - `DiscordNotifier` implements `Notifier`. Posts to an incoming

@@ -16,6 +16,7 @@ import { GeminiAgent } from "@ai-conclave/agent-gemini";
 import { LangfuseMetricsSink } from "@ai-conclave/observability-langfuse";
 import { TelegramNotifier } from "@ai-conclave/integration-telegram";
 import { DiscordNotifier } from "@ai-conclave/integration-discord";
+import { SlackNotifier } from "@ai-conclave/integration-slack";
 import type { Notifier } from "@ai-conclave/core";
 import { loadConfig, resolveMemoryRoot } from "../lib/config.js";
 import { loadPrDiff, loadGitDiff, loadFileDiff, type LoadedDiff } from "../lib/diff-source.js";
@@ -218,6 +219,24 @@ export async function review(argv: string[]): Promise<void> {
         notifiers.push(new DiscordNotifier(opts));
       } catch (err) {
         process.stderr.write(`conclave review: Discord notifier init failed — ${(err as Error).message}\n`);
+      }
+    }
+  }
+  const sl = config.integrations?.slack;
+  if (sl?.enabled !== false) {
+    const hasUrl = !!(sl?.webhookUrl || process.env["SLACK_WEBHOOK_URL"]);
+    if (sl?.enabled === true && !hasUrl) {
+      process.stderr.write("conclave review: SLACK_WEBHOOK_URL not set — skipping Slack notifier\n");
+    } else if (hasUrl) {
+      const opts: ConstructorParameters<typeof SlackNotifier>[0] = {};
+      if (sl?.webhookUrl) opts.webhookUrl = sl.webhookUrl;
+      if (sl?.username) opts.username = sl.username;
+      if (sl?.iconUrl) opts.iconUrl = sl.iconUrl;
+      if (sl?.iconEmoji) opts.iconEmoji = sl.iconEmoji;
+      try {
+        notifiers.push(new SlackNotifier(opts));
+      } catch (err) {
+        process.stderr.write(`conclave review: Slack notifier init failed — ${(err as Error).message}\n`);
       }
     }
   }

@@ -12,6 +12,7 @@
     { "path": "../agent-gemini" },
     { "path": "../agent-openai" },
     { "path": "../integration-discord" },
+    { "path": "../integration-slack" },
     { "path": "../integration-telegram" },
     { "path": "../observability-langfuse" },
     { "path": "../scm-github" }
