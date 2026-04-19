@@ -5,6 +5,7 @@ import { pollOutcomesCommand } from "./commands/poll-outcomes.js";
 import { seed } from "./commands/seed.js";
 import { migrate } from "./commands/migrate.js";
 import { scores } from "./commands/scores.js";
+import { sync } from "./commands/sync.js";
 
 const HELP = `conclave — Ai-Conclave CLI
 
@@ -19,6 +20,7 @@ Commands:
   seed                  Bootstrap failure-catalog from a legacy source (default: bundled solo-cto-agent)
   migrate               Port a solo-cto-agent install over to ai-conclave (config + failure-catalog + checklist)
   scores                Show per-agent performance scores from memory (decision #19)
+  sync                  Exchange k-anonymous baseline signal with a federation endpoint (decision #21, opt-in)
   --help, -h            Show this
   --version, -v         Show version
 
@@ -66,6 +68,9 @@ export async function run(argv: string[]): Promise<void> {
       return;
     case "scores":
       await scores(rest);
+      return;
+    case "sync":
+      await sync(rest);
       return;
     default:
       process.stderr.write(`Unknown command: ${cmd}\n\n${HELP}`);

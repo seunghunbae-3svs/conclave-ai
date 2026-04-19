@@ -3,6 +3,15 @@
 ## Unreleased
 
 ### Added
+- **Federated sync skeleton (decision #21)** — `@ai-conclave/core/federated` subpath + `conclave sync` CLI command. Opt-in cross-user baseline exchange that carries ONLY category + severity + normalized tag vector + day bucket + a deterministic sha256 hash. The `lesson` text, `title`, `body`, `snippet`, `seedBlocker`, `repo`, `user`, `pattern`, and `episodicId` are stripped before anything touches the wire.
+  - `redactAnswerKey` / `redactFailure` — pure, synchronous, deterministic. Same (domain, tags) across users produce the same `contentHash`, which is the aggregation key a federation server uses for counts.
+  - `HttpFederatedSyncTransport` — thin JSON contract (`POST /baselines`, `GET /baselines?since=…`) so community aggregators can implement the endpoint without a vendor SDK. `NoopFederatedSyncTransport` for disabled/test paths.
+  - `runFederatedSync({ transport, answerKeys, failures, dryRun, since, pushDisabled, pullDisabled })` — the orchestrator. All redaction happens here; the transport never sees raw memory entries.
+  - **Default OFF.** Must set `federated.enabled = true` + `federated.endpoint = "https://…"` in `.conclaverc.json` to opt in. Optional `AI_CONCLAVE_FEDERATION_TOKEN` env var for bearer auth.
+  - `conclave sync --dry-run` prints the exact payload that would be uploaded so you can audit before opting in.
+  - Schema is v1; servers MUST reject unknown versions. Bumping the version is the breaking-change lever.
+  - 29 core tests (11 redact + 11 transport + 7 sync). Retrieval-side merge of pulled baselines is DEFERRED — no live endpoint exists yet and the read path stays local-only until one does. CLI command is wired but not test-covered yet; it's thin enough that the underlying core tests carry the guarantees.
+
 - **`@ai-conclave/platform-railway`** — completes decision #31 v2.0
   platform set (Vercel + Netlify + Railway + Cloudflare Pages +
   `deployment-status`).
