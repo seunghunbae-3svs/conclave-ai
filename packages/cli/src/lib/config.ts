@@ -79,8 +79,44 @@ export const ConclaveConfigSchema = z.object({
     .optional(),
   council: z
     .object({
+      // Legacy flat-Council knobs. Kept for backward compat — if
+      // `domains` is absent, the CLI falls back to the original
+      // 3-round flat Council with `maxRounds` + `enableDebate`.
       maxRounds: z.number().int().min(1).max(5).default(3),
       enableDebate: z.boolean().default(true),
+      /**
+       * 2-tier council config per domain (reopens decisions #7 / #26 /
+       * #28; see docs/decision-status.md). When present, overrides the
+       * flat fields above.
+       *
+       * Each domain picks its tier-1 (draft) + tier-2 (authoritative)
+       * agent lists. Design always escalates to tier-2; code escalates
+       * only when tier-1 can't reach a clean approve. `models` nests
+       * the per-agent model override per tier — defaults are sensible
+       * enough that most users leave it empty.
+       */
+      domains: z
+        .record(
+          z.enum(["code", "design"]),
+          z.object({
+            tier1: z
+              .array(z.enum(["claude", "openai", "gemini", "deepseek", "ollama", "grok"]))
+              .default([]),
+            tier2: z
+              .array(z.enum(["claude", "openai", "gemini", "deepseek", "ollama", "grok"]))
+              .default([]),
+            tier1MaxRounds: z.number().int().min(1).max(3).default(1),
+            tier2MaxRounds: z.number().int().min(1).max(3).default(2),
+            alwaysEscalate: z.boolean().default(false),
+            models: z
+              .object({
+                tier1: z.record(z.string(), z.string()).default({}),
+                tier2: z.record(z.string(), z.string()).default({}),
+              })
+              .default({ tier1: {}, tier2: {} }),
+          }),
+        )
+        .optional(),
     })
     .default({ maxRounds: 3, enableDebate: true }),
   federated: z

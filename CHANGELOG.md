@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### Changed (breaking prep — no runtime change yet)
+- **Schema prep for 2-tier council (reopens decisions #7 / #26 / #28).** This PR lays the foundation — next PRs bring the `TieredCouncil` class and CLI wiring.
+  - `ReviewContext` gains `domain: "code" | "design"` (optional; absent ≡ `"code"` for backward compat) and `tier: 1 | 2` (set by `TieredCouncil` at call time; legacy flat-Council callers leave it undefined).
+  - `ConclaveConfig.council.domains.{code,design}` — Zod schema with tier-1/tier-2 agent lists, per-tier maxRounds, `alwaysEscalate`, and optional per-tier model overrides. The legacy flat fields (`maxRounds`, `enableDebate`) stay in place as a fallback so existing `.conclaverc.json` files keep working.
+  - Dogfood `.conclaverc.json` drops `"deepseek"` from the agent list. The npm package `@conclave-ai/agent-deepseek@0.1.0` stays published (72-hour unpublish window passed, no need to burn it); users can opt it back in explicitly if they want.
+  - `docs/decision-status.md` records the reopen + the rationale + the explicit dropped items (idea domain, Deepseek default) + the trigger for a future revisit.
+
 ### Added
 - **`@conclave-ai/agent-grok` — xAI agent (decision #32).** Third v2.1 agent. OpenAI-wire-compatible; routes to `https://api.x.ai/v1` via the `openai` SDK. Default model `grok-code-fast-1` (code-tuned, cheapest at $0.20/M input, $1.50/M output); pricing table also covers `grok-3`, `grok-3-mini`, `grok-4`. `XAI_API_KEY` required. Missing key skips cleanly.
 
