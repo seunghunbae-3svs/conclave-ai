@@ -105,16 +105,21 @@ export class LangfuseMetricsSink implements MetricsSink {
    * MetricsSink.record is synchronous — we kick off the Langfuse call and
    * let the SDK queue handle delivery. Errors are swallowed to stderr so
    * observability failure never kills a running review.
+   *
+   * Captures `traceId` at call time (not inside the async `submit`) so a
+   * caller that flips `setTraceId` between records gets the correct id
+   * on each generation, not a race-y read-current value.
    */
   record(metric: CallMetric): void {
-    this.submit(metric).catch((err) => {
+    const traceIdSnapshot = this.traceId;
+    this.submit(metric, traceIdSnapshot).catch((err) => {
       process.stderr.write(
         `[langfuse] failed to record metric for ${metric.agent}/${metric.model}: ${(err as Error).message}\n`,
       );
     });
   }
 
-  private async submit(metric: CallMetric): Promise<void> {
+  private async submit(metric: CallMetric, traceId: string | undefined): Promise<void> {
     const client = await this.getClient();
     const startTime = new Date(metric.timestamp - metric.latencyMs);
     const endTime = new Date(metric.timestamp);
@@ -135,7 +140,7 @@ export class LangfuseMetricsSink implements MetricsSink {
         latencyMs: metric.latencyMs,
       },
     };
-    if (this.traceId) params.traceId = this.traceId;
+    if (traceId) params.traceId = traceId;
     const gen = client.generation(params);
     // Generations in the Langfuse SDK expect an `end()` call to finalize.
     gen.end();
