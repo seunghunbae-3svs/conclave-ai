@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+### Docs
+- **README rewrite + `docs/` directory** for public-launch readiness.
+  README now reflects actual state (18 packages, 9 CLI commands, 29/34
+  decisions implemented, 28 PRs merged) instead of the pre-alpha
+  scaffolding text it opened with.
+- `docs/getting-started.md` — zero-to-review walkthrough with env
+  vars, init, review, outcome recording, optional visual + federated
+  paths, troubleshooting.
+- `docs/configuration.md` — full `.conclaverc.json` schema reference
+  with every env var mapped to the feature it enables.
+- `docs/federated-sync.md` — the privacy model, exact wire format,
+  three independent off-switches, and an audit pointer into the four
+  files that define the entire redaction + transport flow.
+
 ### Added
 - **Council 3-round debate (decision #7)** — Council now runs up to 3 rounds of review before verdict. Round 1 is independent; rounds 2+ pass each agent the other agents' results (`ctx.priors`) so they can update their verdict on arguments they missed, or hold firm. Consensus (all approve OR any reject) triggers early exit at any point.
   - `ReviewContext` gets two optional additive fields: `round?: number` + `priors?: PriorReview[]`. Backward compat: agents that ignore them stay valid; the three in-repo agents (claude, openai, gemini) all render priors into their prompts so they actually use the debate signal.
