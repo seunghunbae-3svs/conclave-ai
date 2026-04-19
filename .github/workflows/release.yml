@@ -1,0 +1,75 @@
+name: release
+
+# Two triggers:
+#   1. workflow_dispatch — manual "ship a release" button in the Actions UI.
+#      Bumps every public package in lockstep (monorepo pre-1.0 policy) and
+#      publishes via `pnpm publish -r`.
+#   2. tag push on `v*` — for when you want to cut the tag locally and let
+#      CI handle the actual publish. Skips the version bump step since the
+#      tag is the source of truth.
+
+on:
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: "Version bump type"
+        required: true
+        default: "patch"
+        type: choice
+        options: ["patch", "minor", "major"]
+  push:
+    tags: ["v*"]
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+permissions:
+  contents: write     # push bump commit + create tag (workflow_dispatch path)
+  id-token: write     # npm provenance
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          registry-url: "https://registry.npmjs.org"
+
+      - run: pnpm install --frozen-lockfile
+
+      - run: pnpm typecheck
+      - run: pnpm build
+      - run: pnpm test
+
+      # Bump + commit + tag (workflow_dispatch path). No-op on tag-push path.
+      - name: Bump versions + commit + tag
+        if: ${{ github.event_name == 'workflow_dispatch' }}
+        env:
+          BUMP: ${{ inputs.bump }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          pnpm -r --filter "./packages/*" exec npm version "$BUMP" --no-git-tag-version
+          ROOT_VERSION=$(node -p "require('./packages/core/package.json').version")
+          git add -A
+          git commit -m "chore(release): v$ROOT_VERSION"
+          git tag "v$ROOT_VERSION"
+          git push origin HEAD:main
+          git push origin "v$ROOT_VERSION"
+
+      - name: Publish to npm
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          NPM_CONFIG_PROVENANCE: "true"
+        run: pnpm publish -r --access public --no-git-checks
