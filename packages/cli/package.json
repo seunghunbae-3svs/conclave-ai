@@ -25,6 +25,7 @@
     "@conclave-ai/agent-claude": "workspace:*",
     "@conclave-ai/agent-deepseek": "workspace:*",
     "@conclave-ai/agent-gemini": "workspace:*",
+    "@conclave-ai/agent-ollama": "workspace:*",
     "@conclave-ai/agent-openai": "workspace:*",
     "@conclave-ai/core": "workspace:*",
     "@conclave-ai/integration-discord": "workspace:*",

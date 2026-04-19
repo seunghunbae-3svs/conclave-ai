@@ -17,6 +17,7 @@ import { ClaudeAgent } from "@conclave-ai/agent-claude";
 import { OpenAIAgent } from "@conclave-ai/agent-openai";
 import { GeminiAgent } from "@conclave-ai/agent-gemini";
 import { DeepseekAgent } from "@conclave-ai/agent-deepseek";
+import { OllamaAgent } from "@conclave-ai/agent-ollama";
 import { LangfuseMetricsSink } from "@conclave-ai/observability-langfuse";
 import { TelegramNotifier } from "@conclave-ai/integration-telegram";
 import { DiscordNotifier } from "@conclave-ai/integration-discord";
@@ -178,6 +179,11 @@ export async function review(argv: string[]): Promise<void> {
         continue;
       }
       agents.push(new DeepseekAgent({ gate }));
+    } else if (id === "ollama") {
+      // Ollama has no API key; we assume a local daemon is running at
+      // OLLAMA_BASE_URL (default http://localhost:11434/v1). The user
+      // is responsible for pulling the configured model.
+      agents.push(new OllamaAgent({ gate }));
     }
   }
   if (agents.length === 0) {
