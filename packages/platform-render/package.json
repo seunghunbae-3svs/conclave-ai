@@ -1,6 +1,6 @@
 {
   "name": "@conclave-ai/platform-render",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Conclave AI Render adapter — resolve deploy URL for a commit SHA via Render's REST API.",
   "license": "MIT",
   "type": "module",
