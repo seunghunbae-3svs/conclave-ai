@@ -197,3 +197,32 @@ test("runBotOnce: getUpdates failure is surfaced as a thrown error", async () =>
     /telegram getUpdates.*401/,
   );
 });
+
+test("TelegramClient.getUpdates: passes an AbortSignal on the fetch init", async () => {
+  // We receive the fetch init and check that `signal` is present and is an
+  // AbortSignal — this is the contract that prevents the cancellation-
+  // consumes-callbacks bug (run 24634355279 on eventbadge).
+  const fetch = makeFetch([updatesResponse([])]);
+  const gh = makeGh();
+  await runBotOnce({ botToken: "t", repo: "a/b", fetch, gh, pollTimeoutSec: 0 });
+  const getUpdatesCall = fetch.calls.find((c) => c.url.includes("getUpdates"));
+  assert.ok(getUpdatesCall, "getUpdates was not called");
+  assert.ok(getUpdatesCall.init?.signal, "fetch init is missing an AbortSignal");
+  assert.equal(typeof getUpdatesCall.init.signal.aborted, "boolean", "signal doesn't look like an AbortSignal");
+});
+
+test("TelegramClient.getUpdates: translates fetch AbortError into an actionable message", async () => {
+  // Simulate a fetch that throws AbortError (e.g. because the client-side
+  // timeout fired). The caller should see a wrapped error that names what
+  // happened so the workflow log is legible, not a raw AbortError stack.
+  const fetchThatAborts = async (_url, _init) => {
+    const err = new Error("The user aborted a request.");
+    err.name = "AbortError";
+    throw err;
+  };
+  const gh = makeGh();
+  await assert.rejects(
+    () => runBotOnce({ botToken: "t", repo: "a/b", fetch: fetchThatAborts, gh, pollTimeoutSec: 0 }),
+    /aborted after \d+s without response/,
+  );
+});

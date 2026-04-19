@@ -24,7 +24,10 @@ export interface FetchResponse {
   text: () => Promise<string>;
 }
 
-export type FetchLike = (url: string, init?: { method?: string; body?: string; headers?: Record<string, string> }) => Promise<FetchResponse>;
+export type FetchLike = (
+  url: string,
+  init?: { method?: string; body?: string; headers?: Record<string, string>; signal?: AbortSignal },
+) => Promise<FetchResponse>;
 
 export interface GhResult {
   stdout: string;
