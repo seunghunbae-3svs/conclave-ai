@@ -1,7 +1,8 @@
-import { promises as fs } from "node:fs";
 import path from "node:path";
+import { cosmiconfig } from "cosmiconfig";
 import { z } from "zod";
 
+/** Canonical config file that `conclave init` writes. cosmiconfig also accepts .json / .yaml / .yml / .js / .cjs / .mjs and `conclave` fields in package.json. */
 export const CONFIG_FILENAME = ".conclaverc.json";
 
 export const ConclaveConfigSchema = z.object({
@@ -119,31 +120,63 @@ export const DEFAULT_CONFIG: ConclaveConfig = {
 };
 
 /**
- * Loads .conclaverc.json from `cwd` or any ancestor directory. Returns the
- * merged+validated config + the directory the config was found in (or
- * `cwd` if none found). Missing config → DEFAULT_CONFIG with cwd root.
+ * Cosmiconfig-powered config loader. Searches from `cwd` up to the
+ * filesystem root for any of (first hit wins):
+ *
+ *   - `package.json` with a top-level `conclave` field
+ *   - `.conclaverc` (no extension; auto-detected as JSON or YAML)
+ *   - `.conclaverc.json`
+ *   - `.conclaverc.yaml` / `.conclaverc.yml`
+ *   - `.conclaverc.js` / `.cjs` / `.mjs`
+ *   - `conclave.config.js` / `.cjs` / `.mjs`
+ *
+ * The raw config is validated against `ConclaveConfigSchema`; unknown
+ * fields raise a Zod error. Missing config returns `DEFAULT_CONFIG`
+ * with `configDir = cwd`.
  */
 export async function loadConfig(cwd: string = process.cwd()): Promise<{
   config: ConclaveConfig;
   configDir: string;
   found: boolean;
+  configPath?: string;
 }> {
-  let dir = path.resolve(cwd);
-  while (true) {
-    const candidate = path.join(dir, CONFIG_FILENAME);
-    try {
-      const raw = await fs.readFile(candidate, "utf8");
-      const parsed = ConclaveConfigSchema.parse(JSON.parse(raw));
-      return { config: parsed, configDir: dir, found: true };
-    } catch (err) {
-      const code = (err as NodeJS.ErrnoException).code;
-      if (code !== "ENOENT") throw err;
-    }
-    const parent = path.dirname(dir);
-    if (parent === dir) break;
-    dir = parent;
+  // searchStrategy "global" walks up to the filesystem root (matches the
+  // original manual walker). "project" would stop at the nearest
+  // package.json, which would miss configs placed at the workspace root
+  // above a package's own package.json.
+  //
+  // searchPlaces reorders cosmiconfig's defaults so an explicit
+  // `.conclaverc.*` wins over an incidental `conclave` field in
+  // package.json. Cosmiconfig's default puts package.json first; our
+  // users expect "if I wrote a config file, it's authoritative."
+  const explorer = cosmiconfig("conclave", {
+    searchStrategy: "global",
+    stopDir: path.parse(path.resolve(cwd)).root,
+    searchPlaces: [
+      ".conclaverc",
+      ".conclaverc.json",
+      ".conclaverc.yaml",
+      ".conclaverc.yml",
+      ".conclaverc.js",
+      ".conclaverc.cjs",
+      ".conclaverc.mjs",
+      "conclave.config.js",
+      "conclave.config.cjs",
+      "conclave.config.mjs",
+      "package.json",
+    ],
+  });
+  const result = await explorer.search(path.resolve(cwd));
+  if (!result || result.isEmpty) {
+    return { config: DEFAULT_CONFIG, configDir: cwd, found: false };
   }
-  return { config: DEFAULT_CONFIG, configDir: cwd, found: false };
+  const parsed = ConclaveConfigSchema.parse(result.config);
+  return {
+    config: parsed,
+    configDir: path.dirname(result.filepath),
+    found: true,
+    configPath: result.filepath,
+  };
 }
 
 export function resolveMemoryRoot(config: ConclaveConfig, configDir: string): string {

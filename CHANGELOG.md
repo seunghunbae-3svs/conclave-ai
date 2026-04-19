@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+### Added
+- **Cosmiconfig loader (decision #16)** — `.conclaverc.json` still works; now accepts any of `.conclaverc[.json|.yaml|.yml|.js|.cjs|.mjs]`, `conclave.config.{js,cjs,mjs}`, and a top-level `conclave` field in `package.json`. Search strategy "global" walks from cwd to filesystem root (matches the original manual walker). searchPlaces reorders cosmiconfig's defaults so an explicit rc file wins over an incidental `conclave` field in package.json. Four new loader tests (YAML, package.json field, cjs, rc-vs-package.json precedence); `docs/configuration.md` gets a Config Discovery section with YAML / JS / package.json examples.
+
 ### Docs
 - **README rewrite + `docs/` directory** for public-launch readiness.
   README now reflects actual state (18 packages, 9 CLI commands, 29/34
