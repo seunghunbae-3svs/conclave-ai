@@ -49,6 +49,27 @@ export function buildReviewPrompt(ctx: ReviewContext): string {
   sections.push(ctx.diff || "(empty diff — respond with verdict=approve, summary noting nothing to review)");
   sections.push("```");
   sections.push("");
+
+  if (ctx.priors && ctx.priors.length > 0) {
+    sections.push(`# Round ${ctx.round ?? 2} — other agents' verdicts from the previous round`);
+    sections.push(
+      `The council is in a multi-round debate. Read each agent's verdict + blockers. Update your verdict ONLY if you see a real issue you missed, or a false-positive you can now retract. Do not mirror the majority — the dissenting voice is often the correct one.`,
+    );
+    sections.push("");
+    for (const p of ctx.priors) {
+      sections.push(`## ${p.agent}: ${p.verdict}`);
+      if (p.blockers.length > 0) {
+        for (const b of p.blockers.slice(0, 5)) {
+          const loc = b.file ? ` (${b.file}${b.line ? ":" + b.line : ""})` : "";
+          sections.push(`- [${b.severity}/${b.category}] ${b.message}${loc}`);
+        }
+      } else {
+        sections.push(`- (no blockers)`);
+      }
+      sections.push("");
+    }
+  }
+
   sections.push(`Call submit_review exactly once with your verdict, blockers (if any), and a one-paragraph summary.`);
   return sections.join("\n");
 }

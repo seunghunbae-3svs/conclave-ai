@@ -76,6 +76,12 @@ export const ConclaveConfigSchema = z.object({
         .optional(),
     })
     .optional(),
+  council: z
+    .object({
+      maxRounds: z.number().int().min(1).max(5).default(3),
+      enableDebate: z.boolean().default(true),
+    })
+    .default({ maxRounds: 3, enableDebate: true }),
   federated: z
     .object({
       enabled: z.boolean().default(false),
@@ -104,6 +110,7 @@ export const DEFAULT_CONFIG: ConclaveConfig = {
   agents: ["claude"],
   budget: { perPrUsd: 0.5 },
   efficiency: { cacheEnabled: true, compactEnabled: true },
+  council: { maxRounds: 3, enableDebate: true },
   memory: {
     answerKeysDir: ".conclave/answer-keys",
     failureCatalogDir: ".conclave/failure-catalog",

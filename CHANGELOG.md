@@ -3,6 +3,14 @@
 ## Unreleased
 
 ### Added
+- **Council 3-round debate (decision #7)** — Council now runs up to 3 rounds of review before verdict. Round 1 is independent; rounds 2+ pass each agent the other agents' results (`ctx.priors`) so they can update their verdict on arguments they missed, or hold firm. Consensus (all approve OR any reject) triggers early exit at any point.
+  - `ReviewContext` gets two optional additive fields: `round?: number` + `priors?: PriorReview[]`. Backward compat: agents that ignore them stay valid; the three in-repo agents (claude, openai, gemini) all render priors into their prompts so they actually use the debate signal.
+  - `CouncilOutcome` gains two optional fields: `roundHistory?: RoundOutcome[]` + `earlyExit?: boolean`. The legacy-shape fields (`verdict`, `rounds`, `results`, `consensusReached`) are unchanged, so existing consumers (notifiers, memory writer, CLI renderer) keep working without knowing debate happened.
+  - New `Council` options: `maxRounds` (default 3, cap 5) + `enableDebate` (default true; set false to preserve legacy 1-round behavior).
+  - New config block: `council.maxRounds` + `council.enableDebate` in `.conclaverc.json`, defaults match.
+  - CLI `conclave review` renders `Rounds: N (early exit on consensus)` in the output when debate ran.
+  - 13 Council tests (up from 6) cover: early exit on round 1, full 3-round fallthrough, scripted verdict changes reaching consensus mid-debate, priors + round wiring, `enableDebate=false` preserves legacy, `maxRounds` cap, consensus-in-final-round, roundHistory shape, blockers-in-priors end-to-end.
+
 - **Federated sync skeleton (decision #21)** — `@ai-conclave/core/federated` subpath + `conclave sync` CLI command. Opt-in cross-user baseline exchange that carries ONLY category + severity + normalized tag vector + day bucket + a deterministic sha256 hash. The `lesson` text, `title`, `body`, `snippet`, `seedBlocker`, `repo`, `user`, `pattern`, and `episodicId` are stripped before anything touches the wire.
   - `redactAnswerKey` / `redactFailure` — pure, synchronous, deterministic. Same (domain, tags) across users produce the same `contentHash`, which is the aggregation key a federation server uses for counts.
   - `HttpFederatedSyncTransport` — thin JSON contract (`POST /baselines`, `GET /baselines?since=…`) so community aggregators can implement the endpoint without a vendor SDK. `NoopFederatedSyncTransport` for disabled/test paths.

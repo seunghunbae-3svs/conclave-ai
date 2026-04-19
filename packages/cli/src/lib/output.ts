@@ -9,6 +9,10 @@ export interface PrintReviewInput {
   consensus: boolean;
   results: readonly ReviewResult[];
   metrics: MetricsSummary;
+  /** Number of debate rounds executed (≥ 1). Omit for legacy 1-round flows. */
+  rounds?: number;
+  /** `true` when debate halted on consensus before reaching maxRounds. */
+  earlyExit?: boolean;
 }
 
 const SEVERITY_ORDER: Record<Blocker["severity"], number> = {
@@ -49,6 +53,10 @@ export function renderReview(input: PrintReviewInput): string {
   lines.push(`  source: ${input.source}`);
   lines.push("");
   lines.push(`Verdict: ${verdictTag(input.councilVerdict)}${input.consensus ? "" : "  (no consensus)"}`);
+  if (input.rounds && input.rounds > 1) {
+    const tail = input.earlyExit ? " (early exit on consensus)" : "";
+    lines.push(`Rounds:  ${input.rounds}${tail}`);
+  }
   lines.push("");
 
   for (const r of input.results) {

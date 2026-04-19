@@ -162,7 +162,11 @@ export async function review(argv: string[]): Promise<void> {
     process.exit(1);
     return;
   }
-  const council = new Council({ agents });
+  const council = new Council({
+    agents,
+    maxRounds: config.council.maxRounds,
+    enableDebate: config.council.enableDebate,
+  });
 
   // 5. Deliberate
   const reviewCtx: ReviewContext = {
@@ -198,6 +202,8 @@ export async function review(argv: string[]): Promise<void> {
       consensus: outcome.consensusReached,
       results: outcome.results,
       metrics: gate.metrics.summary(),
+      rounds: outcome.rounds,
+      ...(outcome.earlyExit !== undefined ? { earlyExit: outcome.earlyExit } : {}),
     }),
   );
   process.stdout.write(
