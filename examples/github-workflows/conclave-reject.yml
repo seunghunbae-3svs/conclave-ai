@@ -1,0 +1,39 @@
+# Triggered by the telegram-bot-runner when a user clicks ❌ Reject.
+# Closes the PR (without merging) and records the outcome so the
+# failure-catalog (오답지) generator picks up the blocker patterns.
+name: conclave-reject
+
+on:
+  repository_dispatch:
+    types: [conclave-reject]
+
+jobs:
+  reject:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Resolve PR + close
+        env:
+          GH_TOKEN: ${{ secrets.ORCHESTRATOR_PAT }}
+          EPISODIC: ${{ github.event.client_payload.episodic }}
+        run: |
+          set -euo pipefail
+          EP_FILE=$(grep -rl "\"id\": \"${EPISODIC}\"" .conclave/episodic 2>/dev/null | head -1)
+          PR=$(jq -r '.pullNumber' "${EP_FILE}")
+          gh pr close "${PR}" --comment "Closed via conclave Telegram callback (${{ github.event.client_payload.triggeredBy }})."
+
+      - name: Record outcome = rejected
+        env:
+          GH_TOKEN: ${{ secrets.ORCHESTRATOR_PAT }}
+        run: |
+          npx -y -p @conclave-ai/cli@latest conclave record-outcome \
+            --id ${{ github.event.client_payload.episodic }} \
+            --result rejected

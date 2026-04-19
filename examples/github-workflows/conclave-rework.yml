@@ -1,0 +1,75 @@
+# Triggered by the telegram-bot-runner when a user clicks 🔧 Rework.
+# Runs `conclave rework --episodic <id>` on the PR branch, which invokes
+# the Worker agent, applies the generated patch, and pushes back to the
+# PR branch. The pull_request:synchronize event then re-runs the council
+# review automatically.
+#
+# Copy into `.github/workflows/conclave-rework.yml`. Requires secrets:
+#   - ANTHROPIC_API_KEY : the Worker uses Claude
+#   - ORCHESTRATOR_PAT  : a PAT with contents:write (to push the fix commit)
+name: conclave-rework
+
+on:
+  repository_dispatch:
+    types: [conclave-rework]
+
+concurrency:
+  # One rework at a time per episodic — avoids two Telegram clicks racing.
+  group: conclave-rework-${{ github.event.client_payload.episodic }}
+  cancel-in-progress: false
+
+jobs:
+  rework:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: read
+    steps:
+      - name: Find the PR from the episodic
+        id: resolve
+        env:
+          GH_TOKEN: ${{ secrets.ORCHESTRATOR_PAT }}
+          EPISODIC: ${{ github.event.client_payload.episodic }}
+        run: |
+          set -euo pipefail
+          # Expect the episodic store to live at .conclave/episodic/**/ep-*.json
+          # on the default branch. Shallow-clone to find it.
+          git clone --depth 1 "https://x-access-token:${GH_TOKEN}@github.com/${{ github.repository }}.git" repo
+          cd repo
+          EP_FILE=$(grep -rl "\"id\": \"${EPISODIC}\"" .conclave/episodic 2>/dev/null | head -1 || true)
+          if [ -z "${EP_FILE}" ]; then
+            echo "::error::No episodic file found for id ${EPISODIC}"
+            exit 1
+          fi
+          PR=$(jq -r '.pullNumber' "${EP_FILE}")
+          echo "pr=${PR}" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@v4
+        with:
+          # Check out the PR branch so `conclave rework` can apply + push.
+          ref: refs/pull/${{ steps.resolve.outputs.pr }}/head
+          fetch-depth: 0
+          token: ${{ secrets.ORCHESTRATOR_PAT }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Switch to the PR's actual branch (not detached HEAD)
+        env:
+          GH_TOKEN: ${{ secrets.ORCHESTRATOR_PAT }}
+          PR: ${{ steps.resolve.outputs.pr }}
+        run: |
+          set -euo pipefail
+          BRANCH=$(gh pr view "$PR" --repo ${{ github.repository }} --json headRefName -q .headRefName)
+          git checkout -B "$BRANCH"
+          git branch --set-upstream-to="origin/${BRANCH}" "$BRANCH" || true
+
+      - name: Run conclave rework
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          GH_TOKEN: ${{ secrets.ORCHESTRATOR_PAT }}
+        run: |
+          npx -y -p @conclave-ai/cli@latest conclave rework \
+            --pr ${{ steps.resolve.outputs.pr }} \
+            --episodic ${{ github.event.client_payload.episodic }}

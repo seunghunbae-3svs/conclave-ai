@@ -1,0 +1,44 @@
+# Triggered by the telegram-bot-runner when a user clicks ✅ Approve.
+# Merges the PR and records the outcome in conclave's episodic store so
+# the answer-key (정답지) generator picks it up.
+#
+# Branch protection rules on the target PR still apply — this workflow
+# cannot force a merge past required reviews / required checks. That's
+# intentional: Telegram is a convenience, not an authorisation bypass.
+name: conclave-merge
+
+on:
+  repository_dispatch:
+    types: [conclave-merge]
+
+jobs:
+  merge:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Resolve PR + merge
+        env:
+          GH_TOKEN: ${{ secrets.ORCHESTRATOR_PAT }}
+          EPISODIC: ${{ github.event.client_payload.episodic }}
+        run: |
+          set -euo pipefail
+          EP_FILE=$(grep -rl "\"id\": \"${EPISODIC}\"" .conclave/episodic 2>/dev/null | head -1)
+          PR=$(jq -r '.pullNumber' "${EP_FILE}")
+          echo "Merging PR ${PR} on behalf of Telegram approval"
+          gh pr merge "${PR}" --squash --delete-branch
+
+      - name: Record outcome = merged
+        env:
+          GH_TOKEN: ${{ secrets.ORCHESTRATOR_PAT }}
+        run: |
+          npx -y -p @conclave-ai/cli@latest conclave record-outcome \
+            --id ${{ github.event.client_payload.episodic }} \
+            --result merged
