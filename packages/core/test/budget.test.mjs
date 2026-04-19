@@ -2,14 +2,20 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { BudgetTracker, BudgetExceededError, DEFAULT_PER_PR_BUDGET_USD } from "../dist/index.js";
 
+const APPROX = 1e-9;
+function approxEqual(a, b) {
+  return Math.abs(a - b) < APPROX;
+}
+
 test("BudgetTracker: happy path reserve + commit", () => {
   const b = new BudgetTracker({ perPrUsd: 1 });
   b.reserve(0.2);
   b.commit(0.15);
   b.reserve(0.3);
   b.commit(0.3);
-  assert.equal(b.spentUsd, 0.45);
-  assert.equal(b.remainingUsd, 0.55);
+  // JS floats: 0.15 + 0.3 ≈ 0.44999999999999996. Use tolerance, not strict eq.
+  assert.ok(approxEqual(b.spentUsd, 0.45), `expected ≈ 0.45, got ${b.spentUsd}`);
+  assert.ok(approxEqual(b.remainingUsd, 0.55), `expected ≈ 0.55, got ${b.remainingUsd}`);
 });
 
 test("BudgetTracker: reserve beyond cap throws BudgetExceededError", () => {

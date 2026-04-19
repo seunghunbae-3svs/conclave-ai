@@ -3,6 +3,8 @@ export { Council } from "./council.js";
 export type { CouncilOutcome } from "./council.js";
 export { ReviewResultSchema, BlockerSchema } from "./schema.js";
 export type { Notifier, NotifyReviewInput } from "./notifier.js";
+export { resolveFirstPreview } from "./platform.js";
+export type { Platform, PreviewResolution, ResolvePreviewInput } from "./platform.js";
 
 // Memory substrate (decision #17: 정답지 + 오답지 duality as core primitive).
 // Re-exported here for convenience; dedicated subpath at @ai-conclave/core/memory.
@@ -22,6 +24,7 @@ export {
   toFailureEntry,
   mapLegacyCategory,
   LegacyCatalogSchema,
+  retrieve,
 } from "./memory/index.js";
 export type {
   AnswerKey,
@@ -60,6 +63,7 @@ export {
   touchesRiskyPath,
   compact,
   buildRelevanceContext,
+  inferTestPath,
   DEFAULT_PER_PR_BUDGET_USD,
   DEFAULT_MODELS,
   ANTHROPIC_PROMPT_CACHE_TTL_MS,
