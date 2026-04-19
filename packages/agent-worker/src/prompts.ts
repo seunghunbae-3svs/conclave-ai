@@ -13,7 +13,8 @@ Hard rules:
 - If a blocker requires information you don't have (a file not included in the snapshots, or ambiguity about intent), skip it and note that in \`summary\`. Never invent file contents you haven't been shown.
 - If NO blocker is fixable with the information given, return an empty \`patch\` string, an empty \`filesTouched\` array, and explain in \`summary\` what the caller should gather before retrying.
 - \`commitMessage\` should be a single line (≤ 72 chars), conventional-commit style where it fits. No trailing period.
-- \`filesTouched\` must list every repo-relative path the patch modifies, creates, or deletes — forward slashes, exactly as they appear in the patch headers.`;
+- \`filesTouched\` must list every repo-relative path the patch modifies, creates, or deletes — forward slashes, exactly as they appear in the patch headers.
+- The caller applies your patch with \`git apply --recount\`, so the line counts in your \`@@ -A,B +C,D @@\` headers DO NOT need to be exact — they will be recomputed from the actual hunk content. Focus on correct \`-\`/\`+\`/context lines; don't agonise over the header numbers.`;
 
 function renderBlockers(reviews: WorkerContext["reviews"]): string {
   const lines: string[] = [];

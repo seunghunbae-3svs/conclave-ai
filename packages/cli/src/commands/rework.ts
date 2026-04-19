@@ -335,7 +335,13 @@ export async function runRework(args: ReworkArgs, deps: ReworkDeps = {}): Promis
   await writeTemp(patchPath, outcome.patch);
 
   try {
-    await git("git", ["apply", "--check", patchPath], { cwd: args.cwd });
+    // --recount lets git apply recompute the @@ hunk header line counts from
+    // the actual hunk content. LLMs (Claude, GPT, Gemini) routinely get those
+    // counts wrong — the hunk body is correct but the header claims e.g.
+    // "7 lines" when only 3 are present, which `git apply` would otherwise
+    // reject as "corrupt patch at line N". --recount is the official git
+    // option designed for exactly this case.
+    await git("git", ["apply", "--check", "--recount", patchPath], { cwd: args.cwd });
   } catch (err) {
     await removeTemp(patchPath).catch(() => undefined);
     const msg = err instanceof Error ? err.message : String(err);
@@ -343,7 +349,7 @@ export async function runRework(args: ReworkArgs, deps: ReworkDeps = {}): Promis
     return 1;
   }
 
-  await git("git", ["apply", patchPath], { cwd: args.cwd });
+  await git("git", ["apply", "--recount", patchPath], { cwd: args.cwd });
   await removeTemp(patchPath).catch(() => undefined);
 
   if (outcome.appliedFiles.length > 0) {
