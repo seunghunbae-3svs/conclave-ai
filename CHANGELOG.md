@@ -3,6 +3,33 @@
 ## Unreleased
 
 ### Added
+- **`Platform` interface in `@ai-conclave/core`** (decision #31: v2.0
+  platform set). Contract: `resolve({ repo, sha, waitSeconds? })` →
+  `{ url, provider, sha, deploymentId?, createdAt? } | null`. Missing
+  auth / no match returns null; only auth errors and 5xx throw.
+- **`resolveFirstPreview(platforms, input)`** helper — walks an ordered
+  list; first non-null wins. Hard errors on one platform are logged to
+  stderr but don't abort the walk (try the next one).
+- **`@ai-conclave/platform-vercel`** — Vercel adapter over
+  `/v6/deployments?meta-githubCommitSha=<sha>`. Picks newest READY
+  deployment. Supports `VERCEL_TOKEN` + optional `VERCEL_TEAM_ID` +
+  `VERCEL_PROJECT_ID`. `waitSeconds` polls every ~3s until deployment is
+  ready or deadline hits.
+- **`@ai-conclave/platform-netlify`** — Netlify adapter over
+  `/api/v1/sites/{siteId}/deploys` filtered by `commit_ref`. URL fallback
+  chain: `deploy_ssl_url` → `ssl_url` → `deploy_url`. Requires
+  `NETLIFY_TOKEN` + `NETLIFY_SITE_ID`.
+- 25 test cases across core (`resolveFirstPreview`: first-wins,
+  throwing-platform-does-not-abort, all-null, empty list), Vercel (12:
+  missing token throws, empty result → null, newest READY wins,
+  BUILDING filtered, https-prefix passthrough, 401 throws, 5xx throws,
+  404 null, teamId + projectId query params, bearer auth, waitSeconds
+  polls until READY), and Netlify (9: missing token/siteId throws,
+  newest ready matching commit_ref, non-matching ref filtered,
+  non-ready filtered, URL fallback chain, bearer + siteId in URL, 401
+  throws, 404 null).
+
+### Added
 - Monorepo skeleton (pnpm workspaces + turbo).
 - `@ai-conclave/core`: `Agent` / `Council` interfaces + Zod schemas.
 - `@ai-conclave/agent-claude`: Claude agent skeleton implementing `Agent`.
