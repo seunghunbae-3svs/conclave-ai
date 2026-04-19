@@ -131,7 +131,59 @@ Optional `AI_CONCLAVE_FEDERATION_TOKEN` env for bearer auth.
 
 ## Config discovery
 
-`loadConfig(cwd)` walks up from `cwd` looking for `.conclaverc.json`.
-When found, the file is Zod-validated against the schema above — any
-unknown field is rejected. When not found, `DEFAULT_CONFIG` is used
-silently.
+`loadConfig(cwd)` uses [cosmiconfig](https://github.com/cosmiconfig/cosmiconfig)
+to walk up from `cwd` looking for (in order; first hit wins):
+
+1. `.conclaverc` (auto-detected JSON or YAML)
+2. `.conclaverc.json`
+3. `.conclaverc.yaml` / `.conclaverc.yml`
+4. `.conclaverc.js` / `.cjs` / `.mjs`
+5. `conclave.config.js` / `.cjs` / `.mjs`
+6. `package.json` with a top-level `"conclave"` field
+
+The ordering is deliberate: an explicit `.conclaverc.*` file wins over
+an incidental `conclave` field in `package.json`. Cosmiconfig's default
+puts `package.json` first; we override that so users can keep the rc
+file authoritative.
+
+The resolved config is Zod-validated against the schema above — any
+unknown field is rejected. When nothing is found, `DEFAULT_CONFIG` is
+used silently.
+
+### YAML example
+
+```yaml
+# .conclaverc.yaml
+version: 1
+agents:
+  - claude
+  - openai
+budget:
+  perPrUsd: 0.5
+council:
+  maxRounds: 3
+```
+
+### JS example (dynamic config)
+
+```js
+// conclave.config.js
+module.exports = {
+  version: 1,
+  agents: process.env.CI ? ["claude"] : ["claude", "openai", "gemini"],
+  budget: { perPrUsd: process.env.CI ? 0.2 : 1.0 },
+};
+```
+
+### package.json example
+
+```json
+{
+  "name": "my-app",
+  "version": "1.0.0",
+  "conclave": {
+    "version": 1,
+    "agents": ["claude"]
+  }
+}
+```

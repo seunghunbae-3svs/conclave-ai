@@ -98,3 +98,77 @@ test("resolveMemoryRoot: absolute path passes through", () => {
   const root = resolveMemoryRoot({ ...DEFAULT_CONFIG, memory: { ...DEFAULT_CONFIG.memory, root: abs } }, "/other/dir");
   assert.equal(root, abs);
 });
+
+test("loadConfig: reads .conclaverc.yaml (cosmiconfig YAML support)", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "aic-cli-cfg-"));
+  try {
+    fs.writeFileSync(
+      path.join(dir, ".conclaverc.yaml"),
+      "version: 1\nagents:\n  - claude\nbudget:\n  perPrUsd: 0.75\n",
+    );
+    const { config, found, configPath } = await loadConfig(dir);
+    assert.equal(found, true);
+    assert.equal(config.budget.perPrUsd, 0.75);
+    assert.ok(configPath.endsWith(".conclaverc.yaml"));
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("loadConfig: reads `conclave` field in package.json", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "aic-cli-cfg-"));
+  try {
+    fs.writeFileSync(
+      path.join(dir, "package.json"),
+      JSON.stringify({
+        name: "some-project",
+        version: "1.0.0",
+        conclave: { version: 1, agents: ["openai"], budget: { perPrUsd: 1.5 } },
+      }),
+    );
+    const { config, found } = await loadConfig(dir);
+    assert.equal(found, true);
+    assert.deepEqual(config.agents, ["openai"]);
+    assert.equal(config.budget.perPrUsd, 1.5);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("loadConfig: reads .conclaverc.cjs module", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "aic-cli-cfg-"));
+  try {
+    fs.writeFileSync(
+      path.join(dir, ".conclaverc.cjs"),
+      "module.exports = { version: 1, agents: ['gemini'] };\n",
+    );
+    const { config, found } = await loadConfig(dir);
+    assert.equal(found, true);
+    assert.deepEqual(config.agents, ["gemini"]);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("loadConfig: .conclaverc.json wins over package.json when both present (cosmiconfig default order)", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "aic-cli-cfg-"));
+  try {
+    fs.writeFileSync(
+      path.join(dir, "package.json"),
+      JSON.stringify({
+        name: "x",
+        version: "1.0.0",
+        conclave: { version: 1, budget: { perPrUsd: 99 } },
+      }),
+    );
+    fs.writeFileSync(
+      path.join(dir, CONFIG_FILENAME),
+      JSON.stringify({ version: 1, budget: { perPrUsd: 0.1 } }),
+    );
+    const { config, configPath } = await loadConfig(dir);
+    assert.equal(config.budget.perPrUsd, 0.1);
+    assert.ok(configPath.endsWith(CONFIG_FILENAME));
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
