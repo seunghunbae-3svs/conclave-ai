@@ -3,6 +3,24 @@
 ## Unreleased
 
 ### Added
+- **`@ai-conclave/platform-cloudflare`** — Cloudflare Pages adapter via
+  `GET /accounts/{id}/pages/projects/{name}/deployments`. Filters
+  client-side by `deployment_trigger.metadata.commit_hash`; picks newest
+  `latest_stage.status: "success"`. URL-encodes project name for
+  projects with spaces. API `success: false` → throw with first error
+  message. Env: `CLOUDFLARE_API_TOKEN` + `CLOUDFLARE_ACCOUNT_ID` +
+  `CLOUDFLARE_PROJECT_NAME`.
+- **`@ai-conclave/platform-deployment-status`** — generic GitHub
+  Deployments API adapter. Works with **any** host that posts back to
+  GitHub (Render / Fly / Railway / Replit / Docker / custom CI) without
+  a dedicated package. Uses `gh api /repos/{repo}/deployments?sha=<sha>`
+  then resolves each candidate's status. Picks newest in an accepted
+  state (default `["success"]`). URL fallback chain:
+  `environment_url` → `target_url`. Optional `environment` filter.
+  Intended LAST in platform chain — dedicated adapters come first.
+- 19 test cases across Cloudflare + deployment-status covering env
+  validation, commit matching, state filtering, URL fallback, newest-
+  wins, error surfaces, URL encoding, empty results.
 - **`@ai-conclave/visual-review`** — before/after visual diff package
   (decision #15 partial — pixelmatch default; odiff for v2.x speed
   upgrade):
