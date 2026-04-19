@@ -1,0 +1,111 @@
+{
+  "version": 1,
+  "updated_at": "2026-04-13",
+  "items": [
+    {
+      "id": "ERR-001",
+      "category": "build",
+      "pattern": "Module not found",
+      "description": "Import path missing or dependency not installed.",
+      "fix": "Verify file path or install missing dependency."
+    },
+    {
+      "id": "ERR-002",
+      "category": "build",
+      "pattern": "prisma generate did not create",
+      "description": "Prisma client not generated or output path mismatched.",
+      "fix": "Run prisma generate and confirm output path."
+    },
+    {
+      "id": "ERR-003",
+      "category": "build",
+      "pattern": "@apply unknown utility",
+      "description": "Tailwind config mismatch or wrong version syntax.",
+      "fix": "Verify Tailwind version and update @apply usage."
+    },
+    {
+      "id": "ERR-004",
+      "category": "deploy",
+      "pattern": "Build completed in 14ms",
+      "description": "Wrong root directory or build command skipped real build.",
+      "fix": "Check project root and build command configuration."
+    },
+    {
+      "id": "ERR-005",
+      "category": "deploy",
+      "pattern": "No output directory found",
+      "description": "Build output directory not produced or misconfigured.",
+      "fix": "Confirm framework preset and output directory."
+    },
+    {
+      "id": "ERR-006",
+      "category": "runtime",
+      "pattern": "NEXTAUTH_URL is not set",
+      "description": "Auth runtime missing required environment variable.",
+      "fix": "Set NEXTAUTH_URL and redeploy."
+    },
+    {
+      "id": "ERR-007",
+      "category": "runtime",
+      "pattern": "PrismaClientInitializationError",
+      "description": "DB connection or schema mismatch at runtime.",
+      "fix": "Verify DATABASE_URL and schema compatibility."
+    },
+    {
+      "id": "ERR-008",
+      "category": "runtime",
+      "pattern": "Cannot find module '/var/task'",
+      "description": "Serverless packaging missing build artifacts.",
+      "fix": "Ensure build output is included in deployment."
+    },
+    {
+      "id": "ERR-009",
+      "category": "build",
+      "pattern": "Type error: Route .* does not match",
+      "description": "Next.js App Router page/layout type mismatch after upgrade.",
+      "fix": "Update page component signature to match expected Next.js types."
+    },
+    {
+      "id": "ERR-010",
+      "category": "build",
+      "pattern": "Cannot find module 'next/headers'",
+      "description": "Server-only import used in client component.",
+      "fix": "Add 'use server' directive or move import to server component."
+    },
+    {
+      "id": "ERR-011",
+      "category": "deploy",
+      "pattern": "FUNCTION_INVOCATION_TIMEOUT",
+      "description": "Serverless function exceeded execution time limit.",
+      "fix": "Check for missing await, large DB queries, or increase timeout in vercel.json."
+    },
+    {
+      "id": "ERR-012",
+      "category": "deploy",
+      "pattern": "Edge Runtime is not supported",
+      "description": "Package uses Node.js APIs not available in Edge Runtime.",
+      "fix": "Switch to nodejs runtime in route config or replace incompatible package."
+    },
+    {
+      "id": "ERR-013",
+      "category": "runtime",
+      "pattern": "relation .* does not exist",
+      "description": "Database table missing — migration not applied or wrong schema.",
+      "fix": "Run pending migrations or verify DATABASE_URL points to correct database."
+    },
+    {
+      "id": "ERR-014",
+      "category": "runtime",
+      "pattern": "JWT_SESSION_ERROR",
+      "description": "NextAuth session token invalid or NEXTAUTH_SECRET changed.",
+      "fix": "Verify NEXTAUTH_SECRET matches across environments. Clear cookies if rotated."
+    },
+    {
+      "id": "ERR-015",
+      "category": "build",
+      "pattern": "Conflicting peer dependency",
+      "description": "npm install fails due to incompatible package version requirements.",
+      "fix": "Check which packages conflict, pin compatible versions, or use --legacy-peer-deps as last resort."
+    }
+  ]
+}

@@ -32,3 +32,13 @@ export type {
 
 export { RuleBasedClassifier, newEpisodicId } from "./classifier.js";
 export type { Classifier, ClassificationOutput, OutcomeResult } from "./classifier.js";
+
+export {
+  LegacyEntrySchema,
+  LegacyCatalogSchema,
+  mapLegacyCategory,
+  toFailureEntry,
+  seedFromLegacyCatalog,
+  seedFromLegacyCatalogPath,
+} from "./seeder.js";
+export type { LegacyEntry, LegacyCatalog, SeedOptions, SeedResult, NewFailureCategory } from "./seeder.js";

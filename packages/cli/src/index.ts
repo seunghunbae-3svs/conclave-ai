@@ -2,6 +2,7 @@ import { init } from "./commands/init.js";
 import { review } from "./commands/review.js";
 import { recordOutcome } from "./commands/record-outcome.js";
 import { pollOutcomesCommand } from "./commands/poll-outcomes.js";
+import { seed } from "./commands/seed.js";
 
 const HELP = `conclave — Ai-Conclave CLI
 
@@ -13,6 +14,7 @@ Commands:
   review                Run a council review on the current branch
   record-outcome        Record a PR's merge/reject/rework outcome manually
   poll-outcomes         Auto-classify pending reviews against live GitHub PR state
+  seed                  Bootstrap failure-catalog from a legacy source (default: bundled solo-cto-agent)
   --help, -h            Show this
   --version, -v         Show version
 
@@ -21,6 +23,7 @@ Examples:
   conclave review --pr 42
   conclave record-outcome --id ep-... --result merged
   conclave poll-outcomes                 # cron-friendly automatic outcome capture
+  conclave seed                           # one-time bootstrap from the bundled solo-cto-agent catalog
 `;
 
 export async function run(argv: string[]): Promise<void> {
@@ -48,6 +51,9 @@ export async function run(argv: string[]): Promise<void> {
       return;
     case "poll-outcomes":
       await pollOutcomesCommand(rest);
+      return;
+    case "seed":
+      await seed(rest);
       return;
     default:
       process.stderr.write(`Unknown command: ${cmd}\n\n${HELP}`);

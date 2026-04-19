@@ -17,6 +17,11 @@ export {
   OutcomeWriter,
   RuleBasedClassifier,
   newEpisodicId,
+  seedFromLegacyCatalog,
+  seedFromLegacyCatalogPath,
+  toFailureEntry,
+  mapLegacyCategory,
+  LegacyCatalogSchema,
 } from "./memory/index.js";
 export type {
   AnswerKey,
@@ -33,6 +38,11 @@ export type {
   Classifier,
   ClassificationOutput,
   OutcomeResult,
+  LegacyEntry,
+  LegacyCatalog,
+  SeedOptions,
+  SeedResult,
+  NewFailureCategory,
 } from "./memory/index.js";
 
 // Efficiency Gate (decision #22: first-class from day 1) — every LLM call

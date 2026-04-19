@@ -146,6 +146,39 @@
     flows, response_format shape assertion, refusal throw, invalid-JSON
     throw, invalid-verdict throw, no-key constructor throw, metrics
     aggregation, pre-flight budget short-circuits the network call.
+- **Legacy failure-catalog seeding** (decision #18: port solo-cto-agent's
+  `failure-catalog.json` directly; do not start from zero):
+  - `LegacyCatalogSchema` + `LegacyEntrySchema` (Zod) validate the
+    solo-cto-agent shape.
+  - `mapLegacyCategory` — heuristic mapper from free-form legacy
+    category + pattern + description to the 11 canonical enum values.
+    Priority-ordered regex: type-error → missing-test → schema-drift →
+    security → accessibility → contrast → performance → dead-code →
+    regression → api-misuse → other.
+  - `toFailureEntry(legacy, opts)` produces a canonical `FailureEntry`
+    with a stable `id` (`fc-legacy-<legacyId>-<hash>` keyed on pattern),
+    tags = `[legacyCategory, "legacy", "solo-cto-agent"]` by default,
+    body = `<description> Fix: <fix>`.
+  - `seedFromLegacyCatalog(rawJson, store, opts)` parses + derives +
+    writes. `{ write: false }` returns entries without touching the
+    store. `createdAt` inherits the catalog's `updated_at` normalized to
+    ISO (YYYY-MM-DD → `T00:00:00.000Z`).
+  - `seedFromLegacyCatalogPath(path, store, opts)` reads from disk.
+  - **Bundled catalog** — `packages/core/src/memory/seeds/solo-cto-agent-failure-catalog.json`
+    ships with `@ai-conclave/core`. Post-build script
+    (`scripts/copy-seeds.mjs`) mirrors `src/memory/seeds/` →
+    `dist/memory/seeds/` since tsc does not copy non-TS files.
+  - **New CLI command `conclave seed [--from <path>]`** — zero-config
+    seeding from the bundled catalog, or custom path. Prints
+    per-category count (type-error=X, schema-drift=Y, ...) for auditing.
+  - 15 test cases (`seeder.test.mjs`): 7 mapping rules (type-error,
+    schema-drift, performance, dead-code, security, api-misuse, other
+    fallback), id stability across calls, tag merge with legacy
+    category + extras, body format, LegacyCatalogSchema accepts real
+    shape + rejects wrong version, write round-trip + byCategory
+    correctness, `{ write: false }` no-op, createdAt normalization from
+    YYYY-MM-DD to ISO, bundled catalog smoke test (15 entries all tagged
+    "solo-cto-agent").
 - **`@ai-conclave/integration-telegram`** — first notification surface
   (decision #24 — Telegram / Discord / Slack / Email are equal-weight;
   none is hero):

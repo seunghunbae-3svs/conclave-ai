@@ -23,10 +23,11 @@
   "files": [
     "dist",
     "src",
+    "scripts",
     "README.md"
   ],
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "tsc -p tsconfig.json && node scripts/copy-seeds.mjs",
     "dev": "tsc -p tsconfig.json --watch",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "node --test --experimental-test-coverage test/*.test.mjs",
