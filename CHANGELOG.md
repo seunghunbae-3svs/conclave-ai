@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### Added
+- **`@conclave-ai/core/guards` — `LoopGuard` + `CircuitBreaker` (architecture spec layer 3, now shipped).** Two in-memory primitives with clock-injection for tests:
+  - **`LoopGuard`** — bounded-frequency counter on `(repo, pr, sha)` or any user-chosen key. Throws `LoopDetectedError` when the same key is reviewed more than `threshold` times inside a rolling `windowMs`. Defaults: threshold 5, window 60 min. Prevents the "rework → re-review → rework → …" loop that'll happen once the Worker/Rework agent lands (planned).
+  - **`CircuitBreaker`** — per-provider consecutive-failure counter with cooldown. Wrap each external call with `breaker.guard(providerId, fn)`. After `failureThreshold` consecutive failures (default 3), refuses calls for `cooldownMs` (default 5 min) with `CircuitOpenError`. Success between failures resets the counter. Half-open on next call after cooldown. Providers track independently — Gemini 429 doesn't throttle Claude + OpenAI. Complements the `Promise.allSettled` fix in PR #53: allSettled survives one-round failures; CircuitBreaker stops repeated offenders before they burn budget.
+  - Neither wired into Council / EfficiencyGate by default — callers opt-in through the orchestrator template. Keeps primitives unit-testable and the gate free of deployment-shape assumptions.
+  - 13 tests: threshold math, rolling-window eviction, independent keys/providers, diagnostic error fields, cooldown expiry → half-open → re-open path.
+
 ### Changed
 - **Telegram notification rewritten for non-developer readability (dogfood feedback).** The old per-agent wall-of-technical-jargon format buried the actual action items in paragraphs and repeated the same file:line blocker once per agent. New format:
   - **Plain-language verdict label** — `APPROVE` / `REWORK` / `REJECT` → `Approved` / `Needs changes` / `Rejected`.

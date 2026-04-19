@@ -3,6 +3,8 @@ export { Council } from "./council.js";
 export type { CouncilOutcome, CouncilOptions, RoundOutcome } from "./council.js";
 export { TieredCouncil } from "./tiered-council.js";
 export type { TieredCouncilOptions, TieredCouncilOutcome } from "./tiered-council.js";
+export { LoopGuard, CircuitBreaker, LoopDetectedError, CircuitOpenError } from "./guards.js";
+export type { LoopGuardOptions, CircuitBreakerOptions } from "./guards.js";
 export { ReviewResultSchema, BlockerSchema } from "./schema.js";
 export type { Notifier, NotifyReviewInput } from "./notifier.js";
 export { resolveFirstPreview } from "./platform.js";
