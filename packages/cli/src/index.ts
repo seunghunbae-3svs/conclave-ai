@@ -6,6 +6,7 @@ import { seed } from "./commands/seed.js";
 import { migrate } from "./commands/migrate.js";
 import { scores } from "./commands/scores.js";
 import { sync } from "./commands/sync.js";
+import { mcpServer } from "./commands/mcp-server.js";
 
 const HELP = `conclave — Ai-Conclave CLI
 
@@ -21,6 +22,7 @@ Commands:
   migrate               Port a solo-cto-agent install over to ai-conclave (config + failure-catalog + checklist)
   scores                Show per-agent performance scores from memory (decision #19)
   sync                  Exchange k-anonymous baseline signal with a federation endpoint (decision #21, opt-in)
+  mcp-server            Run an MCP stdio server exposing conclave's memory to Claude Desktop / Cursor / Windsurf (decision #11)
   --help, -h            Show this
   --version, -v         Show version
 
@@ -71,6 +73,9 @@ export async function run(argv: string[]): Promise<void> {
       return;
     case "sync":
       await sync(rest);
+      return;
+    case "mcp-server":
+      await mcpServer(rest);
       return;
     default:
       process.stderr.write(`Unknown command: ${cmd}\n\n${HELP}`);
