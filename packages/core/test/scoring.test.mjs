@@ -43,7 +43,7 @@ test("AGENT_SCORE_WEIGHTS sum to 1.0 per decision #19", () => {
     AGENT_SCORE_WEIGHTS.reviewApproval +
     AGENT_SCORE_WEIGHTS.time +
     AGENT_SCORE_WEIGHTS.rework;
-  assert.equal(sum, 1.0);
+  assert.ok(Math.abs(sum - 1.0) < 1e-9, `weights sum to ${sum}, expected 1.0`);
 });
 
 test("computeAgentScore: empty episodic history → score 0, all components null", () => {

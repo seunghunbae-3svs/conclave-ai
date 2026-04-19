@@ -91,8 +91,15 @@ export class PixelmatchDiff implements VisualDiff {
 function padToSize(source: PNG, targetWidth: number, targetHeight: number): PNG {
   if (source.width === targetWidth && source.height === targetHeight) return source;
   const padded = new PNG({ width: targetWidth, height: targetHeight });
-  // Fill with transparent black; pixelmatch will see it as "different".
-  padded.data.fill(0);
+  // Opaque magenta (255,0,255,255) — pixelmatch blends transparent pixels with a
+  // white background, so `fill(0)` would read as white and collapse to zero diff.
+  // Opaque magenta is unlikely to appear in real UI and registers as a real diff.
+  for (let i = 0; i < padded.data.length; i += 4) {
+    padded.data[i] = 255;
+    padded.data[i + 1] = 0;
+    padded.data[i + 2] = 255;
+    padded.data[i + 3] = 255;
+  }
   for (let y = 0; y < source.height; y += 1) {
     for (let x = 0; x < source.width; x += 1) {
       const sIdx = (source.width * y + x) << 2;

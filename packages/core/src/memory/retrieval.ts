@@ -72,10 +72,15 @@ function scoreDoc<T>(
   }
   let score = overlap / Math.sqrt(queryTokens.length * dTokens.length);
 
+  const tagSet = new Set(extract.tags(doc).map((t) => t.toLowerCase()));
+  let tagHits = 0;
+  for (const t of qTf.keys()) if (tagSet.has(t)) tagHits += 1;
+
+  if (score === 0 && tagHits > 0) {
+    score = tagHits / queryTokens.length;
+  }
+
   if (score > 0) {
-    const tagSet = new Set(extract.tags(doc).map((t) => t.toLowerCase()));
-    let tagHits = 0;
-    for (const t of qTf.keys()) if (tagSet.has(t)) tagHits += 1;
     if (tagHits > 0) score *= opts.tagBoost;
 
     if (queryRepo && extract.repo) {

@@ -18,7 +18,11 @@ function solidPng(w, h, c = [200, 200, 200, 255]) {
 }
 
 function fixedPlatform(id, result) {
-  return { id, displayName: id, resolve: async () => result };
+  return {
+    id,
+    displayName: id,
+    resolve: async (input) => (result && result.sha === input.sha ? result : null),
+  };
 }
 
 function stubCapture(screenshots) {
