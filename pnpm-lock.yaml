@@ -57,6 +57,19 @@ importers:
         specifier: ^5.7.0
         version: 5.9.3
 
+  packages/agent-grok:
+    dependencies:
+      '@conclave-ai/core':
+        specifier: workspace:*
+        version: link:../core
+      openai:
+        specifier: ^4.76.0
+        version: 4.104.0(ws@8.20.0)(zod@3.25.76)
+    devDependencies:
+      typescript:
+        specifier: ^5.7.0
+        version: 5.9.3
+
   packages/agent-ollama:
     dependencies:
       '@conclave-ai/core':
@@ -94,6 +107,9 @@ importers:
       '@conclave-ai/agent-gemini':
         specifier: workspace:*
         version: link:../agent-gemini
+      '@conclave-ai/agent-grok':
+        specifier: workspace:*
+        version: link:../agent-grok
       '@conclave-ai/agent-ollama':
         specifier: workspace:*
         version: link:../agent-ollama

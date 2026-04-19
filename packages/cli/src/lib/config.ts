@@ -7,7 +7,7 @@ export const CONFIG_FILENAME = ".conclaverc.json";
 
 export const ConclaveConfigSchema = z.object({
   version: z.literal(1),
-  agents: z.array(z.enum(["claude", "openai", "gemini", "deepseek", "ollama"])).default(["claude"]),
+  agents: z.array(z.enum(["claude", "openai", "gemini", "deepseek", "ollama", "grok"])).default(["claude"]),
   budget: z
     .object({
       perPrUsd: z.number().positive(),

@@ -11,6 +11,7 @@
     { "path": "../agent-claude" },
     { "path": "../agent-deepseek" },
     { "path": "../agent-gemini" },
+    { "path": "../agent-grok" },
     { "path": "../agent-ollama" },
     { "path": "../agent-openai" },
     { "path": "../integration-discord" },
