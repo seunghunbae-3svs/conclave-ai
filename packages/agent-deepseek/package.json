@@ -21,7 +21,7 @@
     "build": "tsc -p tsconfig.json",
     "dev": "tsc -p tsconfig.json --watch",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "node --test --experimental-test-coverage test/*.test.mjs",
+    "test": "node --test test/*.test.mjs",
     "clean": "rm -rf dist .tsbuildinfo"
   },
   "dependencies": {
