@@ -1,6 +1,7 @@
 import { init } from "./commands/init.js";
 import { review } from "./commands/review.js";
 import { recordOutcome } from "./commands/record-outcome.js";
+import { rework } from "./commands/rework.js";
 import { pollOutcomesCommand } from "./commands/poll-outcomes.js";
 import { seed } from "./commands/seed.js";
 import { migrate } from "./commands/migrate.js";
@@ -16,6 +17,7 @@ Usage:
 Commands:
   init                  Set up conclave in the current repo (config + skeleton)
   review                Run a council review on the current branch
+  rework                Apply a worker-generated patch for a pending council "rework" verdict
   record-outcome        Record a PR's merge/reject/rework outcome manually
   poll-outcomes         Auto-classify pending reviews against live GitHub PR state
   seed                  Bootstrap failure-catalog from a legacy source (default: bundled solo-cto-agent)
@@ -29,6 +31,7 @@ Commands:
 Examples:
   conclave init
   conclave review --pr 42 --visual
+  conclave rework --pr 42                 # apply worker patch for the latest pending review on PR 42
   conclave record-outcome --id ep-... --result merged
   conclave poll-outcomes                 # cron-friendly automatic outcome capture
   conclave seed                           # one-time bootstrap from the bundled solo-cto-agent catalog
@@ -55,6 +58,9 @@ export async function run(argv: string[]): Promise<void> {
       return;
     case "review":
       await review(rest);
+      return;
+    case "rework":
+      await rework(rest);
       return;
     case "record-outcome":
       await recordOutcome(rest);
