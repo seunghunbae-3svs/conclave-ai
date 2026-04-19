@@ -11,6 +11,10 @@ work — you almost never run `npm publish` locally.
 - Workflow permissions: `Settings → Actions → General → Workflow
   permissions` set to **Read and write** (needed for the commit + tag
   the workflow pushes back to `main`).
+- Manual (`workflow_dispatch`) runs are **gated to `main`**. The
+  workflow fails fast with an actionable error if dispatched from a
+  feature branch — guards against accidentally pushing that branch
+  into `main` via the release pipeline.
 
 ## Option A — Ship from the GitHub UI (recommended)
 

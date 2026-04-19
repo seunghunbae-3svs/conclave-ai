@@ -21,6 +21,12 @@ on:
     tags: ["v*"]
 
 concurrency:
+  # `cancel-in-progress: false` is deliberate. A running release has
+  # already started publishing npm tarballs; killing it mid-flight
+  # leaves the registry in a split state (some packages on the new
+  # version, some on the old). With `false`, the second trigger queues
+  # until the first finishes — the GitHub Actions concurrency group
+  # only keeps at most one pending run, so there is no race.
   group: release
   cancel-in-progress: false
 
@@ -52,21 +58,42 @@ jobs:
       - run: pnpm build
       - run: pnpm test
 
+      # workflow_dispatch must run on main — protects against accidentally
+      # pushing a feature branch into main via the release pipeline.
+      - name: Require main branch for manual runs
+        if: ${{ github.event_name == 'workflow_dispatch' && github.ref != 'refs/heads/main' }}
+        run: |
+          echo "::error::release workflow_dispatch must run on 'main', got ${{ github.ref }}"
+          exit 1
+
       # Bump + commit + tag (workflow_dispatch path). No-op on tag-push path.
       - name: Bump versions + commit + tag
         if: ${{ github.event_name == 'workflow_dispatch' }}
         env:
           BUMP: ${{ inputs.bump }}
         run: |
+          set -euo pipefail
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           pnpm -r --filter "./packages/*" exec npm version "$BUMP" --no-git-tag-version
           ROOT_VERSION=$(node -p "require('./packages/core/package.json').version")
-          git add -A
-          git commit -m "chore(release): v$ROOT_VERSION"
-          git tag "v$ROOT_VERSION"
-          git push origin HEAD:main
-          git push origin "v$ROOT_VERSION"
+          # Idempotent: only commit when there are actual changes (covers
+          # pnpm no-op re-runs and manual-bump recoveries).
+          if git diff --cached --quiet && git diff --quiet; then
+            echo "No version changes staged. Nothing to commit."
+          else
+            git add -A
+            git commit -m "chore(release): v$ROOT_VERSION"
+            git push origin HEAD:main
+          fi
+          # Idempotent tag — don't fail if the tag already exists on a
+          # re-run of the same version.
+          if git rev-parse -q --verify "refs/tags/v$ROOT_VERSION" >/dev/null; then
+            echo "Tag v$ROOT_VERSION already exists; skipping create + push."
+          else
+            git tag "v$ROOT_VERSION"
+            git push origin "v$ROOT_VERSION"
+          fi
 
       - name: Publish to npm
         env:
