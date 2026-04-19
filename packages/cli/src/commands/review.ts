@@ -319,7 +319,7 @@ export async function review(argv: string[]): Promise<void> {
     } else {
       try {
         const platformIds: PlatformId[] =
-          config.visual?.platforms ?? ["vercel", "netlify", "cloudflare", "deployment-status"];
+          config.visual?.platforms ?? ["vercel", "netlify", "cloudflare", "railway", "deployment-status"];
         const { platforms, skipped } = await buildPlatforms(platformIds);
         for (const sk of skipped) {
           process.stderr.write(`conclave review: visual platform "${sk.id}" skipped — ${sk.reason}\n`);

@@ -26,15 +26,17 @@ test("buildPlatforms: no env → all platforms except deployment-status skipped"
       CLOUDFLARE_API_TOKEN: null,
       CLOUDFLARE_ACCOUNT_ID: null,
       CLOUDFLARE_PROJECT_NAME: null,
+      RAILWAY_API_TOKEN: null,
+      RAILWAY_PROJECT_ID: null,
     },
     async () => {
-      const out = await buildPlatforms(["vercel", "netlify", "cloudflare", "deployment-status"]);
+      const out = await buildPlatforms(["vercel", "netlify", "cloudflare", "railway", "deployment-status"]);
       // deployment-status has no env requirement — always resolves
       assert.equal(out.platforms.length, 1);
       assert.equal(out.platforms[0].id, "deployment-status");
-      assert.equal(out.skipped.length, 3);
+      assert.equal(out.skipped.length, 4);
       const skippedIds = out.skipped.map((s) => s.id);
-      assert.deepEqual(skippedIds.sort(), ["cloudflare", "netlify", "vercel"]);
+      assert.deepEqual(skippedIds.sort(), ["cloudflare", "netlify", "railway", "vercel"]);
     },
   );
 });
@@ -92,6 +94,20 @@ test("buildPlatforms: Cloudflare needs all three envs", async () => {
       assert.equal(out.platforms.length, 1);
     },
   );
+});
+
+test("buildPlatforms: Railway needs BOTH token + projectId", async () => {
+  await withEnv({ RAILWAY_API_TOKEN: "t", RAILWAY_PROJECT_ID: null }, async () => {
+    const out = await buildPlatforms(["railway"]);
+    assert.equal(out.platforms.length, 0);
+    assert.equal(out.skipped.length, 1);
+    assert.match(out.skipped[0].reason, /PROJECT_ID/);
+  });
+  await withEnv({ RAILWAY_API_TOKEN: "t", RAILWAY_PROJECT_ID: "proj" }, async () => {
+    const out = await buildPlatforms(["railway"]);
+    assert.equal(out.platforms.length, 1);
+    assert.equal(out.platforms[0].id, "railway");
+  });
 });
 
 test("buildPlatforms: deployment-status has no env requirement", async () => {

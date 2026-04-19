@@ -1,6 +1,6 @@
 import type { Platform } from "@ai-conclave/core";
 
-export type PlatformId = "vercel" | "netlify" | "cloudflare" | "deployment-status";
+export type PlatformId = "vercel" | "netlify" | "cloudflare" | "railway" | "deployment-status";
 
 export interface PlatformFactoryResult {
   platforms: Platform[];
@@ -61,6 +61,19 @@ export async function buildPlatforms(
         const mod = await import("@ai-conclave/platform-cloudflare");
         try {
           platforms.push(new mod.CloudflarePlatform());
+        } catch (err) {
+          skipped.push({ id, reason: (err as Error).message });
+        }
+        break;
+      }
+      case "railway": {
+        if (!process.env["RAILWAY_API_TOKEN"] || !process.env["RAILWAY_PROJECT_ID"]) {
+          skipped.push({ id, reason: "RAILWAY_API_TOKEN or RAILWAY_PROJECT_ID not set" });
+          continue;
+        }
+        const mod = await import("@ai-conclave/platform-railway");
+        try {
+          platforms.push(new mod.RailwayPlatform());
         } catch (err) {
           skipped.push({ id, reason: (err as Error).message });
         }
