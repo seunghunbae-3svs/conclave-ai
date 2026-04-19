@@ -31,3 +31,24 @@
     execute → mark → commit → record in a single call.
 - Test coverage (`node --test`): 9 files, 45+ test cases across all
   efficiency modules and Council outcome logic.
+- **Real Claude review loop** in `@ai-conclave/agent-claude`:
+  - `ClaudeAgent.review(ctx)` now issues a real `messages.create` call via
+    the injected (or lazy-loaded) `@anthropic-ai/sdk` client.
+  - Single-tool pattern (`tool_choice: { type: "tool", name: "submit_review" }`)
+    forces structured output — no free-form parsing.
+  - System prompt + RAG prefix sent as a cache-controlled ephemeral block
+    so repeat calls within 5 minutes hit Anthropic's prompt cache (~90%
+    input-cost savings on the prefix).
+  - All SDK calls route through `EfficiencyGate.run(...)`: pre-flight budget
+    reserve (throws before the network call), cache-liveness tracking,
+    actual-cost metering via `actualCost(model, usage)`, per-call metrics.
+  - `PRICING` table covers Sonnet 4.6 / Haiku 4.5 / Opus 4.7 with standard,
+    cache-write, and cache-read rates. `estimateCallCost` is pessimistic
+    (no cache assumed) for safe pre-flight reservation.
+  - Parser tolerates malformed blockers (drops invalid entries instead of
+    failing the whole review), throws on missing `submit_review` tool_use
+    block or invalid verdict.
+  - Agent-claude tests (16 cases): happy verdicts (approve / rework with
+    blockers), invalid response shapes, budget enforcement, cache_control
+    wire-format, tool_choice wire-format, missing-key constructor guard,
+    metrics aggregation on shared gate.
