@@ -38,6 +38,7 @@
     "@conclave-ai/platform-deployment-status": "workspace:*",
     "@conclave-ai/platform-netlify": "workspace:*",
     "@conclave-ai/platform-railway": "workspace:*",
+    "@conclave-ai/platform-render": "workspace:*",
     "@conclave-ai/platform-vercel": "workspace:*",
     "@conclave-ai/scm-github": "workspace:*",
     "@conclave-ai/visual-review": "workspace:*",
