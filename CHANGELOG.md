@@ -3,6 +3,9 @@
 ## Unreleased
 
 ### Added
+- **`@conclave-ai/platform-render` — first v2.1 platform adapter.** Ranked #1 in the 2026-04 adapter-scope study (solo-maker default outside the v2.0 five). REST API at `api.render.com/v1` — GET service for canonical URL, GET deploys filtered client-side by `commit.id === sha` AND `status === "live"`. Pattern mirrors `platform-railway` (Bearer-token + URL-encode serviceId), so the next v2.1 platforms (Fly / Firebase if ranked in) plug in the same shape. 12 unit tests use the shared `mockFetch` harness. `RENDER_API_TOKEN` + `RENDER_SERVICE_ID` env vars; missing either → factory skips with reason. CLI `visual.platforms` default list adds `"render"` so it participates automatically once the user configures credentials. Service Previews caveat documented in the README — for per-PR preview URLs, point the adapter at the preview service's `srv-...` id rather than the main one.
+
+### Added
 - **CLI wiring for 2-tier council (part 3/3 of decisions #7/#26/#28 reopen).** `conclave review` now selects `TieredCouncil` when `config.council.domains[<domain>]` is set, and the legacy flat `Council` otherwise. New CLI flag `--domain code|design` (default `code`). Per-tier agent model override is pulled from config (`models.tier1` / `models.tier2`); absent entries fall back to each agent's default. `output.ts` `renderReview` adds a "Tiers" line summarizing the escalation path (`1 (1r) → 2 (2r) — domain=design`). Agent-builder logic refactored into `buildAgent(id, modelOverride?)` so tier-1 and tier-2 share one credential-check code path. Dogfood `.conclaverc.json` switched to the 2-tier shape with flagship-model overrides for tier 2 (`claude-opus-4-7`, `gpt-5.4`). `docs/configuration.md` gets a new "(b) 2-tier council" subsection documenting the shape + the escalation rule. Added `gpt-5.4` to `agent-openai` pricing table (placeholder matching gpt-5 rates; budget cap enforces spend regardless).
 
 ### Added

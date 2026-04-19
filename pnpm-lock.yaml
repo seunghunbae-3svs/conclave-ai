@@ -146,6 +146,9 @@ importers:
       '@conclave-ai/platform-railway':
         specifier: workspace:*
         version: link:../platform-railway
+      '@conclave-ai/platform-render':
+        specifier: workspace:*
+        version: link:../platform-render
       '@conclave-ai/platform-vercel':
         specifier: workspace:*
         version: link:../platform-vercel
@@ -263,6 +266,16 @@ importers:
         version: 5.9.3
 
   packages/platform-railway:
+    dependencies:
+      '@conclave-ai/core':
+        specifier: workspace:*
+        version: link:../core
+    devDependencies:
+      typescript:
+        specifier: ^5.7.0
+        version: 5.9.3
+
+  packages/platform-render:
     dependencies:
       '@conclave-ai/core':
         specifier: workspace:*
