@@ -1,19 +1,38 @@
 {
   "version": 1,
-  "agents": [
-    "claude",
-    "openai",
-    "gemini"
-  ],
-  "budget": {
-    "perPrUsd": 1.0
-  },
-  "efficiency": {
-    "cacheEnabled": true,
-    "compactEnabled": true
-  },
+  "agents": ["claude", "openai", "gemini"],
+  "budget": { "perPrUsd": 1.0 },
+  "efficiency": { "cacheEnabled": true, "compactEnabled": true },
   "memory": {
     "answerKeysDir": ".conclave/answer-keys",
     "failureCatalogDir": ".conclave/failure-catalog"
+  },
+  "council": {
+    "maxRounds": 3,
+    "enableDebate": true,
+    "domains": {
+      "code": {
+        "tier1": ["claude", "openai", "gemini"],
+        "tier2": ["claude", "openai"],
+        "tier1MaxRounds": 1,
+        "tier2MaxRounds": 2,
+        "alwaysEscalate": false,
+        "models": {
+          "tier1": {},
+          "tier2": { "claude": "claude-opus-4-7", "openai": "gpt-5.4" }
+        }
+      },
+      "design": {
+        "tier1": ["claude", "openai", "gemini"],
+        "tier2": ["claude", "openai"],
+        "tier1MaxRounds": 1,
+        "tier2MaxRounds": 2,
+        "alwaysEscalate": true,
+        "models": {
+          "tier1": {},
+          "tier2": { "claude": "claude-opus-4-7", "openai": "gpt-5.4" }
+        }
+      }
+    }
   }
 }

@@ -78,10 +78,32 @@ if a call would breach the cap. Default `0.5`.
 
 ### `council`
 
-- `maxRounds` — cap on debate rounds. `1` = legacy single-round. Cap
-  of `5`. Default `3` per decision #7.
-- `enableDebate` — set `false` to force single-round regardless of
-  `maxRounds`. Default `true`.
+Two shapes supported — pick one:
+
+**(a) Legacy flat-council** (backward compat):
+- `maxRounds` — cap on debate rounds. `1` = legacy single-round. Cap of `5`. Default `3`.
+- `enableDebate` — set `false` to force single-round. Default `true`.
+
+**(b) 2-tier council** (current default, reopens #7 / #26 / #28):
+```jsonc
+"council": {
+  "domains": {
+    "code":   { "tier1": [...], "tier2": [...], "alwaysEscalate": false, ... },
+    "design": { "tier1": [...], "tier2": [...], "alwaysEscalate": true,  ... }
+  }
+}
+```
+Per-domain knobs:
+- `tier1` / `tier2` — agent id arrays. Tier 1 runs first (draft). Tier 2 runs only on escalation.
+- `tier1MaxRounds` / `tier2MaxRounds` — default `1` / `2`.
+- `alwaysEscalate` — force tier-2 every run. `true` for design by default.
+- `models.tier1` / `models.tier2` — optional per-agent model overrides per tier (e.g. `{ "claude": "claude-opus-4-7", "openai": "gpt-5.4" }` for tier-2 flagships). Absent entries use the agent's default.
+
+Escalation rule (no config knob — enforced by `TieredCouncil`):
+- `domain === "design"` OR `alwaysEscalate === true` → always escalate.
+- Any tier-1 blocker of severity `blocker` or `major` → escalate.
+- Tier-1 verdict not `approve` → escalate.
+- Otherwise → ship tier-1 verdict, skip tier-2.
 
 ### `memory`
 
