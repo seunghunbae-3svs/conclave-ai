@@ -16,6 +16,7 @@ import {
 import { ClaudeAgent } from "@conclave-ai/agent-claude";
 import { OpenAIAgent } from "@conclave-ai/agent-openai";
 import { GeminiAgent } from "@conclave-ai/agent-gemini";
+import { DeepseekAgent } from "@conclave-ai/agent-deepseek";
 import { LangfuseMetricsSink } from "@conclave-ai/observability-langfuse";
 import { TelegramNotifier } from "@conclave-ai/integration-telegram";
 import { DiscordNotifier } from "@conclave-ai/integration-discord";
@@ -171,6 +172,12 @@ export async function review(argv: string[]): Promise<void> {
         continue;
       }
       agents.push(new GeminiAgent({ gate }));
+    } else if (id === "deepseek") {
+      if (!process.env["DEEPSEEK_API_KEY"]) {
+        process.stderr.write("conclave review: DEEPSEEK_API_KEY not set — skipping Deepseek agent\n");
+        continue;
+      }
+      agents.push(new DeepseekAgent({ gate }));
     }
   }
   if (agents.length === 0) {

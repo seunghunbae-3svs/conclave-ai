@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+### Added
+- **`@conclave-ai/agent-deepseek` — first v2.1 agent (decision #32).** OpenAI-wire-compatible; reuses the `openai` SDK pointed at `https://api.deepseek.com`. Supports `deepseek-chat` (V3, general) and `deepseek-reasoner` (R1, chain-of-thought). Pricing ~20× cheaper than GPT-5 input (0.27/M vs 5.0/M) with a deep cache discount (0.07/M — ~26% of standard). Wired into the CLI factory alongside `"claude" / "openai" / "gemini"`; missing `DEEPSEEK_API_KEY` skips cleanly like the others. `docs/configuration.md` + Zod config enum both updated. 18 tests mirror the agent-openai suite (16 agent + 8 pricing).
+
 ### Docs
 - **Public-launch prep.** README install path switched from "clone + build" to `pnpm add -g @conclave-ai/cli` now that packages are live on npm. Added npm version / scope / license / node badges. `docs/getting-started.md` updated the same way — every `node /path/to/conclave-ai/packages/cli/dist/bin/conclave.js ...` collapsed to plain `conclave ...`. New `CONTRIBUTING.md` at the repo root — setup, ground rules (architecture lock, one package per responsibility, Zod at boundaries, tests alongside code, lockstep versioning), PR flow, and release flow pointer.
 

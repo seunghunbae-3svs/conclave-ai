@@ -9,6 +9,7 @@
   "references": [
     { "path": "../core" },
     { "path": "../agent-claude" },
+    { "path": "../agent-deepseek" },
     { "path": "../agent-gemini" },
     { "path": "../agent-openai" },
     { "path": "../integration-discord" },
