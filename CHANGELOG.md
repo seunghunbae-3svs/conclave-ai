@@ -3,6 +3,12 @@
 ## Unreleased
 
 ### Added
+- **odiff native adapter (decision #15)** — `OdiffDiff` wraps [odiff-bin](https://www.npmjs.com/package/odiff-bin) (Zig port, ~6-8× faster on large images than pixelmatch) behind the same `VisualDiff` interface as `PixelmatchDiff`. Opt-in; shipping default remains pixelmatch because odiff is out-of-process and the fork + file I/O overhead eats the speed win for small diffs.
+  - `odiff-bin` declared as optional peer dependency — users opt in with `pnpm add odiff-bin` and approving its postinstall.
+  - Size-mismatched inputs padded with opaque magenta before invocation (matches `PixelmatchDiff` behavior) so `DiffResult` shapes are interchangeable.
+  - Maps odiff's exit codes (0 = identical, 21 = different, 22 = size mismatch) to `DiffResult`; parses `"N diff pixels"` from stdout with comma-tolerance. Defaults `diffPixels = 0` if the output format drifts.
+  - Constructor accepts `{ binaryPath, spawner }` for tests; 11 new tests use a mock spawner so the suite doesn't require odiff-bin installed on CI.
+
 - **Retrieval-side merge of federated baselines (decision #21)** — closes the gap the sync skeleton left. `conclave sync` now persists pulled baselines to `.conclave/federated/baselines.jsonl` (JSONL, deduped by `contentHash`); `conclave review` reads that cache when `federated.enabled = true` and boosts retrieval proportionally.
   - `computeBaselineHash` / `hashAnswerKey` / `hashFailure` exported from `core/federated` so retrieval-time code can recompute the hash a local doc would produce.
   - `buildFrequencyMap(baselines)` aggregates by `contentHash`; `rerankByFrequency(scored, map, hashDoc, { boost, saturationAt })` applies a logarithmic boost — `factor = 1 + min(1, log2(1+freq) / log2(1+saturationAt)) * (boost - 1)`. Default `boost = 2.0`, `saturationAt = 256`. Docs with zero matches keep their score.

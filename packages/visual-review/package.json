@@ -31,10 +31,14 @@
   },
   "peerDependencies": {
     "@anthropic-ai/sdk": "^0.65.0",
+    "odiff-bin": "^4.3.0",
     "playwright": "^1.49.0"
   },
   "peerDependenciesMeta": {
     "@anthropic-ai/sdk": {
+      "optional": true
+    },
+    "odiff-bin": {
       "optional": true
     },
     "playwright": {
