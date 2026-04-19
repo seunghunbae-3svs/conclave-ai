@@ -3,6 +3,14 @@
 ## Unreleased
 
 ### Added
+- **MCP stdio server (decision #11)** — `conclave mcp-server` starts a stdio-transport MCP server that exposes read-only views of the local memory substrate. Designed to be launched by an MCP client (Claude Desktop / Cursor / Windsurf) via their config. Three tools:
+  - `conclave_scores` — per-agent weighted performance (decision #19).
+  - `conclave_retrieve { query, k?, domain?, repo? }` — BM25-style retrieval over local answer-keys + failures.
+  - `conclave_list_episodic { limit?, outcomeFilter? }` — recent review events + outcomes.
+  - Deliberately read-only: running a full review (multi-agent + debate rounds + LLM spend) stays on `conclave review`. MCP clients can inspect what the council has learned; they don't trigger new reviews through the protocol.
+  - Tool handlers extracted to pure functions (`retrieveReadOnly`, `listEpisodic`) so unit tests cover semantics without spinning up the MCP transport. +6 CLI tests (52 total).
+  - SDK loaded lazily so CLI startup cost stays unchanged for users who never run the MCP server.
+
 - **odiff native adapter (decision #15)** — `OdiffDiff` wraps [odiff-bin](https://www.npmjs.com/package/odiff-bin) (Zig port, ~6-8× faster on large images than pixelmatch) behind the same `VisualDiff` interface as `PixelmatchDiff`. Opt-in; shipping default remains pixelmatch because odiff is out-of-process and the fork + file I/O overhead eats the speed win for small diffs.
   - `odiff-bin` declared as optional peer dependency — users opt in with `pnpm add odiff-bin` and approving its postinstall.
   - Size-mismatched inputs padded with opaque magenta before invocation (matches `PixelmatchDiff` behavior) so `DiffResult` shapes are interchangeable.
