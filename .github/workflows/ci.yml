@@ -12,18 +12,24 @@ concurrency:
 
 jobs:
   typecheck-build:
+    strategy:
+      fail-fast: false
+      matrix:
+        node-version: ["20", "22"]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
       - uses: pnpm/action-setup@v4
         with:
           version: 9.15.0
+
       - uses: actions/setup-node@v4
         with:
-          node-version: "20"
-      # No `cache: pnpm` yet — lockfile lands after first successful install.
-      # Swap to `pnpm install --frozen-lockfile` + cache once pnpm-lock.yaml is committed.
-      - run: pnpm install
+          node-version: ${{ matrix.node-version }}
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
       - run: pnpm typecheck
       - run: pnpm build
       - run: pnpm test

@@ -1,29 +1,30 @@
 # Getting started with Conclave AI
 
-Step-by-step from zero to a real council review. Pre-publish, so the
-path is "clone + link" rather than "npm install".
+Step-by-step from zero to a real council review.
 
 ## Prerequisites
 
 - Node ≥ 20 (24.x tested)
 - pnpm ≥ 9 (10.x tested; install via `corepack prepare pnpm@10 --activate`)
-- At least ONE LLM API key. The council needs a minimum of one agent
-  available to run; more agents = more useful debate.
+- At least ONE LLM API key. The council runs on whatever subset of
+  agents you have keys for; missing agents skip cleanly.
 
-## 1. Clone and build
+## 1. Install the CLI
 
 ```bash
-git clone https://github.com/seunghunbae-3svs/conclave-ai
-cd conclave-ai
-pnpm install
-pnpm build
-pnpm test   # optional, confirms everything works on your machine
+pnpm add -g @conclave-ai/cli
+# or: npm install -g @conclave-ai/cli
 ```
 
-## 2. Set agent API keys
+This installs the `conclave` binary. Verify:
 
-Every agent is skipped cleanly if its key is missing — the council runs
-on whatever subset you have keys for.
+```bash
+conclave --version
+```
+
+(Prefer building from source? See the [Contributing guide](../CONTRIBUTING.md).)
+
+## 2. Set agent API keys
 
 | Agent | Env var |
 |---|---|
@@ -34,17 +35,15 @@ on whatever subset you have keys for.
 ```bash
 export ANTHROPIC_API_KEY=sk-ant-...
 # Optional:
-export OPENAI_API_KEY=sk-...
+export OPENAI_API_KEY=sk-proj-...
 export GOOGLE_API_KEY=...
 ```
 
 ## 3. Initialize the target repo
 
-The target is whatever repo you want to review. In a new shell:
-
 ```bash
 cd /path/to/your-repo
-node /path/to/conclave-ai/packages/cli/dist/bin/conclave.js init
+conclave init
 ```
 
 This writes `.conclaverc.json` at the repo root and creates
@@ -65,20 +64,20 @@ only the agents you set keys for:
 For a PR:
 
 ```bash
-node /path/to/conclave-ai/packages/cli/dist/bin/conclave.js review --pr 42
+conclave review --pr 42
 ```
 
 For the current branch against its base:
 
 ```bash
-node /path/to/conclave-ai/packages/cli/dist/bin/conclave.js review --base main
+conclave review --base main
 ```
 
 From a diff file:
 
 ```bash
 git diff main... > /tmp/change.diff
-node /path/to/conclave-ai/packages/cli/dist/bin/conclave.js review --diff /tmp/change.diff
+conclave review --diff /tmp/change.diff
 ```
 
 Exit codes:
@@ -91,7 +90,7 @@ Exit codes:
 Either automatic (recommended — cron the `poll-outcomes` command):
 
 ```bash
-node /path/to/conclave.js poll-outcomes --quiet
+conclave poll-outcomes --quiet
 ```
 
 This checks every pending episodic entry against live GitHub state
@@ -100,7 +99,7 @@ This checks every pending episodic entry against live GitHub state
 Or manual:
 
 ```bash
-node /path/to/conclave.js record-outcome --id ep-... --result merged
+conclave record-outcome --id ep-... --result merged
 ```
 
 Both paths write the distilled pattern into the memory substrate, where
@@ -112,15 +111,15 @@ If you want the council to inherit lessons from an existing
 solo-cto-agent installation:
 
 ```bash
-node /path/to/conclave.js migrate --from ../path/to/solo-cto-agent --dry-run
-node /path/to/conclave.js migrate --from ../path/to/solo-cto-agent
+conclave migrate --from ../path/to/solo-cto-agent --dry-run
+conclave migrate --from ../path/to/solo-cto-agent
 ```
 
 Or seed from the bundled default catalog (~15 failure patterns
 harvested from v1's incident log):
 
 ```bash
-node /path/to/conclave.js seed
+conclave seed
 ```
 
 ## 7. (Optional) Visual review for UI work
@@ -140,14 +139,14 @@ Set whichever platform env vars apply to your deploy target (see
 [configuration.md](configuration.md) for the full matrix). Then:
 
 ```bash
-node /path/to/conclave.js review --pr 42 --visual
+conclave review --pr 42 --visual
 ```
 
 ## 8. (Optional) Agent performance tracking
 
 ```bash
-node /path/to/conclave.js scores
-node /path/to/conclave.js scores --json | jq .
+conclave scores
+conclave scores --json | jq .
 ```
 
 After a few merges, each agent's rolling score shows who's carrying
