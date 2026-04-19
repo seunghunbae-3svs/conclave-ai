@@ -3,6 +3,51 @@
 ## Unreleased
 
 ### Added
+- **`@ai-conclave/visual-review`** — before/after visual diff package
+  (decision #15 partial — pixelmatch default; odiff for v2.x speed
+  upgrade):
+  - `ScreenshotCapture` interface + `PlaywrightCapture` default
+    implementation. Reuses a single Chromium across captures in the
+    same process; fresh context per capture for isolation. Playwright
+    is an OPTIONAL peer dep — users who never run visual review don't
+    pay the ~300MB Chromium cost.
+  - `VisualDiff` interface + `PixelmatchDiff` default implementation
+    (pure JS, no native binary). `classifyDiffRatio(ratio)` maps into
+    5 severity bands: identical / minor / significant / major /
+    total-rewrite. Swap in an `odiff` adapter for 6–8× speed.
+  - Size-mismatched images pad to max dimensions instead of throwing.
+    Diff PNG shares inputs' dimensions; changed pixels highlighted red
+    (configurable).
+  - `runVisualReview({ platforms, repo, beforeSha, afterSha, … })`
+    orchestrator:
+    - Resolves before + after preview URLs via the Platform adapters
+      from PR #17 (Vercel / Netlify / …). Walks platforms first-non-
+      null-wins.
+    - Captures both URLs sequentially via the configured capture
+      engine.
+    - Diffs via the configured diff engine.
+    - Writes `before.png` / `after.png` / `diff.png` to
+      `<outputDir>/` (default `.conclave/visual/<afterSha>/`).
+    - Returns structured result: before/after PreviewResolution,
+      paths, capture metadata, diff metrics + severity.
+    - Missing before URL → throws with `beforeSha=...`. Missing after
+      → throws with `afterSha=...`. Caller catches + logs + skips —
+      visual failure never poisons the code review verdict.
+    - Closes the default-created `PlaywrightCapture` in a `finally`
+      block. User-supplied captures are the caller's responsibility.
+  - 25 test cases across `diff` (identical → 0, completely different
+    → 1, half-half ≈ 0.5, size-mismatch pads instead of throws, diff
+    image dims, threshold sensitivity, classifyDiffRatio boundaries),
+    `capture` (single launch across captures, viewport + DSF wiring,
+    extraHTTPHeaders propagation, fullPage default + override,
+    waitForSelector triggered, postLoadDelayMs=0 skips wait, finalUrl
+    + viewport returned, close() + re-launch), and `orchestrator`
+    (happy path 3 PNGs written, identical severity, missing before
+    throws with actionable sha, missing after throws, default
+    outputDir `.conclave/visual/<sha>`, user-supplied capture NOT
+    closed by orchestrator, PreviewResolution metadata surfaced).
+
+### Added
 - **`Platform` interface in `@ai-conclave/core`** (decision #31: v2.0
   platform set). Contract: `resolve({ repo, sha, waitSeconds? })` →
   `{ url, provider, sha, deploymentId?, createdAt? } | null`. Missing
