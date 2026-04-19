@@ -37,3 +37,10 @@ coverage/
 # Temp
 *.tmp
 tmp/
+
+# Conclave — dogfood the memory substrate but keep the noisy parts out
+# of git. Learned patterns (answer-keys + failure-catalog) ARE tracked
+# so clones inherit them; raw events + federated cache aren't.
+.conclave/episodic/
+.conclave/federated/
+.conclave/visual/
