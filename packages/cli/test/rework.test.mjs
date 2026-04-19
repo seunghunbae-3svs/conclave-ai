@@ -240,8 +240,8 @@ test("runRework: happy path — applies patch, commits, pushes, records outcome"
   assert.equal(worker.calls[0].fileSnapshots[0].path, "src/x.ts");
   assert.equal(tempWrites.length, 1);
   const gitCmds = git.calls.map((c) => c.args.join(" "));
-  assert.ok(gitCmds.some((c) => c.startsWith("apply --check")), `git apply --check missing: ${gitCmds.join(" | ")}`);
-  assert.ok(gitCmds.some((c) => c === `apply ${tempWrites[0].p}`), "git apply missing");
+  assert.ok(gitCmds.some((c) => c.startsWith("apply --check --recount")), `git apply --check --recount missing: ${gitCmds.join(" | ")}`);
+  assert.ok(gitCmds.some((c) => c === `apply --recount ${tempWrites[0].p}`), "git apply --recount missing");
   assert.ok(gitCmds.some((c) => c.startsWith("add -- src/x.ts")), "git add missing");
   assert.ok(gitCmds.some((c) => c.includes("commit")), "git commit missing");
   assert.ok(gitCmds.some((c) => c === "push"), "git push missing");
