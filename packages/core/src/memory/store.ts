@@ -9,6 +9,13 @@ export interface MemoryReadQuery {
   k?: number;
   /** Repo scope — prefer entries tagged for this repo; falls back to global. */
   repo?: string;
+  /**
+   * Optional federated-frequency map (`contentHash → count`). When set,
+   * retrieval output is re-ranked so local docs whose (kind, domain,
+   * category, severity, normalized-tags) hash matches a federated
+   * baseline get a logarithmic frequency boost. Decision #21.
+   */
+  federatedFrequency?: ReadonlyMap<string, number>;
 }
 
 export interface MemoryRetrieval {

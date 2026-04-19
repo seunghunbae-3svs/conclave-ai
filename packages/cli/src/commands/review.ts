@@ -1,10 +1,13 @@
+import path from "node:path";
 import {
   BudgetTracker,
   Council,
   EfficiencyGate,
+  FileSystemFederatedBaselineStore,
   FileSystemMemoryStore,
   MetricsRecorder,
   OutcomeWriter,
+  buildFrequencyMap,
   formatAnswerKeyForPrompt,
   formatFailureForPrompt,
   type MetricsSink,
@@ -105,10 +108,23 @@ export async function review(argv: string[]): Promise<void> {
     return;
   }
 
-  // 2. Retrieve RAG context from memory
+  // 2. Retrieve RAG context from memory (+ federated frequency rerank if available)
   const store = new FileSystemMemoryStore({ root: memoryRoot });
   const queryText = `${loaded.repo} ${loaded.diff.slice(0, 4_000)}`;
-  const retrieval = await store.retrieve({ query: queryText, repo: loaded.repo, k: 8 });
+  let federatedFrequency: ReadonlyMap<string, number> | undefined;
+  if (config.federated?.enabled) {
+    const baselineStore = new FileSystemFederatedBaselineStore({
+      root: path.join(memoryRoot, "federated"),
+    });
+    const cached = await baselineStore.read();
+    if (cached.length > 0) federatedFrequency = buildFrequencyMap(cached);
+  }
+  const retrieval = await store.retrieve({
+    query: queryText,
+    repo: loaded.repo,
+    k: 8,
+    ...(federatedFrequency ? { federatedFrequency } : {}),
+  });
 
   // 3. Build the efficiency gate with config-driven budget + optional Langfuse sink
   const budget = new BudgetTracker({ perPrUsd: config.budget.perPrUsd });
