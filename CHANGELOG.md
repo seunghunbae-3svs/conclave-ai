@@ -330,7 +330,7 @@
 - `@conclave-ai/agent-claude`: Claude agent skeleton implementing `Agent`.
 - `@conclave-ai/cli`: `conclave` binary with `init` and `review` commands (skeleton).
 - `ARCHITECTURE.md`: locked 7-layer design for the council, efficiency gate,
-  self-evolve substrate (정답지 + 오답지), and migration path from solo-cto-agent.
+  self-evolve substrate (answer-keys + failure-catalog), and migration path from solo-cto-agent.
 - GitHub Actions CI: typecheck + build + test on push/PR.
 - **Efficiency Gate** (`@conclave-ai/core/efficiency`) per decision #22 —
   first-class from day 1. Every LLM call must route through
@@ -375,7 +375,7 @@
     wire-format, tool_choice wire-format, missing-key constructor guard,
     metrics aggregation on shared gate.
 - **Memory substrate** (`@conclave-ai/core/memory`) per decision #17 —
-  정답지 / 오답지 dualism as the core primitive.
+  answer-keys dualism as the core primitive.
   - Zod schemas for `EpisodicEntry`, `AnswerKey`, `FailureEntry`, `SemanticRule`
     with enum-validated domains (code / design), severity, and 11 failure categories.
   - `MemoryStore` interface (read + write + list) with a `FileSystemMemoryStore`

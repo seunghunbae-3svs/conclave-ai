@@ -1,6 +1,6 @@
 # Triggered by the telegram-bot-runner when a user clicks ✅ Approve.
 # Merges the PR and records the outcome in conclave's episodic store so
-# the answer-key (정답지) generator picks it up.
+# the answer-key generator picks it up.
 #
 # Branch protection rules on the target PR still apply — this workflow
 # cannot force a merge past required reviews / required checks. That's

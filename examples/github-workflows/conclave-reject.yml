@@ -1,6 +1,6 @@
 # Triggered by the telegram-bot-runner when a user clicks ❌ Reject.
 # Closes the PR (without merging) and records the outcome so the
-# failure-catalog (오답지) generator picks up the blocker patterns.
+# failure-catalog generator picks up the blocker patterns.
 name: conclave-reject
 
 on:

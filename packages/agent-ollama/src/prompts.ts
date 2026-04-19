@@ -21,7 +21,7 @@ export function buildReviewPrompt(ctx: ReviewContext): string {
   sections.push("");
 
   if (ctx.answerKeys && ctx.answerKeys.length > 0) {
-    sections.push(`# Past success patterns (answer-keys / 정답지)`);
+    sections.push(`# Past success patterns (answer-keys)`);
     sections.push(
       `These are reviews that led to merged changes on similar code in this repo. Lean on them as a style + quality bar — match their tolerance for what counts as a blocker.`,
     );
@@ -31,7 +31,7 @@ export function buildReviewPrompt(ctx: ReviewContext): string {
   }
 
   if (ctx.failureCatalog && ctx.failureCatalog.length > 0) {
-    sections.push(`# Known failure patterns (failure-catalog / 오답지)`);
+    sections.push(`# Known failure patterns (failure-catalog)`);
     sections.push(
       `These are patterns that caused real incidents in the past. Flag them aggressively if you see them in this diff.`,
     );
