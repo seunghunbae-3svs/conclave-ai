@@ -86,10 +86,18 @@ jobs:
             git commit -m "chore(release): v$ROOT_VERSION"
             git push origin HEAD:main
           fi
-          # Idempotent tag — don't fail if the tag already exists on a
-          # re-run of the same version.
-          if git rev-parse -q --verify "refs/tags/v$ROOT_VERSION" >/dev/null; then
-            echo "Tag v$ROOT_VERSION already exists; skipping create + push."
+          # Remote-aware idempotent tag. `git rev-parse` sees only the
+          # runner's local refs, so a pure-local check can miss a tag
+          # that already exists on `origin`. Ask the remote directly.
+          CURRENT_HEAD=$(git rev-parse --verify HEAD)
+          REMOTE_TAG_HASH=$(git ls-remote --tags origin "refs/tags/v$ROOT_VERSION" | awk '{print $1}' || true)
+          if [ -n "$REMOTE_TAG_HASH" ]; then
+            if [ "$REMOTE_TAG_HASH" = "$CURRENT_HEAD" ]; then
+              echo "Tag v$ROOT_VERSION already on remote at HEAD; skipping create + push."
+            else
+              echo "::error::Remote tag v$ROOT_VERSION points at $REMOTE_TAG_HASH, not HEAD ($CURRENT_HEAD). Refusing to overwrite — bump the version if this was an accidental re-run."
+              exit 1
+            fi
           else
             git tag "v$ROOT_VERSION"
             git push origin "v$ROOT_VERSION"
