@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+### Added
+- **`TieredCouncil` class — 2-tier escalation flow (part 2 of decision #7/#26/#28 reopen).** Composes two `Council` instances (reuses all of #7's round/priors/early-exit logic) into a tier-1 draft → escalation → tier-2 authoritative pipeline. Escalation reason is deterministic: design domain, any `major`/`blocker` severity, non-approve verdict, or `alwaysEscalate: true` each force tier-2. Tier-2 agents see tier-1 priors injected into their first-round `ctx.priors`. Output `TieredCouncilOutcome` extends `CouncilOutcome` with `escalated`, `tier1Outcome`, `tier2Outcome?`, and `escalationReason` (string, surfaced to ops dashboards). Tier-1-only mode allowed — emits a clear "would-escalate but no tier-2 configured" reason and ships tier-1. 19 unit tests cover: empty-tier guards, all escalation paths, priors + `tier` field propagation, per-tier round counts, backward-compat output shape. No CLI wiring yet — that's PR 3. Full suite 39/39.
+
 ### Changed (breaking prep — no runtime change yet)
 - **Schema prep for 2-tier council (reopens decisions #7 / #26 / #28).** This PR lays the foundation — next PRs bring the `TieredCouncil` class and CLI wiring.
   - `ReviewContext` gains `domain: "code" | "design"` (optional; absent ≡ `"code"` for backward compat) and `tier: 1 | 2` (set by `TieredCouncil` at call time; legacy flat-Council callers leave it undefined).
