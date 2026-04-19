@@ -4,6 +4,7 @@ import { recordOutcome } from "./commands/record-outcome.js";
 import { pollOutcomesCommand } from "./commands/poll-outcomes.js";
 import { seed } from "./commands/seed.js";
 import { migrate } from "./commands/migrate.js";
+import { scores } from "./commands/scores.js";
 
 const HELP = `conclave — Ai-Conclave CLI
 
@@ -17,6 +18,7 @@ Commands:
   poll-outcomes         Auto-classify pending reviews against live GitHub PR state
   seed                  Bootstrap failure-catalog from a legacy source (default: bundled solo-cto-agent)
   migrate               Port a solo-cto-agent install over to ai-conclave (config + failure-catalog + checklist)
+  scores                Show per-agent performance scores from memory (decision #19)
   --help, -h            Show this
   --version, -v         Show version
 
@@ -61,6 +63,9 @@ export async function run(argv: string[]): Promise<void> {
       return;
     case "migrate":
       await migrate(rest);
+      return;
+    case "scores":
+      await scores(rest);
       return;
     default:
       process.stderr.write(`Unknown command: ${cmd}\n\n${HELP}`);

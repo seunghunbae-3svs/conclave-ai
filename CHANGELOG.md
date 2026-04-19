@@ -3,6 +3,34 @@
 ## Unreleased
 
 ### Added
+- **Agent scoring (decision #19)** — rolling weighted per-agent
+  performance metrics from memory. Weights ported from solo-cto-agent
+  where they were validated in production:
+  - build pass rate 40% · review approval rate 30% · time to
+    resolution 20% · rework frequency 10%.
+  - Missing components (time not yet tracked) renormalize so agents
+    aren't penalized for data we don't collect yet.
+  - `computeAgentScore(agent, entries)` operates on a flat episodic
+    list. `computeAllAgentScores(store)` one-pass over every agent.
+  - Review approval rate = agent's `approve` votes / total reviews.
+  - Build pass proxy = of the PRs an agent approved, fraction that
+    eventually merged. Counts as a signal that the agent's judgment
+    aligned with final outcome.
+  - Rework-friendly = 1 - (reworked / resolved). Pending entries
+    excluded from both buildPass and rework calcs.
+  - Time component currently `null` — needs resolution timestamps
+    beyond createdAt, tracked separately.
+  - Score rounded to 4 decimals for stable CLI output.
+  - **New CLI command `conclave scores [--json]`** prints per-agent
+    score + component breakdown, or JSON for piping.
+  - 12 test cases: weights sum to 1.0, empty history → 0, all-merged
+    → near-1.0, all-reworks → 0, pending excluded, other-agent
+    entries ignored, mixed verdicts fractional, approved-but-rejected
+    drops buildPass, time always null placeholder, componentsUsed
+    lists contributors, score rounding, computeAllAgentScores picks
+    up every agent + sorted alphabetically.
+
+### Added
 - **Vision judge for visual review** — semantic classification of
   before/after diff (intentional / regression / accessibility / mixed /
   unreviewable) via Claude multimodal. `VisionJudge` interface +
