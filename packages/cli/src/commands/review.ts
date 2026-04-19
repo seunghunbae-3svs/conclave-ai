@@ -3,14 +3,17 @@ import {
   Council,
   EfficiencyGate,
   FileSystemMemoryStore,
+  MetricsRecorder,
   OutcomeWriter,
   formatAnswerKeyForPrompt,
   formatFailureForPrompt,
+  type MetricsSink,
   type ReviewContext,
 } from "@ai-conclave/core";
 import { ClaudeAgent } from "@ai-conclave/agent-claude";
 import { OpenAIAgent } from "@ai-conclave/agent-openai";
 import { GeminiAgent } from "@ai-conclave/agent-gemini";
+import { LangfuseMetricsSink } from "@ai-conclave/observability-langfuse";
 import { loadConfig, resolveMemoryRoot } from "../lib/config.js";
 import { loadPrDiff, loadGitDiff, loadFileDiff, type LoadedDiff } from "../lib/diff-source.js";
 import { renderReview, verdictToExitCode } from "../lib/output.js";
@@ -79,12 +82,29 @@ export async function review(argv: string[]): Promise<void> {
   const queryText = `${loaded.repo} ${loaded.diff.slice(0, 4_000)}`;
   const retrieval = await store.retrieve({ query: queryText, repo: loaded.repo, k: 8 });
 
-  // 3. Build the efficiency gate with config-driven budget
+  // 3. Build the efficiency gate with config-driven budget + optional Langfuse sink
   const budget = new BudgetTracker({ perPrUsd: config.budget.perPrUsd });
   budget.onWarning((spent, cap) => {
     process.stderr.write(`conclave review: budget warning — spent $${spent.toFixed(4)} of $${cap.toFixed(2)} cap\n`);
   });
-  const gate = new EfficiencyGate({ budget });
+  let langfuseSink: LangfuseMetricsSink | null = null;
+  const sink: MetricsSink | undefined = (() => {
+    const lf = config.observability?.langfuse;
+    if (!lf?.enabled) return undefined;
+    if (!process.env["LANGFUSE_PUBLIC_KEY"] || !process.env["LANGFUSE_SECRET_KEY"]) {
+      process.stderr.write(
+        "conclave review: langfuse configured but LANGFUSE_PUBLIC_KEY / LANGFUSE_SECRET_KEY not set — skipping\n",
+      );
+      return undefined;
+    }
+    const sinkOpts: ConstructorParameters<typeof LangfuseMetricsSink>[0] = {};
+    if (lf.baseUrl) sinkOpts.baseUrl = lf.baseUrl;
+    sinkOpts.traceId = `conclave-${loaded.repo.replace(/\//g, "-")}-${loaded.pullNumber || "local"}-${loaded.newSha.slice(0, 8)}`;
+    langfuseSink = new LangfuseMetricsSink(sinkOpts);
+    return langfuseSink;
+  })();
+  const metrics = sink ? new MetricsRecorder({ sink }) : new MetricsRecorder();
+  const gate = new EfficiencyGate({ budget, metrics });
 
   // 4. Instantiate the council. Agents enabled in config.agents. An agent
   //    is only included if its credentials are available; others are skipped
@@ -157,6 +177,10 @@ export async function review(argv: string[]): Promise<void> {
       `  when the PR lands, close the loop with:\n` +
       `    conclave record-outcome --id ${episodic.id} --result merged\n`,
   );
+
+  if (langfuseSink) {
+    await langfuseSink.shutdown();
+  }
 
   process.exit(verdictToExitCode(outcome.verdict));
 }

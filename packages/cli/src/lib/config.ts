@@ -28,6 +28,16 @@ export const ConclaveConfigSchema = z.object({
       answerKeysDir: ".conclave/answer-keys",
       failureCatalogDir: ".conclave/failure-catalog",
     }),
+  observability: z
+    .object({
+      langfuse: z
+        .object({
+          enabled: z.boolean().default(true),
+          baseUrl: z.string().url().optional(),
+        })
+        .optional(),
+    })
+    .optional(),
 });
 
 export type ConclaveConfig = z.infer<typeof ConclaveConfigSchema>;
