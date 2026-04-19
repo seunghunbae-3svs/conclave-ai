@@ -1,5 +1,10 @@
 # Conclave AI
 
+[![npm version](https://img.shields.io/npm/v/@conclave-ai/cli?label=%40conclave-ai%2Fcli&color=brightgreen)](https://www.npmjs.com/package/@conclave-ai/cli)
+[![npm scope](https://img.shields.io/badge/npm%20scope-%40conclave--ai-blue)](https://www.npmjs.com/org/conclave-ai)
+[![license](https://img.shields.io/github/license/seunghunbae-3svs/conclave-ai)](LICENSE)
+[![node](https://img.shields.io/node/v/@conclave-ai/cli)](https://nodejs.org)
+
 **AI drafted. Council refined.**
 
 A multi-agent council reviews your AI-generated code, debates blockers
@@ -7,9 +12,8 @@ across up to 3 rounds until it reaches consensus, and learns from every
 merge + rejection so future reviews match your repo's real tolerance for
 "blocker" vs "nit". Built for solo makers who ship with AI.
 
-> **Status**: v2.0 development. Architecture locked; 29/34 decisions
-> implemented across 28 PRs. Not yet published to npm — see `ARCHITECTURE.md`
-> for the full 7-layer design.
+> **Status**: v0.1 on npm. Architecture locked (see `ARCHITECTURE.md`);
+> dogfood-tested on this repo's own PRs.
 
 ## Who this is for
 
@@ -50,8 +54,8 @@ negative); here `정답지 ∥ 오답지` is the primitive — decision #17.
   4 notifiers (Telegram/Discord/Slack/Email) + 5 platform adapters
   (Vercel/Netlify/Cloudflare Pages/Railway/GitHub deployment_status) +
   SCM + observability + visual review + CLI.
-- **9 CLI commands** covering init → review → outcome capture →
-  seeding → migration → scoring → federated sync.
+- **10 CLI commands** covering init → review → outcome capture →
+  seeding → migration → scoring → federated sync → MCP server.
 - **Cost per PR**: ~$0.05-$0.20 at current pricing with caching + triage,
   capped by a per-PR budget that the efficiency gate enforces before any
   LLM call fires.
@@ -86,29 +90,23 @@ conclave seed [--from <path>]              # bootstrap failure-catalog
 conclave migrate [--from <solo-cto-agent>] # port a v1 install
 conclave scores [--json]                   # per-agent weighted performance
 conclave sync [--dry-run|--push-only|--pull-only]  # federated baseline (opt-in)
+conclave mcp-server                        # MCP stdio — Claude Desktop / Cursor / Windsurf
 ```
 
-## Quickstart (from source, pre-publish)
+## Quickstart
 
 ```bash
-git clone https://github.com/seunghunbae-3svs/conclave-ai
-cd conclave-ai
-pnpm install
-pnpm build
+pnpm add -g @conclave-ai/cli
 
-# Set at least one agent key:
+# At least one agent key (any combination works; missing ones skip cleanly):
 export ANTHROPIC_API_KEY=sk-ant-...
-# Optional additional agents:
-export OPENAI_API_KEY=...
+export OPENAI_API_KEY=sk-proj-...
 export GOOGLE_API_KEY=...
 
-# Drop into a repo you want to review:
 cd /path/to/your-repo
-node /path/to/conclave-ai/packages/cli/dist/bin/conclave.js init
-node /path/to/conclave-ai/packages/cli/dist/bin/conclave.js review --pr 42
+conclave init
+conclave review --pr 42
 ```
-
-Once published: `pnpm add -g @conclave-ai/cli`.
 
 Full walkthrough: [docs/getting-started.md](docs/getting-started.md).
 

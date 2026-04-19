@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+### Docs
+- **Public-launch prep.** README install path switched from "clone + build" to `pnpm add -g @conclave-ai/cli` now that packages are live on npm. Added npm version / scope / license / node badges. `docs/getting-started.md` updated the same way — every `node /path/to/conclave-ai/packages/cli/dist/bin/conclave.js ...` collapsed to plain `conclave ...`. New `CONTRIBUTING.md` at the repo root — setup, ground rules (architecture lock, one package per responsibility, Zod at boundaries, tests alongside code, lockstep versioning), PR flow, and release flow pointer.
+
+### Ops
+- **`ci.yml` hardening.** Switched to `pnpm install --frozen-lockfile` now that `pnpm-lock.yaml` is committed; added `cache: pnpm` to the Node setup action for faster installs; added Node 20 + 22 matrix so we catch breaks on newer runtimes before users do. No test or behavior change, just faster and stricter.
+
 ### Fixed
 - **`release.yml` safety hardening (dogfood feedback)** — OpenAI's review of PR #37 flagged five workflow correctness issues during the first real E2E run. Three land as real fixes, two are intentional and now documented:
   - **Fixed:** bump+commit step now idempotent (skips when there are no staged changes, covers no-op re-runs).
