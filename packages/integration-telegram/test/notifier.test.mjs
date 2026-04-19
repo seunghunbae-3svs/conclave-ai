@@ -63,7 +63,7 @@ test("TelegramNotifier: notifyReview posts HTML + disable_web_page_preview", asy
   await n.notifyReview(baseInput);
   assert.equal(f.calls[0].body.parse_mode, "HTML");
   assert.equal(f.calls[0].body.disable_web_page_preview, true);
-  assert.match(f.calls[0].body.text, /APPROVE/);
+  assert.match(f.calls[0].body.text, /Approved/);
 });
 
 test("TelegramNotifier: includes inline action keyboard by default", async () => {
