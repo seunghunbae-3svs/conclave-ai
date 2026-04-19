@@ -1,7 +1,7 @@
 {
-  "name": "@ai-conclave/integration-email",
+  "name": "@conclave-ai/integration-email",
   "version": "0.0.0",
-  "description": "Ai-Conclave email notifier — pluggable transport (Resend default; SMTP/SES/nodemailer drop-ins).",
+  "description": "Conclave AI email notifier — pluggable transport (Resend default; SMTP/SES/nodemailer drop-ins).",
   "license": "MIT",
   "type": "module",
   "main": "./dist/index.js",
@@ -25,7 +25,7 @@
     "clean": "rm -rf dist .tsbuildinfo"
   },
   "dependencies": {
-    "@ai-conclave/core": "workspace:*"
+    "@conclave-ai/core": "workspace:*"
   },
   "devDependencies": {
     "typescript": "^5.7.0"

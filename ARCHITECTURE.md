@@ -1,4 +1,4 @@
-# Ai-Conclave Architecture
+# Conclave AI Architecture
 
 **Status:** architecture finalized 2026-04-19. Decisions 1–34 are locked; do
 not re-litigate without explicit reopen. This document is the source of
@@ -6,8 +6,8 @@ truth for scaffolding.
 
 ## Product
 
-- **Brand**: Ai-Conclave (hero display may be stylized `Con{claude}ve`)
-- **npm scope**: `@ai-conclave` (fallbacks: `conclaveai`, `ai-conclave-io`)
+- **Brand**: Conclave AI (hero display may be stylized `Con{claude}ve`)
+- **npm scope**: `@conclave-ai` (fallbacks: `conclaveai`, `conclave-ai-io`)
 - **CLI binary**: `conclave`
 - **Positioning (α)**: *"AI drafted. Council refined."*
 - **Tagline**: *A multi-agent council reviews your AI-generated code and
@@ -46,7 +46,7 @@ truth for scaffolding.
          ↕                                ↕
 ┌────────────────────────┐  ┌────────────────────────────────┐
 │  Layer 4 — AGENTS      │  │  Layer 5 — INFRASTRUCTURE      │
-│  @ai-conclave/agent-*  │  │  scm / platform / integration  │
+│  @conclave-ai/agent-*  │  │  scm / platform / integration  │
 │  (pluggable npm pkgs)  │  │  packages                      │
 │  claude, openai,       │  │  GitHub/Vercel/Netlify/...     │
 │  gemini, grok,         │  │  Telegram/Discord/Slack/Email  │
@@ -151,7 +151,7 @@ Plus new metrics:
 ## Monorepo Layout
 
 ```
-ai-conclave/
+conclave-ai/
 ├── package.json                  # pnpm workspace root
 ├── pnpm-workspace.yaml
 ├── turbo.json
@@ -160,7 +160,7 @@ ai-conclave/
 ├── ARCHITECTURE.md               # this doc
 ├── LICENSE
 ├── packages/
-│   ├── core/                     # @ai-conclave/core
+│   ├── core/                     # @conclave-ai/core
 │   │   └── src/
 │   │       ├── agent.ts          # Agent interface
 │   │       ├── council.ts        # Mastra-based N-agent graph
@@ -180,7 +180,7 @@ ai-conclave/
 │   │              replit,vertex-deploy,docker-local,
 │   │              deployment-status}/
 │   ├── integration-{telegram,discord,slack,email}/
-│   ├── cli/                      # @ai-conclave/cli, binary `conclave`
+│   ├── cli/                      # @conclave-ai/cli, binary `conclave`
 │   └── orchestrator-template/    # GitHub Actions YAML templates
 ├── apps/
 │   ├── web-dashboard/            # v2.1 — cost/trace viz

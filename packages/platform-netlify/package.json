@@ -1,7 +1,7 @@
 {
-  "name": "@ai-conclave/platform-netlify",
+  "name": "@conclave-ai/platform-netlify",
   "version": "0.0.0",
-  "description": "Ai-Conclave Netlify adapter — resolve preview URL for a commit SHA via Netlify API.",
+  "description": "Conclave AI Netlify adapter — resolve preview URL for a commit SHA via Netlify API.",
   "license": "MIT",
   "type": "module",
   "main": "./dist/index.js",
@@ -25,7 +25,7 @@
     "clean": "rm -rf dist .tsbuildinfo"
   },
   "dependencies": {
-    "@ai-conclave/core": "workspace:*"
+    "@conclave-ai/core": "workspace:*"
   },
   "devDependencies": {
     "typescript": "^5.7.0"

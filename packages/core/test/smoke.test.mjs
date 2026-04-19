@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { Council } from "../dist/index.js";
 
-test("core: Council is exported from @ai-conclave/core", () => {
+test("core: Council is exported from @conclave-ai/core", () => {
   assert.equal(typeof Council, "function");
 });
 

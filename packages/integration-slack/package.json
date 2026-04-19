@@ -1,7 +1,7 @@
 {
-  "name": "@ai-conclave/integration-slack",
+  "name": "@conclave-ai/integration-slack",
   "version": "0.0.0",
-  "description": "Ai-Conclave Slack notifier — posts review outcomes to a Slack channel via incoming webhook.",
+  "description": "Conclave AI Slack notifier — posts review outcomes to a Slack channel via incoming webhook.",
   "license": "MIT",
   "type": "module",
   "main": "./dist/index.js",
@@ -25,7 +25,7 @@
     "clean": "rm -rf dist .tsbuildinfo"
   },
   "dependencies": {
-    "@ai-conclave/core": "workspace:*"
+    "@conclave-ai/core": "workspace:*"
   },
   "devDependencies": {
     "typescript": "^5.7.0"

@@ -1,7 +1,7 @@
-# @ai-conclave/platform-netlify
+# @conclave-ai/platform-netlify
 
 Netlify adapter. Mirrors the `Platform` contract from
-`@ai-conclave/platform-vercel`; same API pattern.
+`@conclave-ai/platform-vercel`; same API pattern.
 
 ## Env
 
@@ -11,7 +11,7 @@ Netlify adapter. Mirrors the `Platform` contract from
 | `NETLIFY_SITE_ID` | ✓ |
 
 ```ts
-import { NetlifyPlatform } from "@ai-conclave/platform-netlify";
+import { NetlifyPlatform } from "@conclave-ai/platform-netlify";
 const netlify = new NetlifyPlatform({
   token: process.env.NETLIFY_TOKEN,
   siteId: process.env.NETLIFY_SITE_ID,

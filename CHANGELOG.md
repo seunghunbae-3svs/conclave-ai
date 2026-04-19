@@ -55,7 +55,7 @@
   - CLI `conclave review` renders `Rounds: N (early exit on consensus)` in the output when debate ran.
   - 13 Council tests (up from 6) cover: early exit on round 1, full 3-round fallthrough, scripted verdict changes reaching consensus mid-debate, priors + round wiring, `enableDebate=false` preserves legacy, `maxRounds` cap, consensus-in-final-round, roundHistory shape, blockers-in-priors end-to-end.
 
-- **Federated sync skeleton (decision #21)** — `@ai-conclave/core/federated` subpath + `conclave sync` CLI command. Opt-in cross-user baseline exchange that carries ONLY category + severity + normalized tag vector + day bucket + a deterministic sha256 hash. The `lesson` text, `title`, `body`, `snippet`, `seedBlocker`, `repo`, `user`, `pattern`, and `episodicId` are stripped before anything touches the wire.
+- **Federated sync skeleton (decision #21)** — `@conclave-ai/core/federated` subpath + `conclave sync` CLI command. Opt-in cross-user baseline exchange that carries ONLY category + severity + normalized tag vector + day bucket + a deterministic sha256 hash. The `lesson` text, `title`, `body`, `snippet`, `seedBlocker`, `repo`, `user`, `pattern`, and `episodicId` are stripped before anything touches the wire.
   - `redactAnswerKey` / `redactFailure` — pure, synchronous, deterministic. Same (domain, tags) across users produce the same `contentHash`, which is the aggregation key a federation server uses for counts.
   - `HttpFederatedSyncTransport` — thin JSON contract (`POST /baselines`, `GET /baselines?since=…`) so community aggregators can implement the endpoint without a vendor SDK. `NoopFederatedSyncTransport` for disabled/test paths.
   - `runFederatedSync({ transport, answerKeys, failures, dryRun, since, pushDisabled, pullDisabled })` — the orchestrator. All redaction happens here; the transport never sees raw memory entries.
@@ -64,7 +64,7 @@
   - Schema is v1; servers MUST reject unknown versions. Bumping the version is the breaking-change lever.
   - 29 core tests (11 redact + 11 transport + 7 sync). Retrieval-side merge of pulled baselines is DEFERRED — no live endpoint exists yet and the read path stays local-only until one does. CLI command is wired but not test-covered yet; it's thin enough that the underlying core tests carry the guarantees.
 
-- **`@ai-conclave/platform-railway`** — completes decision #31 v2.0
+- **`@conclave-ai/platform-railway`** — completes decision #31 v2.0
   platform set (Vercel + Netlify + Railway + Cloudflare Pages +
   `deployment-status`).
   - Resolves preview URL for a commit SHA via Railway's GraphQL API
@@ -135,17 +135,17 @@
 - **Vision judge for visual review** — semantic classification of
   before/after diff (intentional / regression / accessibility / mixed /
   unreviewable) via Claude multimodal. `VisionJudge` interface +
-  `ClaudeVisionJudge` default ship in `@ai-conclave/visual-review`.
+  `ClaudeVisionJudge` default ship in `@conclave-ai/visual-review`.
   `runVisualReview` takes optional `judge` + `judgeContext`; CLI
   `--visual` flag auto-enables when `ANTHROPIC_API_KEY` is present.
   Judgment + structured concerns printed in review output. 15 test
   cases (judge parsing + orchestrator integration).
 - **CLI `conclave migrate`** (decision #27) — brings an existing
-  solo-cto-agent install over to ai-conclave without deleting the
+  solo-cto-agent install over to conclave-ai without deleting the
   legacy install:
   - Auto-detects the legacy root by walking up from cwd or checking
     sibling `solo-cto-agent/` folder. `--from <path>` override.
-  - Ports `failure-catalog.json` into ai-conclave's memory store (same
+  - Ports `failure-catalog.json` into conclave-ai's memory store (same
     heuristic mapper as `conclave seed`); tags entries with
     `["legacy", "solo-cto-agent", "migrated"]`.
   - Reads `.solo-cto/tracked.json` if present and prints tracked repo
@@ -173,14 +173,14 @@
     local paths to the 3 PNGs.
   - Failure-tolerant: visual errors never affect the verdict exit code.
   - 6 platform-factory test cases.
-- **`@ai-conclave/platform-cloudflare`** — Cloudflare Pages adapter via
+- **`@conclave-ai/platform-cloudflare`** — Cloudflare Pages adapter via
   `GET /accounts/{id}/pages/projects/{name}/deployments`. Filters
   client-side by `deployment_trigger.metadata.commit_hash`; picks newest
   `latest_stage.status: "success"`. URL-encodes project name for
   projects with spaces. API `success: false` → throw with first error
   message. Env: `CLOUDFLARE_API_TOKEN` + `CLOUDFLARE_ACCOUNT_ID` +
   `CLOUDFLARE_PROJECT_NAME`.
-- **`@ai-conclave/platform-deployment-status`** — generic GitHub
+- **`@conclave-ai/platform-deployment-status`** — generic GitHub
   Deployments API adapter. Works with **any** host that posts back to
   GitHub (Render / Fly / Railway / Replit / Docker / custom CI) without
   a dedicated package. Uses `gh api /repos/{repo}/deployments?sha=<sha>`
@@ -191,7 +191,7 @@
 - 19 test cases across Cloudflare + deployment-status covering env
   validation, commit matching, state filtering, URL fallback, newest-
   wins, error surfaces, URL encoding, empty results.
-- **`@ai-conclave/visual-review`** — before/after visual diff package
+- **`@conclave-ai/visual-review`** — before/after visual diff package
   (decision #15 partial — pixelmatch default; odiff for v2.x speed
   upgrade):
   - `ScreenshotCapture` interface + `PlaywrightCapture` default
@@ -236,19 +236,19 @@
     closed by orchestrator, PreviewResolution metadata surfaced).
 
 ### Added
-- **`Platform` interface in `@ai-conclave/core`** (decision #31: v2.0
+- **`Platform` interface in `@conclave-ai/core`** (decision #31: v2.0
   platform set). Contract: `resolve({ repo, sha, waitSeconds? })` →
   `{ url, provider, sha, deploymentId?, createdAt? } | null`. Missing
   auth / no match returns null; only auth errors and 5xx throw.
 - **`resolveFirstPreview(platforms, input)`** helper — walks an ordered
   list; first non-null wins. Hard errors on one platform are logged to
   stderr but don't abort the walk (try the next one).
-- **`@ai-conclave/platform-vercel`** — Vercel adapter over
+- **`@conclave-ai/platform-vercel`** — Vercel adapter over
   `/v6/deployments?meta-githubCommitSha=<sha>`. Picks newest READY
   deployment. Supports `VERCEL_TOKEN` + optional `VERCEL_TEAM_ID` +
   `VERCEL_PROJECT_ID`. `waitSeconds` polls every ~3s until deployment is
   ready or deadline hits.
-- **`@ai-conclave/platform-netlify`** — Netlify adapter over
+- **`@conclave-ai/platform-netlify`** — Netlify adapter over
   `/api/v1/sites/{siteId}/deploys` filtered by `commit_ref`. URL fallback
   chain: `deploy_ssl_url` → `ssl_url` → `deploy_url`. Requires
   `NETLIFY_TOKEN` + `NETLIFY_SITE_ID`.
@@ -264,13 +264,13 @@
 
 ### Added
 - Monorepo skeleton (pnpm workspaces + turbo).
-- `@ai-conclave/core`: `Agent` / `Council` interfaces + Zod schemas.
-- `@ai-conclave/agent-claude`: Claude agent skeleton implementing `Agent`.
-- `@ai-conclave/cli`: `conclave` binary with `init` and `review` commands (skeleton).
+- `@conclave-ai/core`: `Agent` / `Council` interfaces + Zod schemas.
+- `@conclave-ai/agent-claude`: Claude agent skeleton implementing `Agent`.
+- `@conclave-ai/cli`: `conclave` binary with `init` and `review` commands (skeleton).
 - `ARCHITECTURE.md`: locked 7-layer design for the council, efficiency gate,
   self-evolve substrate (정답지 + 오답지), and migration path from solo-cto-agent.
 - GitHub Actions CI: typecheck + build + test on push/PR.
-- **Efficiency Gate** (`@ai-conclave/core/efficiency`) per decision #22 —
+- **Efficiency Gate** (`@conclave-ai/core/efficiency`) per decision #22 —
   first-class from day 1. Every LLM call must route through
   `EfficiencyGate.run(...)`; direct SDK calls are forbidden by contract.
   - `PromptCache` — Anthropic 5-min TTL aware scheduler (sha256-keyed, LRU-evicted).
@@ -291,7 +291,7 @@
     execute → mark → commit → record in a single call.
 - Test coverage (`node --test`): 9 files, 45+ test cases across all
   efficiency modules and Council outcome logic.
-- **Real Claude review loop** in `@ai-conclave/agent-claude`:
+- **Real Claude review loop** in `@conclave-ai/agent-claude`:
   - `ClaudeAgent.review(ctx)` now issues a real `messages.create` call via
     the injected (or lazy-loaded) `@anthropic-ai/sdk` client.
   - Single-tool pattern (`tool_choice: { type: "tool", name: "submit_review" }`)
@@ -312,7 +312,7 @@
     blockers), invalid response shapes, budget enforcement, cache_control
     wire-format, tool_choice wire-format, missing-key constructor guard,
     metrics aggregation on shared gate.
-- **Memory substrate** (`@ai-conclave/core/memory`) per decision #17 —
+- **Memory substrate** (`@conclave-ai/core/memory`) per decision #17 —
   정답지 / 오답지 dualism as the core primitive.
   - Zod schemas for `EpisodicEntry`, `AnswerKey`, `FailureEntry`, `SemanticRule`
     with enum-validated domains (code / design), severity, and 11 failure categories.
@@ -380,7 +380,7 @@
     stable ids for same input; round-trip through disk; fresh-process
     reconstruction via `findEpisodic`; unknown-id throw; idempotent
     re-writes with caller-provided `episodicId`.
-- **`@ai-conclave/agent-openai`** — second council voice (decision #28 —
+- **`@conclave-ai/agent-openai`** — second council voice (decision #28 —
   v2.0 launch council = Claude + OpenAI + Gemini):
   - `OpenAIAgent` wraps the `openai` SDK via a minimal `OpenAILike`
     client interface; default factory lazy-loads `openai` so tests never
@@ -406,7 +406,7 @@
     flows, response_format shape assertion, refusal throw, invalid-JSON
     throw, invalid-verdict throw, no-key constructor throw, metrics
     aggregation, pre-flight budget short-circuits the network call.
-- **`@ai-conclave/integration-email`** — fourth notification surface,
+- **`@conclave-ai/integration-email`** — fourth notification surface,
   completes decision #24's equal-weight set (CLI + Telegram + Discord +
   Slack + Email):
   - `EmailNotifier` implements `Notifier` using a pluggable
@@ -435,7 +435,7 @@
     comma-separated env fallback, subjectOverride wins, custom
     transport plugs in, text + html both sent, Notifier interface
     conformance).
-- **`@ai-conclave/integration-slack`** — third notification surface
+- **`@conclave-ai/integration-slack`** — third notification surface
   (decision #24, Block Kit format, webhook-based same as Discord):
   - `SlackNotifier` implements `Notifier`. Posts to a Slack incoming
     webhook using Block Kit layout (section + context + divider blocks).
@@ -460,7 +460,7 @@
     default username, iconUrl wins + iconEmoji alone, non-200 throw
     with body, SLACK_WEBHOOK_URL env fallback, Notifier interface
     conformance).
-- **`@ai-conclave/integration-discord`** — second notification surface
+- **`@conclave-ai/integration-discord`** — second notification surface
   (decision #24, same `Notifier` pattern as Telegram):
   - `DiscordNotifier` implements `Notifier`. Posts to an incoming
     webhook — simpler than bot API (no token, no chat id — just the
@@ -482,7 +482,7 @@
     no-blockers placeholder, 24-field cap with overflow) and `notifier`
     (missing URL throw, non-Discord URL throw, both discord.com /
     discordapp.com accepted, POST + JSON content-type shape, default
-    username Ai-Conclave, username override, avatarUrl propagation,
+    username Conclave AI, username override, avatarUrl propagation,
     non-200 throws with status + snippet, DISCORD_WEBHOOK_URL env
     fallback, Notifier interface conformance).
 - **Legacy failure-catalog seeding** (decision #18: port solo-cto-agent's
@@ -504,7 +504,7 @@
     ISO (YYYY-MM-DD → `T00:00:00.000Z`).
   - `seedFromLegacyCatalogPath(path, store, opts)` reads from disk.
   - **Bundled catalog** — `packages/core/src/memory/seeds/solo-cto-agent-failure-catalog.json`
-    ships with `@ai-conclave/core`. Post-build script
+    ships with `@conclave-ai/core`. Post-build script
     (`scripts/copy-seeds.mjs`) mirrors `src/memory/seeds/` →
     `dist/memory/seeds/` since tsc does not copy non-TS files.
   - **New CLI command `conclave seed [--from <path>]`** — zero-config
@@ -518,10 +518,10 @@
     correctness, `{ write: false }` no-op, createdAt normalization from
     YYYY-MM-DD to ISO, bundled catalog smoke test (15 entries all tagged
     "solo-cto-agent").
-- **`@ai-conclave/integration-telegram`** — first notification surface
+- **`@conclave-ai/integration-telegram`** — first notification surface
   (decision #24 — Telegram / Discord / Slack / Email are equal-weight;
   none is hero):
-  - `Notifier` interface added to `@ai-conclave/core`
+  - `Notifier` interface added to `@conclave-ai/core`
     (`notifyReview(input)` contract). Pluggable — any future integration
     package implements this.
   - `TelegramClient`: thin native-fetch wrapper over Bot API sendMessage.
@@ -552,7 +552,7 @@
     inline keyboard present by default, includeActionButtons:false
     omits reply_markup, env fallback for TELEGRAM_BOT_TOKEN +
     TELEGRAM_CHAT_ID, `Notifier` interface conformance.
-- **`@ai-conclave/observability-langfuse`** — first observability sink
+- **`@conclave-ai/observability-langfuse`** — first observability sink
   (decision #13 — self-hosted Langfuse):
   - `LangfuseMetricsSink` implements core's `MetricsSink`. Each per-call
     metric becomes a Langfuse `generation` with name = `review.<agent>`,
@@ -576,7 +576,7 @@
     (setTraceId between records), error-swallowing on client throw,
     flush + shutdown paths (shutdownAsync preferred, flushAsync
     fallback), lazy one-shot client factory init.
-- **`@ai-conclave/scm-github`** — GitHub SCM adapter + automatic outcome
+- **`@conclave-ai/scm-github`** — GitHub SCM adapter + automatic outcome
   capture (closes the manual `record-outcome` gap):
   - `fetchPrState(repo, prNumber)` wraps `gh pr view` to resolve current
     state / merge SHA / head SHA / updatedAt. No GitHub token needed in
@@ -606,7 +606,7 @@
     same-head no-op, pullNumber=0 local review skipped, gh errors
     counted but scan continues, already-resolved entries not re-polled,
     listPendingEpisodics correctness).
-- **`@ai-conclave/agent-gemini`** — third council voice, long-context slot
+- **`@conclave-ai/agent-gemini`** — third council voice, long-context slot
   (decision #10: Gemini 2.5 Pro as the >50K input tokens handler, flash
   as triage. Deep Think skipped as Ultra-tier overkill):
   - `GeminiAgent` wraps `@google/genai` via a minimal `GenAILike` client

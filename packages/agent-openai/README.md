@@ -1,21 +1,21 @@
-# @ai-conclave/agent-openai
+# @conclave-ai/agent-openai
 
-OpenAI agent for Ai-Conclave council review. Implements the `Agent`
-interface from `@ai-conclave/core`. Uses strict JSON Schema response
+OpenAI agent for Conclave AI council review. Implements the `Agent`
+interface from `@conclave-ai/core`. Uses strict JSON Schema response
 format (decision #12) for guaranteed well-formed `ReviewResult` output.
 
 ## Install
 
 ```bash
-pnpm add @ai-conclave/agent-openai @ai-conclave/core
+pnpm add @conclave-ai/agent-openai @conclave-ai/core
 ```
 
 ## Usage
 
 ```ts
-import { OpenAIAgent } from "@ai-conclave/agent-openai";
-import { ClaudeAgent } from "@ai-conclave/agent-claude";
-import { Council, EfficiencyGate } from "@ai-conclave/core";
+import { OpenAIAgent } from "@conclave-ai/agent-openai";
+import { ClaudeAgent } from "@conclave-ai/agent-claude";
+import { Council, EfficiencyGate } from "@conclave-ai/core";
 
 const gate = new EfficiencyGate();
 const council = new Council({

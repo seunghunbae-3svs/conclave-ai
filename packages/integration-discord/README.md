@@ -1,7 +1,7 @@
-# @ai-conclave/integration-discord
+# @conclave-ai/integration-discord
 
-Discord notifier for Ai-Conclave council reviews. Implements the
-`Notifier` interface from `@ai-conclave/core`.
+Discord notifier for Conclave AI council reviews. Implements the
+`Notifier` interface from `@conclave-ai/core`.
 
 Decision #24: equal-weight integration alongside Telegram / Slack /
 Email / CLI. No hero surface.
@@ -9,13 +9,13 @@ Email / CLI. No hero surface.
 ## Install
 
 ```bash
-pnpm add @ai-conclave/integration-discord @ai-conclave/core
+pnpm add @conclave-ai/integration-discord @conclave-ai/core
 ```
 
 ## Usage
 
 ```ts
-import { DiscordNotifier } from "@ai-conclave/integration-discord";
+import { DiscordNotifier } from "@conclave-ai/integration-discord";
 
 const discord = new DiscordNotifier({
   webhookUrl: process.env.DISCORD_WEBHOOK_URL,

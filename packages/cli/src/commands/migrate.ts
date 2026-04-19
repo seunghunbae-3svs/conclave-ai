@@ -1,9 +1,9 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
-import { FileSystemMemoryStore, seedFromLegacyCatalogPath } from "@ai-conclave/core";
+import { FileSystemMemoryStore, seedFromLegacyCatalogPath } from "@conclave-ai/core";
 import { loadConfig, resolveMemoryRoot, CONFIG_FILENAME, DEFAULT_CONFIG } from "../lib/config.js";
 
-const HELP = `conclave migrate — bring a solo-cto-agent install over to ai-conclave
+const HELP = `conclave migrate — bring a solo-cto-agent install over to conclave-ai
 
 Usage:
   conclave migrate [--from <solo-cto-agent-root>] [--dry-run]
@@ -15,11 +15,11 @@ Usage:
 
 What it does:
   1. Detect solo-cto-agent's failure-catalog.json and port every entry
-     to ai-conclave's memory store as a FailureEntry (same mapping as
+     to conclave-ai's memory store as a FailureEntry (same mapping as
      \`conclave seed --from <path>\`).
   2. Read any TRACKED_REPOS config in solo-cto-agent/.solo-cto/tracked.json
      (if present) and surface them for the user to configure under
-     ai-conclave manually.
+     conclave-ai manually.
   3. Emit a .conclaverc.json with sensible defaults if none exists in the
      current directory.
   4. Print a checklist of env vars the user should migrate
@@ -87,7 +87,7 @@ export async function findLegacyUpwards(startDir: string): Promise<LegacyDetecti
     const hit = await detectLegacy(dir);
     if (hit) return hit;
     // Also try a sibling "solo-cto-agent" folder (common layout:
-    // parent/solo-cto-agent + parent/ai-conclave).
+    // parent/solo-cto-agent + parent/conclave-ai).
     const sibling = path.join(dir, "solo-cto-agent");
     const sibHit = await detectLegacy(sibling);
     if (sibHit) return sibHit;

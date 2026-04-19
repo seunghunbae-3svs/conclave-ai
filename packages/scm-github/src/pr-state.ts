@@ -35,7 +35,7 @@ const defaultRunner: GhRunner = async (bin, args, opts) => {
 
 /**
  * Fetch a PR's current state via `gh pr view`. Uses the gh CLI for auth +
- * network — same dependency as @ai-conclave/cli already requires for
+ * network — same dependency as @conclave-ai/cli already requires for
  * `conclave review --pr N`. No GitHub token needs to live in conclave's
  * config.
  */

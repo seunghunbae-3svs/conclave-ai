@@ -1,6 +1,6 @@
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { FileSystemMemoryStore, seedFromLegacyCatalogPath } from "@ai-conclave/core";
+import { FileSystemMemoryStore, seedFromLegacyCatalogPath } from "@conclave-ai/core";
 import { loadConfig, resolveMemoryRoot } from "../lib/config.js";
 
 const HELP = `conclave seed — bootstrap the failure catalog from a legacy source
@@ -29,10 +29,10 @@ function parseArgv(argv: string[]): { from?: string; help: boolean } {
   return out;
 }
 
-/** Resolve the bundled legacy catalog path (ships inside @ai-conclave/core). */
+/** Resolve the bundled legacy catalog path (ships inside @conclave-ai/core). */
 function resolveBundledCatalog(): string {
-  // When bundled via tsc, this file lives at node_modules/@ai-conclave/cli/dist/commands/seed.js.
-  // The catalog ships under node_modules/@ai-conclave/core/dist/memory/seeds/solo-cto-agent-failure-catalog.json
+  // When bundled via tsc, this file lives at node_modules/@conclave-ai/cli/dist/commands/seed.js.
+  // The catalog ships under node_modules/@conclave-ai/core/dist/memory/seeds/solo-cto-agent-failure-catalog.json
   // — but we resolve it relative to the core package's module root for portability.
   const here = path.dirname(fileURLToPath(import.meta.url));
   // Walk up to the workspace root, then dive into core's dist.

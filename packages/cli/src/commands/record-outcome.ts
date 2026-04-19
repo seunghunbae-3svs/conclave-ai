@@ -1,4 +1,4 @@
-import { FileSystemMemoryStore, OutcomeWriter, type OutcomeResult } from "@ai-conclave/core";
+import { FileSystemMemoryStore, OutcomeWriter, type OutcomeResult } from "@conclave-ai/core";
 import { loadConfig, resolveMemoryRoot } from "../lib/config.js";
 
 const HELP = `conclave record-outcome — close the self-evolve loop

@@ -1,7 +1,7 @@
 {
-  "name": "@ai-conclave/agent-gemini",
+  "name": "@conclave-ai/agent-gemini",
   "version": "0.0.0",
-  "description": "Ai-Conclave Gemini agent — wraps @google/genai with responseSchema structured output. Long-context slot per decision #10.",
+  "description": "Conclave AI Gemini agent — wraps @google/genai with responseSchema structured output. Long-context slot per decision #10.",
   "license": "MIT",
   "type": "module",
   "main": "./dist/index.js",
@@ -25,7 +25,7 @@
     "clean": "rm -rf dist .tsbuildinfo"
   },
   "dependencies": {
-    "@ai-conclave/core": "workspace:*",
+    "@conclave-ai/core": "workspace:*",
     "@google/genai": "^0.10.0"
   },
   "devDependencies": {

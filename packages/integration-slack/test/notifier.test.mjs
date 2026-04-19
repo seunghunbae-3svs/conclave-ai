@@ -58,7 +58,7 @@ test("SlackNotifier: default username + iconEmoji/iconUrl behavior", async () =>
   const f = mockFetch();
   const n = new SlackNotifier({ webhookUrl: GOOD_WEBHOOK, fetch: f });
   await n.notifyReview(baseInput);
-  assert.equal(f.calls[0].body.username, "Ai-Conclave");
+  assert.equal(f.calls[0].body.username, "Conclave AI");
   assert.equal(f.calls[0].body.icon_url, undefined);
   assert.equal(f.calls[0].body.icon_emoji, undefined);
 });

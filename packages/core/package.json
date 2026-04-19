@@ -1,7 +1,7 @@
 {
-  "name": "@ai-conclave/core",
-  "version": "0.0.0",
-  "description": "Ai-Conclave core — Agent interface, council orchestration, self-evolve substrate, efficiency gate.",
+  "name": "@conclave-ai/core",
+  "version": "0.1.0",
+  "description": "Conclave AI core — Agent interface, council orchestration, self-evolve substrate, efficiency gate.",
   "license": "MIT",
   "type": "module",
   "main": "./dist/index.js",

@@ -12,16 +12,16 @@ import {
   formatFailureForPrompt,
   type MetricsSink,
   type ReviewContext,
-} from "@ai-conclave/core";
-import { ClaudeAgent } from "@ai-conclave/agent-claude";
-import { OpenAIAgent } from "@ai-conclave/agent-openai";
-import { GeminiAgent } from "@ai-conclave/agent-gemini";
-import { LangfuseMetricsSink } from "@ai-conclave/observability-langfuse";
-import { TelegramNotifier } from "@ai-conclave/integration-telegram";
-import { DiscordNotifier } from "@ai-conclave/integration-discord";
-import { SlackNotifier } from "@ai-conclave/integration-slack";
-import { EmailNotifier } from "@ai-conclave/integration-email";
-import type { Notifier } from "@ai-conclave/core";
+} from "@conclave-ai/core";
+import { ClaudeAgent } from "@conclave-ai/agent-claude";
+import { OpenAIAgent } from "@conclave-ai/agent-openai";
+import { GeminiAgent } from "@conclave-ai/agent-gemini";
+import { LangfuseMetricsSink } from "@conclave-ai/observability-langfuse";
+import { TelegramNotifier } from "@conclave-ai/integration-telegram";
+import { DiscordNotifier } from "@conclave-ai/integration-discord";
+import { SlackNotifier } from "@conclave-ai/integration-slack";
+import { EmailNotifier } from "@conclave-ai/integration-email";
+import type { Notifier } from "@conclave-ai/core";
 import { loadConfig, resolveMemoryRoot } from "../lib/config.js";
 import { loadPrDiff, loadGitDiff, loadFileDiff, type LoadedDiff } from "../lib/diff-source.js";
 import { renderReview, verdictToExitCode } from "../lib/output.js";
@@ -349,7 +349,7 @@ export async function review(argv: string[]): Promise<void> {
         if (platforms.length === 0) {
           process.stderr.write("conclave review: visual enabled but no platforms available — skipping\n");
         } else {
-          const visualMod = await import("@ai-conclave/visual-review");
+          const visualMod = await import("@conclave-ai/visual-review");
           const { runVisualReview } = visualMod;
           const visualInput: Parameters<typeof runVisualReview>[0] = {
             repo: loaded.repo,

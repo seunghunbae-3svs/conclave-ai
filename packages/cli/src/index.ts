@@ -8,7 +8,7 @@ import { scores } from "./commands/scores.js";
 import { sync } from "./commands/sync.js";
 import { mcpServer } from "./commands/mcp-server.js";
 
-const HELP = `conclave — Ai-Conclave CLI
+const HELP = `conclave — Conclave AI CLI
 
 Usage:
   conclave <command> [options]
@@ -19,7 +19,7 @@ Commands:
   record-outcome        Record a PR's merge/reject/rework outcome manually
   poll-outcomes         Auto-classify pending reviews against live GitHub PR state
   seed                  Bootstrap failure-catalog from a legacy source (default: bundled solo-cto-agent)
-  migrate               Port a solo-cto-agent install over to ai-conclave (config + failure-catalog + checklist)
+  migrate               Port a solo-cto-agent install over to conclave-ai (config + failure-catalog + checklist)
   scores                Show per-agent performance scores from memory (decision #19)
   sync                  Exchange k-anonymous baseline signal with a federation endpoint (decision #21, opt-in)
   mcp-server            Run an MCP stdio server exposing conclave's memory to Claude Desktop / Cursor / Windsurf (decision #11)

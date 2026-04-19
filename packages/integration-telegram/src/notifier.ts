@@ -1,4 +1,4 @@
-import type { Notifier, NotifyReviewInput } from "@ai-conclave/core";
+import type { Notifier, NotifyReviewInput } from "@conclave-ai/core";
 import { TelegramClient, type HttpFetch, type TelegramInlineKeyboard } from "./client.js";
 import { formatReviewForTelegram } from "./format.js";
 

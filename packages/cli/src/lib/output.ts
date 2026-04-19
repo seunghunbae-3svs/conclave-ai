@@ -1,4 +1,4 @@
-import type { Blocker, ReviewResult, MetricsSummary } from "@ai-conclave/core";
+import type { Blocker, ReviewResult, MetricsSummary } from "@conclave-ai/core";
 
 export interface PrintReviewInput {
   repo: string;

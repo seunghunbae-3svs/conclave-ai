@@ -1,4 +1,4 @@
-# Ai-Conclave
+# Conclave AI
 
 **AI drafted. Council refined.**
 
@@ -64,16 +64,16 @@ negative); here `정답지 ∥ 오답지` is the primitive — decision #17.
 
 | Package | Purpose |
 |---|---|
-| `@ai-conclave/core` | Agent interface, Council (3-round debate), efficiency gate, memory substrate (정답지 + 오답지), scoring (decision #19), federated sync (decision #21) |
-| `@ai-conclave/agent-claude` | Claude reviewer — tool-use with `submit_review` + prompt caching |
-| `@ai-conclave/agent-openai` | OpenAI reviewer — strict JSON schema + cached-token discount |
-| `@ai-conclave/agent-gemini` | Gemini reviewer — long-context routing tier |
-| `@ai-conclave/cli` | `conclave` binary — 9 commands |
-| `@ai-conclave/scm-github` | `gh`-CLI wrapper + `conclave poll-outcomes` |
-| `@ai-conclave/platform-vercel` · `-netlify` · `-cloudflare` · `-railway` · `-deployment-status` | Preview URL resolution for visual review (decision #31) |
-| `@ai-conclave/integration-telegram` · `-discord` · `-slack` · `-email` | Equal-weight notifiers (decision #24) |
-| `@ai-conclave/observability-langfuse` | `LangfuseMetricsSink` for the efficiency gate |
-| `@ai-conclave/visual-review` | Playwright capture + pixelmatch diff + `ClaudeVisionJudge` |
+| `@conclave-ai/core` | Agent interface, Council (3-round debate), efficiency gate, memory substrate (정답지 + 오답지), scoring (decision #19), federated sync (decision #21) |
+| `@conclave-ai/agent-claude` | Claude reviewer — tool-use with `submit_review` + prompt caching |
+| `@conclave-ai/agent-openai` | OpenAI reviewer — strict JSON schema + cached-token discount |
+| `@conclave-ai/agent-gemini` | Gemini reviewer — long-context routing tier |
+| `@conclave-ai/cli` | `conclave` binary — 9 commands |
+| `@conclave-ai/scm-github` | `gh`-CLI wrapper + `conclave poll-outcomes` |
+| `@conclave-ai/platform-vercel` · `-netlify` · `-cloudflare` · `-railway` · `-deployment-status` | Preview URL resolution for visual review (decision #31) |
+| `@conclave-ai/integration-telegram` · `-discord` · `-slack` · `-email` | Equal-weight notifiers (decision #24) |
+| `@conclave-ai/observability-langfuse` | `LangfuseMetricsSink` for the efficiency gate |
+| `@conclave-ai/visual-review` | Playwright capture + pixelmatch diff + `ClaudeVisionJudge` |
 
 ## CLI commands
 
@@ -91,8 +91,8 @@ conclave sync [--dry-run|--push-only|--pull-only]  # federated baseline (opt-in)
 ## Quickstart (from source, pre-publish)
 
 ```bash
-git clone https://github.com/seunghunbae-3svs/ai-conclave
-cd ai-conclave
+git clone https://github.com/seunghunbae-3svs/conclave-ai
+cd conclave-ai
 pnpm install
 pnpm build
 
@@ -104,11 +104,11 @@ export GOOGLE_API_KEY=...
 
 # Drop into a repo you want to review:
 cd /path/to/your-repo
-node /path/to/ai-conclave/packages/cli/dist/bin/conclave.js init
-node /path/to/ai-conclave/packages/cli/dist/bin/conclave.js review --pr 42
+node /path/to/conclave-ai/packages/cli/dist/bin/conclave.js init
+node /path/to/conclave-ai/packages/cli/dist/bin/conclave.js review --pr 42
 ```
 
-Once published: `pnpm add -g @ai-conclave/cli`.
+Once published: `pnpm add -g @conclave-ai/cli`.
 
 Full walkthrough: [docs/getting-started.md](docs/getting-started.md).
 
@@ -159,8 +159,8 @@ Locked design decisions (do not reopen without explicit reason) live in
 
 `solo-cto-agent` is the v1 predecessor, still on
 [npm](https://www.npmjs.com/package/solo-cto-agent) in maintenance mode
-(security fixes only). Ai-Conclave is a clean-slate rewrite under a new
-`@ai-conclave` scope with a multi-agent architecture. `conclave migrate`
+(security fixes only). Conclave AI is a clean-slate rewrite under a new
+`@conclave-ai` scope with a multi-agent architecture. `conclave migrate`
 ports an existing solo-cto-agent install — config + failure-catalog +
 per-step checklist.
 

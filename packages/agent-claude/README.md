@@ -1,7 +1,7 @@
-# @ai-conclave/agent-claude
+# @conclave-ai/agent-claude
 
-Claude agent for Ai-Conclave council review. Implements the `Agent`
-interface from `@ai-conclave/core`.
+Claude agent for Conclave AI council review. Implements the `Agent`
+interface from `@conclave-ai/core`.
 
 Skeleton status: interface correct, review stub returns `approve`. Real
 tool-use loop (via `@anthropic-ai/claude-agent-sdk`) with RAG over
@@ -11,14 +11,14 @@ a later PR.
 ## Install
 
 ```bash
-pnpm add @ai-conclave/agent-claude @ai-conclave/core
+pnpm add @conclave-ai/agent-claude @conclave-ai/core
 ```
 
 ## Usage
 
 ```ts
-import { ClaudeAgent } from "@ai-conclave/agent-claude";
-import { Council } from "@ai-conclave/core";
+import { ClaudeAgent } from "@conclave-ai/agent-claude";
+import { Council } from "@conclave-ai/core";
 
 const agent = new ClaudeAgent({ apiKey: process.env.ANTHROPIC_API_KEY });
 const council = new Council({ agents: [agent] });

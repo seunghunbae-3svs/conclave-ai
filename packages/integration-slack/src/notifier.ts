@@ -1,4 +1,4 @@
-import type { Notifier, NotifyReviewInput } from "@ai-conclave/core";
+import type { Notifier, NotifyReviewInput } from "@conclave-ai/core";
 import { formatReviewForSlack } from "./format.js";
 
 export interface HttpFetch {
@@ -21,11 +21,11 @@ export interface SlackNotifierOptions {
   fetch?: HttpFetch;
 }
 
-const DEFAULT_USERNAME = "Ai-Conclave";
+const DEFAULT_USERNAME = "Conclave AI";
 
 /**
  * SlackNotifier — posts review outcomes to a Slack channel via incoming
- * webhook. Same pattern as `@ai-conclave/integration-discord` — write-only,
+ * webhook. Same pattern as `@conclave-ai/integration-discord` — write-only,
  * no OAuth.
  */
 export class SlackNotifier implements Notifier {

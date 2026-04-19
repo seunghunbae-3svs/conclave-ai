@@ -1,7 +1,7 @@
-# @ai-conclave/integration-telegram
+# @conclave-ai/integration-telegram
 
-Telegram notifier for Ai-Conclave council reviews. Implements the
-`Notifier` interface from `@ai-conclave/core`.
+Telegram notifier for Conclave AI council reviews. Implements the
+`Notifier` interface from `@conclave-ai/core`.
 
 Decision #24: equal-weight integration alongside Discord / Slack / Email
 / CLI. No hero surface.
@@ -9,13 +9,13 @@ Decision #24: equal-weight integration alongside Discord / Slack / Email
 ## Install
 
 ```bash
-pnpm add @ai-conclave/integration-telegram @ai-conclave/core
+pnpm add @conclave-ai/integration-telegram @conclave-ai/core
 ```
 
 ## Usage
 
 ```ts
-import { TelegramNotifier } from "@ai-conclave/integration-telegram";
+import { TelegramNotifier } from "@conclave-ai/integration-telegram";
 
 const telegram = new TelegramNotifier({
   token: process.env.TELEGRAM_BOT_TOKEN,

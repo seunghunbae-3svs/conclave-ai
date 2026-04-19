@@ -1,4 +1,4 @@
-import type { NotifyReviewInput } from "@ai-conclave/core";
+import type { NotifyReviewInput } from "@conclave-ai/core";
 
 const VERDICT_EMOJI: Record<"approve" | "rework" | "reject", string> = {
   approve: "✅",

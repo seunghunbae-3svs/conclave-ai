@@ -1,5 +1,5 @@
-import { FileSystemMemoryStore, OutcomeWriter } from "@ai-conclave/core";
-import { pollOutcomes } from "@ai-conclave/scm-github";
+import { FileSystemMemoryStore, OutcomeWriter } from "@conclave-ai/core";
+import { pollOutcomes } from "@conclave-ai/scm-github";
 import { loadConfig, resolveMemoryRoot } from "../lib/config.js";
 
 const HELP = `conclave poll-outcomes — auto-classify pending reviews against GitHub PR state

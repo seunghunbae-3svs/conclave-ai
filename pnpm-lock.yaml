@@ -20,7 +20,7 @@ importers:
 
   packages/agent-claude:
     dependencies:
-      '@ai-conclave/core':
+      '@conclave-ai/core':
         specifier: workspace:*
         version: link:../core
       '@anthropic-ai/sdk':
@@ -33,7 +33,7 @@ importers:
 
   packages/agent-gemini:
     dependencies:
-      '@ai-conclave/core':
+      '@conclave-ai/core':
         specifier: workspace:*
         version: link:../core
       '@google/genai':
@@ -46,7 +46,7 @@ importers:
 
   packages/agent-openai:
     dependencies:
-      '@ai-conclave/core':
+      '@conclave-ai/core':
         specifier: workspace:*
         version: link:../core
       openai:
@@ -59,52 +59,52 @@ importers:
 
   packages/cli:
     dependencies:
-      '@ai-conclave/agent-claude':
+      '@conclave-ai/agent-claude':
         specifier: workspace:*
         version: link:../agent-claude
-      '@ai-conclave/agent-gemini':
+      '@conclave-ai/agent-gemini':
         specifier: workspace:*
         version: link:../agent-gemini
-      '@ai-conclave/agent-openai':
+      '@conclave-ai/agent-openai':
         specifier: workspace:*
         version: link:../agent-openai
-      '@ai-conclave/core':
+      '@conclave-ai/core':
         specifier: workspace:*
         version: link:../core
-      '@ai-conclave/integration-discord':
+      '@conclave-ai/integration-discord':
         specifier: workspace:*
         version: link:../integration-discord
-      '@ai-conclave/integration-email':
+      '@conclave-ai/integration-email':
         specifier: workspace:*
         version: link:../integration-email
-      '@ai-conclave/integration-slack':
+      '@conclave-ai/integration-slack':
         specifier: workspace:*
         version: link:../integration-slack
-      '@ai-conclave/integration-telegram':
+      '@conclave-ai/integration-telegram':
         specifier: workspace:*
         version: link:../integration-telegram
-      '@ai-conclave/observability-langfuse':
+      '@conclave-ai/observability-langfuse':
         specifier: workspace:*
         version: link:../observability-langfuse
-      '@ai-conclave/platform-cloudflare':
+      '@conclave-ai/platform-cloudflare':
         specifier: workspace:*
         version: link:../platform-cloudflare
-      '@ai-conclave/platform-deployment-status':
+      '@conclave-ai/platform-deployment-status':
         specifier: workspace:*
         version: link:../platform-deployment-status
-      '@ai-conclave/platform-netlify':
+      '@conclave-ai/platform-netlify':
         specifier: workspace:*
         version: link:../platform-netlify
-      '@ai-conclave/platform-railway':
+      '@conclave-ai/platform-railway':
         specifier: workspace:*
         version: link:../platform-railway
-      '@ai-conclave/platform-vercel':
+      '@conclave-ai/platform-vercel':
         specifier: workspace:*
         version: link:../platform-vercel
-      '@ai-conclave/scm-github':
+      '@conclave-ai/scm-github':
         specifier: workspace:*
         version: link:../scm-github
-      '@ai-conclave/visual-review':
+      '@conclave-ai/visual-review':
         specifier: workspace:*
         version: link:../visual-review
       '@modelcontextprotocol/sdk':
@@ -133,7 +133,7 @@ importers:
 
   packages/integration-discord:
     dependencies:
-      '@ai-conclave/core':
+      '@conclave-ai/core':
         specifier: workspace:*
         version: link:../core
     devDependencies:
@@ -143,7 +143,7 @@ importers:
 
   packages/integration-email:
     dependencies:
-      '@ai-conclave/core':
+      '@conclave-ai/core':
         specifier: workspace:*
         version: link:../core
     devDependencies:
@@ -153,7 +153,7 @@ importers:
 
   packages/integration-slack:
     dependencies:
-      '@ai-conclave/core':
+      '@conclave-ai/core':
         specifier: workspace:*
         version: link:../core
     devDependencies:
@@ -163,7 +163,7 @@ importers:
 
   packages/integration-telegram:
     dependencies:
-      '@ai-conclave/core':
+      '@conclave-ai/core':
         specifier: workspace:*
         version: link:../core
     devDependencies:
@@ -173,7 +173,7 @@ importers:
 
   packages/observability-langfuse:
     dependencies:
-      '@ai-conclave/core':
+      '@conclave-ai/core':
         specifier: workspace:*
         version: link:../core
       langfuse:
@@ -186,7 +186,7 @@ importers:
 
   packages/platform-cloudflare:
     dependencies:
-      '@ai-conclave/core':
+      '@conclave-ai/core':
         specifier: workspace:*
         version: link:../core
     devDependencies:
@@ -196,7 +196,7 @@ importers:
 
   packages/platform-deployment-status:
     dependencies:
-      '@ai-conclave/core':
+      '@conclave-ai/core':
         specifier: workspace:*
         version: link:../core
     devDependencies:
@@ -206,7 +206,7 @@ importers:
 
   packages/platform-netlify:
     dependencies:
-      '@ai-conclave/core':
+      '@conclave-ai/core':
         specifier: workspace:*
         version: link:../core
     devDependencies:
@@ -216,7 +216,7 @@ importers:
 
   packages/platform-railway:
     dependencies:
-      '@ai-conclave/core':
+      '@conclave-ai/core':
         specifier: workspace:*
         version: link:../core
     devDependencies:
@@ -226,7 +226,7 @@ importers:
 
   packages/platform-vercel:
     dependencies:
-      '@ai-conclave/core':
+      '@conclave-ai/core':
         specifier: workspace:*
         version: link:../core
     devDependencies:
@@ -236,7 +236,7 @@ importers:
 
   packages/scm-github:
     dependencies:
-      '@ai-conclave/core':
+      '@conclave-ai/core':
         specifier: workspace:*
         version: link:../core
     devDependencies:
@@ -246,7 +246,7 @@ importers:
 
   packages/visual-review:
     dependencies:
-      '@ai-conclave/core':
+      '@conclave-ai/core':
         specifier: workspace:*
         version: link:../core
       '@anthropic-ai/sdk':

@@ -1,8 +1,8 @@
-# @ai-conclave/platform-vercel
+# @conclave-ai/platform-vercel
 
-Vercel adapter for Ai-Conclave — resolves the preview URL for a given
+Vercel adapter for Conclave AI — resolves the preview URL for a given
 commit SHA via Vercel's `/v6/deployments` REST endpoint. Implements the
-`Platform` interface from `@ai-conclave/core`.
+`Platform` interface from `@conclave-ai/core`.
 
 Decision #31: Vercel is part of the v2.0 platform set alongside Netlify
 / Railway / Cloudflare Pages / `deployment-status`.
@@ -10,14 +10,14 @@ Decision #31: Vercel is part of the v2.0 platform set alongside Netlify
 ## Install
 
 ```bash
-pnpm add @ai-conclave/platform-vercel @ai-conclave/core
+pnpm add @conclave-ai/platform-vercel @conclave-ai/core
 ```
 
 ## Usage
 
 ```ts
-import { VercelPlatform } from "@ai-conclave/platform-vercel";
-import { resolveFirstPreview } from "@ai-conclave/core";
+import { VercelPlatform } from "@conclave-ai/platform-vercel";
+import { resolveFirstPreview } from "@conclave-ai/core";
 
 const vercel = new VercelPlatform({
   token: process.env.VERCEL_TOKEN,
