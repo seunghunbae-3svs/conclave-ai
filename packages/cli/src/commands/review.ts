@@ -18,6 +18,7 @@ import { OpenAIAgent } from "@conclave-ai/agent-openai";
 import { GeminiAgent } from "@conclave-ai/agent-gemini";
 import { DeepseekAgent } from "@conclave-ai/agent-deepseek";
 import { OllamaAgent } from "@conclave-ai/agent-ollama";
+import { GrokAgent } from "@conclave-ai/agent-grok";
 import { LangfuseMetricsSink } from "@conclave-ai/observability-langfuse";
 import { TelegramNotifier } from "@conclave-ai/integration-telegram";
 import { DiscordNotifier } from "@conclave-ai/integration-discord";
@@ -184,6 +185,12 @@ export async function review(argv: string[]): Promise<void> {
       // OLLAMA_BASE_URL (default http://localhost:11434/v1). The user
       // is responsible for pulling the configured model.
       agents.push(new OllamaAgent({ gate }));
+    } else if (id === "grok") {
+      if (!process.env["XAI_API_KEY"]) {
+        process.stderr.write("conclave review: XAI_API_KEY not set — skipping Grok agent\n");
+        continue;
+      }
+      agents.push(new GrokAgent({ gate }));
     }
   }
   if (agents.length === 0) {

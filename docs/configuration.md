@@ -51,7 +51,7 @@ rejects unknown versions.
 
 ### `agents`
 
-Array of `"claude"`, `"openai"`, `"gemini"`, `"deepseek"`, `"ollama"`. An agent is only
+Array of `"claude"`, `"openai"`, `"gemini"`, `"deepseek"`, `"ollama"`, `"grok"`. An agent is only
 instantiated if its env var is set — missing keys cleanly skip.
 
 | Agent | Env var |
@@ -61,6 +61,7 @@ instantiated if its env var is set — missing keys cleanly skip.
 | `gemini` | `GOOGLE_API_KEY` (or `GEMINI_API_KEY`) |
 | `deepseek` | `DEEPSEEK_API_KEY` |
 | `ollama` | none (local); optional `OLLAMA_BASE_URL`, default `http://localhost:11434/v1` |
+| `grok` | `XAI_API_KEY` |
 
 ### `budget.perPrUsd`
 

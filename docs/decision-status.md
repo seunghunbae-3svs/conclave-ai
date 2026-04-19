@@ -48,7 +48,7 @@ Legend:
 | 29 | Architecture coherence > feature novelty | 📄 | `ARCHITECTURE.md` |
 | 30 | Migration path from solo-cto-agent | ✅ | `conclave migrate` |
 | 31 | v2.0 platform set (5/5) | ✅ | 5 `platform-*` packages |
-| 32 | v2.1 agents + platforms | 🟡 | in progress — Deepseek first (`agent-deepseek`); Ollama / Grok / Qwen / Bedrock / Vertex / Cheetah queued |
+| 32 | v2.1 agents + platforms | 🟡 | in progress — Deepseek + Ollama + Grok landed; Qwen / Bedrock / Vertex / Cheetah queued |
 | 33 | Tier model (Maker / Builder / CTO) | 📄 | `ARCHITECTURE.md`, README tier lines |
 | 34 | Self-evolve loop | ✅ | `outcome-writer.ts` + classifier + seeder |
 
