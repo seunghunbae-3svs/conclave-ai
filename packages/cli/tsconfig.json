@@ -15,6 +15,11 @@
     { "path": "../integration-email" },
     { "path": "../integration-slack" },
     { "path": "../integration-telegram" },
+    { "path": "../platform-cloudflare" },
+    { "path": "../platform-deployment-status" },
+    { "path": "../platform-netlify" },
+    { "path": "../platform-vercel" },
+    { "path": "../visual-review" },
     { "path": "../observability-langfuse" },
     { "path": "../scm-github" }
   ]

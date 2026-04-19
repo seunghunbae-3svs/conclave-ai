@@ -3,6 +3,18 @@
 ## Unreleased
 
 ### Added
+- **CLI `--visual` / `--no-visual` on `conclave review`** — completes the
+  visual-diff story end-to-end from the CLI.
+  - Config block `visual.{enabled, platforms[], width, height, fullPage,
+    waitSeconds, diffThreshold}` in `.conclaverc.json`.
+  - Flags override config for the run.
+  - `buildPlatforms(ids)` factory lazy-imports adapters; missing env →
+    skipped with stderr warning, never fatal. `deployment-status`
+    always resolves (gh auth only).
+  - Output block appended: severity / diff ratio / before+after URLs /
+    local paths to the 3 PNGs.
+  - Failure-tolerant: visual errors never affect the verdict exit code.
+  - 6 platform-factory test cases.
 - **`@ai-conclave/platform-cloudflare`** — Cloudflare Pages adapter via
   `GET /accounts/{id}/pages/projects/{name}/deployments`. Filters
   client-side by `deployment_trigger.metadata.commit_hash`; picks newest

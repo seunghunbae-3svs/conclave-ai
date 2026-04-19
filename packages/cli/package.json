@@ -30,6 +30,11 @@
     "@ai-conclave/integration-email": "workspace:*",
     "@ai-conclave/integration-slack": "workspace:*",
     "@ai-conclave/integration-telegram": "workspace:*",
+    "@ai-conclave/platform-cloudflare": "workspace:*",
+    "@ai-conclave/platform-deployment-status": "workspace:*",
+    "@ai-conclave/platform-netlify": "workspace:*",
+    "@ai-conclave/platform-vercel": "workspace:*",
+    "@ai-conclave/visual-review": "workspace:*",
     "@ai-conclave/observability-langfuse": "workspace:*",
     "@ai-conclave/scm-github": "workspace:*",
     "zod": "^3.24.0"

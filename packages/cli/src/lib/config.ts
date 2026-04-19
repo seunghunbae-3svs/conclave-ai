@@ -76,6 +76,19 @@ export const ConclaveConfigSchema = z.object({
         .optional(),
     })
     .optional(),
+  visual: z
+    .object({
+      enabled: z.boolean().default(false),
+      platforms: z
+        .array(z.enum(["vercel", "netlify", "cloudflare", "deployment-status"]))
+        .default(["vercel", "netlify", "cloudflare", "deployment-status"]),
+      width: z.number().int().positive().default(1280),
+      height: z.number().int().positive().default(800),
+      fullPage: z.boolean().default(true),
+      waitSeconds: z.number().int().nonnegative().default(60),
+      diffThreshold: z.number().min(0).max(1).default(0.1),
+    })
+    .optional(),
 });
 
 export type ConclaveConfig = z.infer<typeof ConclaveConfigSchema>;

@@ -22,12 +22,29 @@ import type { Notifier } from "@ai-conclave/core";
 import { loadConfig, resolveMemoryRoot } from "../lib/config.js";
 import { loadPrDiff, loadGitDiff, loadFileDiff, type LoadedDiff } from "../lib/diff-source.js";
 import { renderReview, verdictToExitCode } from "../lib/output.js";
+import { buildPlatforms, type PlatformId } from "../lib/platform-factory.js";
 
-function parseArgv(argv: string[]): { pr?: number; diff?: string; base?: string; help: boolean } {
-  const out: { pr?: number; diff?: string; base?: string; help: boolean } = { help: false };
+function parseArgv(argv: string[]): {
+  pr?: number;
+  diff?: string;
+  base?: string;
+  visual: boolean;
+  noVisual: boolean;
+  help: boolean;
+} {
+  const out: {
+    pr?: number;
+    diff?: string;
+    base?: string;
+    visual: boolean;
+    noVisual: boolean;
+    help: boolean;
+  } = { help: false, visual: false, noVisual: false };
   for (let i = 0; i < argv.length; i += 1) {
     const a = argv[i];
     if (a === "--help" || a === "-h") out.help = true;
+    else if (a === "--visual") out.visual = true;
+    else if (a === "--no-visual") out.noVisual = true;
     else if (a === "--pr" && argv[i + 1]) {
       const n = Number.parseInt(argv[i + 1]!, 10);
       if (!Number.isNaN(n)) out.pr = n;
@@ -46,15 +63,21 @@ function parseArgv(argv: string[]): { pr?: number; diff?: string; base?: string;
 const HELP = `conclave review — run a council review on the current branch
 
 Usage:
-  conclave review [--pr N] [--diff <file>] [--base <ref>]
+  conclave review [--pr N] [--diff <file>] [--base <ref>] [--visual|--no-visual]
 
 Options:
   --pr N         Review PR N using gh CLI (preferred — includes repo context).
   --diff <file>  Review a unified-diff file directly.
   --base <ref>   Base ref for 'git diff' when neither --pr nor --diff given (default: origin/main).
+  --visual       Force-enable before/after visual diff (needs platform tokens + playwright).
+  --no-visual    Force-disable visual diff for this run (overrides .conclaverc.json).
 
 Environment:
   ANTHROPIC_API_KEY   required — Claude review call.
+
+Visual review reads platform tokens from env: VERCEL_TOKEN, NETLIFY_TOKEN,
+CLOUDFLARE_API_TOKEN + account/project, or falls back to gh CLI via the
+deployment-status adapter.
 `;
 
 export async function review(argv: string[]): Promise<void> {
@@ -281,6 +304,60 @@ export async function review(argv: string[]): Promise<void> {
         }
       }),
     );
+  }
+
+  // 9. Optional visual diff (before/after preview screenshots). CLI flag
+  //    overrides config. Failures are logged but never fail the review —
+  //    code review verdict always wins.
+  const visualFromConfig = config.visual?.enabled ?? false;
+  const visualEnabled = args.noVisual ? false : args.visual || visualFromConfig;
+  if (visualEnabled) {
+    if (!loaded.prevSha) {
+      process.stderr.write(
+        "conclave review: --visual set but no base SHA available (pullNumber=0 or git diff had no base) — skipping\n",
+      );
+    } else {
+      try {
+        const platformIds: PlatformId[] =
+          config.visual?.platforms ?? ["vercel", "netlify", "cloudflare", "deployment-status"];
+        const { platforms, skipped } = await buildPlatforms(platformIds);
+        for (const sk of skipped) {
+          process.stderr.write(`conclave review: visual platform "${sk.id}" skipped — ${sk.reason}\n`);
+        }
+        if (platforms.length === 0) {
+          process.stderr.write("conclave review: visual enabled but no platforms available — skipping\n");
+        } else {
+          const { runVisualReview } = await import("@ai-conclave/visual-review");
+          const vResult = await runVisualReview({
+            repo: loaded.repo,
+            beforeSha: loaded.prevSha,
+            afterSha: loaded.newSha,
+            platforms,
+            captureOptions: {
+              width: config.visual?.width ?? 1280,
+              height: config.visual?.height ?? 800,
+              fullPage: config.visual?.fullPage ?? true,
+            },
+            diffOptions: { threshold: config.visual?.diffThreshold ?? 0.1 },
+            waitSeconds: config.visual?.waitSeconds ?? 60,
+          });
+          process.stdout.write(
+            `\n── visual review ──\n` +
+              `  severity:   ${vResult.severity}\n` +
+              `  diff ratio: ${(vResult.diff.diffRatio * 100).toFixed(2)}% ` +
+              `(${vResult.diff.diffPixels.toLocaleString()} / ${vResult.diff.totalPixels.toLocaleString()} px)\n` +
+              `  before url: ${vResult.before.url} (${vResult.before.provider})\n` +
+              `  after url:  ${vResult.after.url} (${vResult.after.provider})\n` +
+              `  paths:\n` +
+              `    before:   ${vResult.paths.before}\n` +
+              `    after:    ${vResult.paths.after}\n` +
+              `    diff:     ${vResult.paths.diff}\n`,
+          );
+        }
+      } catch (err) {
+        process.stderr.write(`conclave review: visual diff failed — ${(err as Error).message}\n`);
+      }
+    }
   }
 
   if (langfuseSink) {
