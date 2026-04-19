@@ -146,6 +146,30 @@
     flows, response_format shape assertion, refusal throw, invalid-JSON
     throw, invalid-verdict throw, no-key constructor throw, metrics
     aggregation, pre-flight budget short-circuits the network call.
+- **`@ai-conclave/observability-langfuse`** — first observability sink
+  (decision #13 — self-hosted Langfuse):
+  - `LangfuseMetricsSink` implements core's `MetricsSink`. Each per-call
+    metric becomes a Langfuse `generation` with name = `review.<agent>`,
+    model, input/output tokens, totalCost, cacheHit + latency in
+    metadata, start/end times derived from `timestamp - latencyMs`.
+  - Self-hosted is the intended deployment (baseUrl override); cloud
+    identical. LANGFUSE_PUBLIC_KEY + LANGFUSE_SECRET_KEY required.
+  - Fire-and-forget on `record()` per the synchronous MetricsSink
+    contract; Langfuse SDK's internal queue handles HTTP. Errors
+    captured + logged to stderr so observability failures never kill
+    the review.
+  - `setTraceId(id)` groups all metrics in a single review under one
+    Langfuse trace. `flush()` / `shutdown()` for clean exit.
+  - CLI integration: new `observability.langfuse.{enabled, baseUrl?}`
+    config block. `conclave review` wires the sink when
+    `LANGFUSE_PUBLIC_KEY` / `LANGFUSE_SECRET_KEY` env are set; trace
+    id = `conclave-<owner>-<repo>-<pr>-<sha8>`. Sink flushed before
+    process exit.
+  - 10 sink tests: generation params mapping, metadata for cacheHit +
+    latency, start/end time derivation, traceId static + dynamic
+    (setTraceId between records), error-swallowing on client throw,
+    flush + shutdown paths (shutdownAsync preferred, flushAsync
+    fallback), lazy one-shot client factory init.
 - **`@ai-conclave/scm-github`** — GitHub SCM adapter + automatic outcome
   capture (closes the manual `record-outcome` gap):
   - `fetchPrState(repo, prNumber)` wraps `gh pr view` to resolve current

@@ -11,6 +11,7 @@
     { "path": "../agent-claude" },
     { "path": "../agent-gemini" },
     { "path": "../agent-openai" },
+    { "path": "../observability-langfuse" },
     { "path": "../scm-github" }
   ]
 }
