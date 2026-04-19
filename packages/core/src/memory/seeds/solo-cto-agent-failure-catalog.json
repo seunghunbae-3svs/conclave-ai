@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updated_at": "2026-04-13",
+  "updated_at": "2026-04-20",
   "items": [
     {
       "id": "ERR-001",
@@ -106,6 +106,27 @@
       "pattern": "Conflicting peer dependency",
       "description": "npm install fails due to incompatible package version requirements.",
       "fix": "Check which packages conflict, pin compatible versions, or use --legacy-peer-deps as last resort."
+    },
+    {
+      "id": "ERR-016",
+      "category": "build",
+      "pattern": "corrupt patch at line",
+      "description": "git apply rejects an LLM-generated unified diff. Hunk content is usually correct but the @@ -A,B +C,D @@ header line counts are wrong (every frontier LLM gets this arithmetic flaky).",
+      "fix": "Apply patches with git apply --recount — the official git flag that recomputes hunk counts from actual content and ignores the header numbers. Use for both --check and apply steps."
+    },
+    {
+      "id": "ERR-017",
+      "category": "build",
+      "pattern": "Unsupported URL Type .workspace:.|EUNSUPPORTEDPROTOCOL",
+      "description": "npm install fails because a published monorepo package still has workspace:* in its dependencies. Occurs when the package was published with npm publish instead of pnpm publish — pnpm rewrites workspace:* to concrete versions on upload, npm does not.",
+      "fix": "Publish workspace packages with pnpm publish --access public (never npm publish). Recover from a bad release by bumping version and republishing via pnpm; deprecate the broken version with npm deprecate <pkg>@<ver> <reason>."
+    },
+    {
+      "id": "ERR-018",
+      "category": "build",
+      "pattern": "pathspec .* did not match any files",
+      "description": "git add fails right after a successful git apply. Usually the worker claimed to create a new file but the new-file hunk (@@ -0,0 +1,N @@) did not actually materialise on disk — a known sharp edge when combining git apply --recount with new-file creation hunks.",
+      "fix": "Use git add -A after git apply instead of pathspec-based git add -- <files>. -A stages exactly what the apply materialised, ignoring anything the worker claimed to have touched but did not."
     }
   ]
 }
