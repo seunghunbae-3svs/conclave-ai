@@ -79,7 +79,50 @@ export class Council {
     for (let round = 1; round <= roundCap; round++) {
       const roundCtx: ReviewContext = { ...ctx, round };
       if (priors.length > 0) roundCtx.priors = priors;
-      const results = await Promise.all(this.agents.map((a) => a.review(roundCtx)));
+      // Promise.allSettled — one agent failing (rate-limit, network blip,
+      // provider 5xx) must NOT kill the rest of the council. Failed
+      // agents drop out of this round; their failure is logged to
+      // stderr and their result is synthesized as verdict="rework" with
+      // a single blocker so upstream consumers still see the signal.
+      const settled = await Promise.allSettled(this.agents.map((a) => a.review(roundCtx)));
+      const results: ReviewResult[] = [];
+      settled.forEach((s, i) => {
+        if (s.status === "fulfilled") {
+          results.push(s.value);
+          return;
+        }
+        const agent = this.agents[i];
+        if (!agent) return;
+        const err = s.reason instanceof Error ? s.reason : new Error(String(s.reason));
+        process.stderr.write(
+          `Council: ${agent.id} failed in round ${round} — ${err.message.slice(0, 300)}\n`,
+        );
+        results.push({
+          agent: agent.id,
+          verdict: "rework",
+          blockers: [
+            {
+              severity: "major",
+              category: "agent-failure",
+              message: `${agent.displayName} failed: ${err.message.slice(0, 200)}`,
+            },
+          ],
+          summary: `${agent.displayName} errored during round ${round} and was excluded from the tally.`,
+        });
+      });
+      // Throw only if ALL agents failed — otherwise continue with the survivors.
+      const anySucceeded = settled.some((s) => s.status === "fulfilled");
+      if (!anySucceeded) {
+        const reasons = settled
+          .map((s, i) =>
+            s.status === "rejected"
+              ? `${this.agents[i]?.id ?? "?"}: ${s.reason instanceof Error ? s.reason.message : String(s.reason)}`
+              : null,
+          )
+          .filter(Boolean)
+          .join("; ");
+        throw new Error(`Council: all agents failed in round ${round} — ${reasons}`);
+      }
       const tally = this.tally(results);
       roundHistory.push({
         round,

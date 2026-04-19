@@ -235,3 +235,61 @@ test("Council: exposes config (agentCount, roundLimit, debateEnabled)", async ()
   const legacy = new Council({ agents: [fakeAgent("a", "approve")], enableDebate: false });
   assert.equal(legacy.debateEnabled, false);
 });
+
+// ---------------------------------------------------------------------
+// Agent-failure isolation (Promise.allSettled — P0 regression test)
+// ---------------------------------------------------------------------
+
+function throwingAgent(id, err) {
+  return {
+    id,
+    displayName: id,
+    review: async () => {
+      throw err instanceof Error ? err : new Error(String(err));
+    },
+  };
+}
+
+test("Council: one agent throwing does NOT kill the rest of the council", async () => {
+  const council = new Council({
+    agents: [
+      throwingAgent("gemini", "429 Too Many Requests (free tier exhausted)"),
+      fakeAgent("claude", "approve"),
+      fakeAgent("openai", "approve"),
+    ],
+  });
+  const outcome = await council.deliberate(ctx);
+  assert.equal(outcome.results.length, 3, "failed agent still surfaces a synthetic result");
+  const failed = outcome.results.find((r) => r.agent === "gemini");
+  assert.ok(failed);
+  assert.equal(failed.verdict, "rework");
+  assert.equal(failed.blockers[0].category, "agent-failure");
+  assert.match(failed.blockers[0].message, /429/);
+});
+
+test("Council: partial failure + mixed verdicts → no consensus, runs full rounds", async () => {
+  const council = new Council({
+    agents: [
+      throwingAgent("gemini", "timeout"),
+      fakeAgent("claude", "approve"),
+      fakeAgent("openai", "rework"),
+    ],
+  });
+  const outcome = await council.deliberate(ctx);
+  // gemini injected as rework → 1 approve + 2 rework → rework, no consensus
+  assert.equal(outcome.verdict, "rework");
+  assert.equal(outcome.consensusReached, false);
+});
+
+test("Council: all agents failing → throws with aggregated reasons", async () => {
+  const council = new Council({
+    agents: [
+      throwingAgent("a", "network unreachable"),
+      throwingAgent("b", "invalid api key"),
+    ],
+  });
+  await assert.rejects(
+    () => council.deliberate(ctx),
+    /all agents failed.*network unreachable.*invalid api key/s,
+  );
+});
