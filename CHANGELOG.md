@@ -3,6 +3,13 @@
 ## Unreleased
 
 ### Fixed
+- **`release.yml` safety hardening (dogfood feedback)** — OpenAI's review of PR #37 flagged five workflow correctness issues during the first real E2E run. Three land as real fixes, two are intentional and now documented:
+  - **Fixed:** bump+commit step now idempotent (skips when there are no staged changes, covers no-op re-runs).
+  - **Fixed:** tag creation idempotent (checks for existing `vX.Y.Z` ref before creating + pushing).
+  - **Fixed:** manual (`workflow_dispatch`) runs gated to `main` — fast-fail with actionable error when dispatched from a feature branch, prevents accidentally pushing a non-main branch into `main` via the release pipeline.
+  - **Kept as-is with rationale in code:** `cancel-in-progress: false` is deliberate. A running release is already publishing tarballs; cancelling mid-flight leaves the registry split. Concurrency group keeps at most one pending run, so there is no race.
+  - **Deferred:** workspace-level atomic versioning (vs per-package `npm version -r`) — `pnpm -r --filter` runs sequentially from a common starting version, so drift only occurs on mid-loop failure. Revisit when/if Changesets lands.
+
 - **Agents' default `maxTokens` 2,048 → 8,192** across Claude, OpenAI, and Gemini. Surfaced during the first real `conclave review` run against PR #37 — OpenAI returned `finish_reason=length` because a medium-sized review prompt + structured JSON output + reasoning tokens exceeded the old cap. 2k was a fixture-friendly default that never tripped in unit tests (mocks don't emit real tokens). Budget reservation math still fits comfortably under the default `$1.00/PR` cap even at 8k × 3 agents × 3 rounds.
 
 ### Ops
