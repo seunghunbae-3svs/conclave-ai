@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+### Ops
+- **`.github/workflows/release.yml` — automated release pipeline.** Two triggers: (1) `workflow_dispatch` with a `patch | minor | major` bump input, runs build + test, bumps every `packages/*` version in lockstep, commits + tags + pushes, then publishes via `pnpm publish -r --access public` with npm provenance. (2) `push: tags: ["v*"]` — skips the bump step (tag is truth) and goes straight to publish. `docs/release-process.md` covers both paths, the one-time secrets setup (`NPM_TOKEN`), and the lockstep-versioning pre-1.0 policy.
+
 ### Docs
 - **`docs/decision-status.md`** — ground-truth table mapping each of the 34 locked decisions to its current implementation state.
   - #8 + #9 (Agent SDK migrations to `@anthropic-ai/claude-agent-sdk` / `@openai/agents`) marked **🔄 Diverged** with explicit rationale: our agents are one-shot reviewers, not loops. The agent-SDK wrappers target autonomous multi-step flows — real weight (3.9 MB Claude SDK + 3-package OpenAI chain), zero behavioral win for our shape. Migration trigger documented: if per-agent tool use lands inside a single review (MCP lookups, iterative proposals), revisit #8/#9 then.
