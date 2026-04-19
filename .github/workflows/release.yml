@@ -125,8 +125,13 @@ jobs:
             fi
           fi
 
+      # npm provenance requires a PUBLIC source repo — sigstore bundle
+      # verification rejects privates with "Unsupported GitHub Actions
+      # source repository visibility: private". We leave the feature off
+      # by default and enable it via `PROVENANCE=true` env input once the
+      # repo is flipped to public.
       - name: Publish to npm
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-          NPM_CONFIG_PROVENANCE: "true"
+          NPM_CONFIG_PROVENANCE: ${{ vars.NPM_CONFIG_PROVENANCE || 'false' }}
         run: pnpm publish -r --access public --no-git-checks
