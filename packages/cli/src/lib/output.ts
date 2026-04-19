@@ -13,6 +13,15 @@ export interface PrintReviewInput {
   rounds?: number;
   /** `true` when debate halted on consensus before reaching maxRounds. */
   earlyExit?: boolean;
+  /** Domain label (e.g. "code", "design"). Omit for legacy flows. */
+  domain?: string;
+  /** Set by TieredCouncil path — tier-2 escalation state. */
+  tier?: {
+    escalated: boolean;
+    reason: string;
+    tier1Rounds: number;
+    tier2Rounds?: number;
+  };
 }
 
 const SEVERITY_ORDER: Record<Blocker["severity"], number> = {
@@ -53,7 +62,16 @@ export function renderReview(input: PrintReviewInput): string {
   lines.push(`  source: ${input.source}`);
   lines.push("");
   lines.push(`Verdict: ${verdictTag(input.councilVerdict)}${input.consensus ? "" : "  (no consensus)"}`);
-  if (input.rounds && input.rounds > 1) {
+  if (input.domain) {
+    lines.push(`Domain:  ${input.domain}`);
+  }
+  if (input.tier) {
+    if (input.tier.escalated) {
+      lines.push(`Tiers:   1 (${input.tier.tier1Rounds}r) → 2 (${input.tier.tier2Rounds ?? 0}r) — ${input.tier.reason}`);
+    } else {
+      lines.push(`Tiers:   1 (${input.tier.tier1Rounds}r) only — ${input.tier.reason}`);
+    }
+  } else if (input.rounds && input.rounds > 1) {
     const tail = input.earlyExit ? " (early exit on consensus)" : "";
     lines.push(`Rounds:  ${input.rounds}${tail}`);
   }

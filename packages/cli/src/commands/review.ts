@@ -7,11 +7,15 @@ import {
   FileSystemMemoryStore,
   MetricsRecorder,
   OutcomeWriter,
+  TieredCouncil,
   buildFrequencyMap,
   formatAnswerKeyForPrompt,
   formatFailureForPrompt,
+  type Agent,
   type MetricsSink,
   type ReviewContext,
+  type ReviewDomain,
+  type TieredCouncilOutcome,
 } from "@conclave-ai/core";
 import { ClaudeAgent } from "@conclave-ai/agent-claude";
 import { OpenAIAgent } from "@conclave-ai/agent-openai";
@@ -30,6 +34,7 @@ import { loadPrDiff, loadGitDiff, loadFileDiff, type LoadedDiff } from "../lib/d
 import { renderReview, verdictToExitCode } from "../lib/output.js";
 import { buildPlatforms, type PlatformId } from "../lib/platform-factory.js";
 
+type ReviewDomainInput = "code" | "design";
 function parseArgv(argv: string[]): {
   pr?: number;
   diff?: string;
@@ -37,6 +42,7 @@ function parseArgv(argv: string[]): {
   visual: boolean;
   noVisual: boolean;
   help: boolean;
+  domain?: ReviewDomainInput;
 } {
   const out: {
     pr?: number;
@@ -45,6 +51,7 @@ function parseArgv(argv: string[]): {
     visual: boolean;
     noVisual: boolean;
     help: boolean;
+    domain?: ReviewDomainInput;
   } = { help: false, visual: false, noVisual: false };
   for (let i = 0; i < argv.length; i += 1) {
     const a = argv[i];
@@ -61,6 +68,10 @@ function parseArgv(argv: string[]): {
     } else if (a === "--base" && argv[i + 1]) {
       out.base = argv[i + 1];
       i += 1;
+    } else if (a === "--domain" && argv[i + 1]) {
+      const d = argv[i + 1];
+      if (d === "code" || d === "design") out.domain = d;
+      i += 1;
     }
   }
   return out;
@@ -69,12 +80,13 @@ function parseArgv(argv: string[]): {
 const HELP = `conclave review — run a council review on the current branch
 
 Usage:
-  conclave review [--pr N] [--diff <file>] [--base <ref>] [--visual|--no-visual]
+  conclave review [--pr N] [--diff <file>] [--base <ref>] [--visual|--no-visual] [--domain code|design]
 
 Options:
   --pr N         Review PR N using gh CLI (preferred — includes repo context).
   --diff <file>  Review a unified-diff file directly.
   --base <ref>   Base ref for 'git diff' when neither --pr nor --diff given (default: origin/main).
+  --domain       "code" (default) or "design". Design always escalates to tier-2 cross-review.
   --visual       Force-enable before/after visual diff (needs platform tokens + playwright).
   --no-visual    Force-disable visual diff for this run (overrides .conclaverc.json).
 
@@ -153,56 +165,108 @@ export async function review(argv: string[]): Promise<void> {
   const metrics = sink ? new MetricsRecorder({ sink }) : new MetricsRecorder();
   const gate = new EfficiencyGate({ budget, metrics });
 
-  // 4. Instantiate the council. Agents enabled in config.agents. An agent
-  //    is only included if its credentials are available; others are skipped
-  //    with a warning so a missing key doesn't block review.
-  const agents = [];
-  for (const id of config.agents) {
+  // 4. Build agents. Per-tier if config.council.domains[domain] is
+  //    present; else a single flat agent list (legacy flat-Council).
+  //    An agent is only included if its credentials are available;
+  //    others are skipped with a warning so a missing key doesn't
+  //    block the review.
+  const domain: ReviewDomain = args.domain ?? "code";
+  const domainConfig = config.council.domains?.[domain];
+  const useTiered = Boolean(domainConfig);
+
+  function buildAgent(id: string, modelOverride?: string): Agent | null {
+    const modelOpt = modelOverride ? { model: modelOverride } : {};
     if (id === "claude") {
-      if (!process.env["ANTHROPIC_API_KEY"]) continue;
-      agents.push(new ClaudeAgent({ gate }));
-    } else if (id === "openai") {
+      if (!process.env["ANTHROPIC_API_KEY"]) return null;
+      return new ClaudeAgent({ gate, ...modelOpt });
+    }
+    if (id === "openai") {
       if (!process.env["OPENAI_API_KEY"]) {
         process.stderr.write("conclave review: OPENAI_API_KEY not set — skipping OpenAI agent\n");
-        continue;
+        return null;
       }
-      agents.push(new OpenAIAgent({ gate }));
-    } else if (id === "gemini") {
+      return new OpenAIAgent({ gate, ...modelOpt });
+    }
+    if (id === "gemini") {
       const hasKey = !!(process.env["GOOGLE_API_KEY"] || process.env["GEMINI_API_KEY"]);
       if (!hasKey) {
         process.stderr.write("conclave review: GOOGLE_API_KEY / GEMINI_API_KEY not set — skipping Gemini agent\n");
-        continue;
+        return null;
       }
-      agents.push(new GeminiAgent({ gate }));
-    } else if (id === "deepseek") {
+      return new GeminiAgent({ gate, ...modelOpt });
+    }
+    if (id === "deepseek") {
       if (!process.env["DEEPSEEK_API_KEY"]) {
         process.stderr.write("conclave review: DEEPSEEK_API_KEY not set — skipping Deepseek agent\n");
-        continue;
+        return null;
       }
-      agents.push(new DeepseekAgent({ gate }));
-    } else if (id === "ollama") {
-      // Ollama has no API key; we assume a local daemon is running at
-      // OLLAMA_BASE_URL (default http://localhost:11434/v1). The user
-      // is responsible for pulling the configured model.
-      agents.push(new OllamaAgent({ gate }));
-    } else if (id === "grok") {
+      return new DeepseekAgent({ gate, ...modelOpt });
+    }
+    if (id === "ollama") {
+      // Ollama has no API key; we assume the daemon is running at
+      // OLLAMA_BASE_URL (default http://localhost:11434/v1).
+      return new OllamaAgent({ gate, ...modelOpt });
+    }
+    if (id === "grok") {
       if (!process.env["XAI_API_KEY"]) {
         process.stderr.write("conclave review: XAI_API_KEY not set — skipping Grok agent\n");
-        continue;
+        return null;
       }
-      agents.push(new GrokAgent({ gate }));
+      return new GrokAgent({ gate, ...modelOpt });
     }
+    return null;
   }
-  if (agents.length === 0) {
-    process.stderr.write("conclave review: no agents available. Set at least ANTHROPIC_API_KEY.\n");
-    process.exit(1);
-    return;
+
+  type CouncilLike = {
+    deliberate: (ctx: ReviewContext) => Promise<TieredCouncilOutcome | Awaited<ReturnType<Council["deliberate"]>>>;
+  };
+  let council: CouncilLike;
+
+  if (useTiered && domainConfig) {
+    const tier1Models = domainConfig.models?.tier1 ?? {};
+    const tier2Models = domainConfig.models?.tier2 ?? {};
+    const tier1: Agent[] = [];
+    for (const id of domainConfig.tier1) {
+      const a = buildAgent(id, tier1Models[id]);
+      if (a) tier1.push(a);
+    }
+    const tier2: Agent[] = [];
+    for (const id of domainConfig.tier2) {
+      const a = buildAgent(id, tier2Models[id]);
+      if (a) tier2.push(a);
+    }
+    if (tier1.length === 0) {
+      process.stderr.write(
+        `conclave review: no tier-1 agents available for domain "${domain}". Set at least one agent's API key.\n`,
+      );
+      process.exit(1);
+      return;
+    }
+    council = new TieredCouncil({
+      tier1Agents: tier1,
+      tier2Agents: tier2,
+      tier1MaxRounds: domainConfig.tier1MaxRounds,
+      tier2MaxRounds: domainConfig.tier2MaxRounds,
+      alwaysEscalate: domainConfig.alwaysEscalate,
+    });
+  } else {
+    // Legacy flat-Council path — used when config.council.domains is absent.
+    const flatAgents: Agent[] = [];
+    for (const id of config.agents) {
+      const a = buildAgent(id);
+      if (a) flatAgents.push(a);
+    }
+    if (flatAgents.length === 0) {
+      process.stderr.write("conclave review: no agents available. Set at least ANTHROPIC_API_KEY.\n");
+      process.exit(1);
+      return;
+    }
+    council = new Council({
+      agents: flatAgents,
+      maxRounds: config.council.maxRounds,
+      enableDebate: config.council.enableDebate,
+    });
   }
-  const council = new Council({
-    agents,
-    maxRounds: config.council.maxRounds,
-    enableDebate: config.council.enableDebate,
-  });
 
   // 5. Deliberate
   const reviewCtx: ReviewContext = {
@@ -212,6 +276,7 @@ export async function review(argv: string[]): Promise<void> {
     newSha: loaded.newSha,
     answerKeys: retrieval.answerKeys.map(formatAnswerKeyForPrompt),
     failureCatalog: retrieval.failures.map(formatFailureForPrompt),
+    domain,
   };
   if (loaded.prevSha) reviewCtx.prevSha = loaded.prevSha;
 
@@ -228,20 +293,32 @@ export async function review(argv: string[]): Promise<void> {
   });
 
   // 7. Render + exit with a verdict-derived code
-  process.stdout.write(
-    renderReview({
-      repo: loaded.repo,
-      pullNumber: loaded.pullNumber,
-      sha: loaded.newSha,
-      source: loaded.source,
-      councilVerdict: outcome.verdict,
-      consensus: outcome.consensusReached,
-      results: outcome.results,
-      metrics: gate.metrics.summary(),
-      rounds: outcome.rounds,
-      ...(outcome.earlyExit !== undefined ? { earlyExit: outcome.earlyExit } : {}),
-    }),
-  );
+  const tieredOutcome =
+    useTiered && "tier1Outcome" in outcome
+      ? (outcome as TieredCouncilOutcome)
+      : null;
+  const renderInput: Parameters<typeof renderReview>[0] = {
+    repo: loaded.repo,
+    pullNumber: loaded.pullNumber,
+    sha: loaded.newSha,
+    source: loaded.source,
+    councilVerdict: outcome.verdict,
+    consensus: outcome.consensusReached,
+    results: outcome.results,
+    metrics: gate.metrics.summary(),
+    rounds: outcome.rounds,
+    domain,
+    ...(outcome.earlyExit !== undefined ? { earlyExit: outcome.earlyExit } : {}),
+  };
+  if (tieredOutcome) {
+    renderInput.tier = {
+      escalated: tieredOutcome.escalated,
+      reason: tieredOutcome.escalationReason,
+      tier1Rounds: tieredOutcome.tier1Outcome.rounds,
+      ...(tieredOutcome.tier2Outcome ? { tier2Rounds: tieredOutcome.tier2Outcome.rounds } : {}),
+    };
+  }
+  process.stdout.write(renderReview(renderInput));
   process.stdout.write(
     `\nepisodic: ${episodic.id}\n` +
       `  when the PR lands, close the loop with:\n` +
