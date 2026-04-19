@@ -18,6 +18,10 @@
     "./memory": {
       "types": "./dist/memory/index.d.ts",
       "import": "./dist/memory/index.js"
+    },
+    "./federated": {
+      "types": "./dist/federated/index.d.ts",
+      "import": "./dist/federated/index.js"
     }
   },
   "files": [

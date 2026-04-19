@@ -50,6 +50,29 @@ export type {
   NewFailureCategory,
 } from "./memory/index.js";
 
+// Federated sync (decision #21) — redact answer-keys + failures to the
+// k-anonymous baseline shape and ship them across a pluggable transport.
+// Re-exported here for convenience; dedicated subpath at @ai-conclave/core/federated.
+export {
+  FederatedBaselineSchema,
+  FederatedBaselineKindSchema,
+  redactAnswerKey,
+  redactFailure,
+  redactAll,
+  normalizeTags,
+  HttpFederatedSyncTransport,
+  NoopFederatedSyncTransport,
+  runFederatedSync,
+} from "./federated/index.js";
+export type {
+  FederatedBaseline,
+  FederatedBaselineKind,
+  FederatedSyncTransport,
+  HttpTransportOptions,
+  RunSyncInput,
+  RunSyncResult,
+} from "./federated/index.js";
+
 // Efficiency Gate (decision #22: first-class from day 1) — every LLM call
 // routes through `EfficiencyGate.run(...)`. Re-exported here for convenience;
 // the dedicated subpath export lives at @ai-conclave/core/efficiency.

@@ -76,6 +76,12 @@ export const ConclaveConfigSchema = z.object({
         .optional(),
     })
     .optional(),
+  federated: z
+    .object({
+      enabled: z.boolean().default(false),
+      endpoint: z.string().url().optional(),
+    })
+    .optional(),
   visual: z
     .object({
       enabled: z.boolean().default(false),
