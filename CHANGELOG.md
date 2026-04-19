@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+### Docs
+- **`docs/decision-status.md`** — ground-truth table mapping each of the 34 locked decisions to its current implementation state.
+  - #8 + #9 (Agent SDK migrations to `@anthropic-ai/claude-agent-sdk` / `@openai/agents`) marked **🔄 Diverged** with explicit rationale: our agents are one-shot reviewers, not loops. The agent-SDK wrappers target autonomous multi-step flows — real weight (3.9 MB Claude SDK + 3-package OpenAI chain), zero behavioral win for our shape. Migration trigger documented: if per-agent tool use lands inside a single review (MCP lookups, iterative proposals), revisit #8/#9 then.
+  - ARCHITECTURE.md left untouched (locked). This document is purely a map from locked decisions → code, not a revision of the decisions themselves.
+
 ### Added
 - **MCP stdio server (decision #11)** — `conclave mcp-server` starts a stdio-transport MCP server that exposes read-only views of the local memory substrate. Designed to be launched by an MCP client (Claude Desktop / Cursor / Windsurf) via their config. Three tools:
   - `conclave_scores` — per-agent weighted performance (decision #19).
