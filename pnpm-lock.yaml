@@ -96,6 +96,19 @@ importers:
         specifier: ^5.7.0
         version: 5.9.3
 
+  packages/agent-worker:
+    dependencies:
+      '@anthropic-ai/sdk':
+        specifier: ^0.65.0
+        version: 0.65.0(zod@3.25.76)
+      '@conclave-ai/core':
+        specifier: workspace:*
+        version: link:../core
+    devDependencies:
+      typescript:
+        specifier: ^5.7.0
+        version: 5.9.3
+
   packages/cli:
     dependencies:
       '@conclave-ai/agent-claude':
