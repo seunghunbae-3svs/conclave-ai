@@ -1,7 +1,7 @@
 {
-  "name": "@ai-conclave/platform-railway",
+  "name": "@conclave-ai/platform-railway",
   "version": "0.0.0",
-  "description": "Ai-Conclave Railway adapter — resolve preview URL for a commit SHA via Railway's GraphQL API.",
+  "description": "Conclave AI Railway adapter — resolve preview URL for a commit SHA via Railway's GraphQL API.",
   "license": "MIT",
   "type": "module",
   "main": "./dist/index.js",
@@ -25,7 +25,7 @@
     "clean": "rm -rf dist .tsbuildinfo"
   },
   "dependencies": {
-    "@ai-conclave/core": "workspace:*"
+    "@conclave-ai/core": "workspace:*"
   },
   "devDependencies": {
     "typescript": "^5.7.0"

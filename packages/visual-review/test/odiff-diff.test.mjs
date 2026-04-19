@@ -193,10 +193,11 @@ test("OdiffDiff: stdout with no pixel count defaults to diffPixels=0", async () 
   assert.equal(out.diffPixels, 0);
 });
 
-test("OdiffDiff: no installed odiff-bin + no explicit binaryPath → throws actionable error on first use", async () => {
-  const d = new OdiffDiff();
-  // We can't trivially stub createRequire here, so we just confirm calling
-  // without a spawner stub produces a missing-binary failure (one of two
-  // places — either resolveOdiffBinary or the spawn itself).
+test("OdiffDiff: explicit nonexistent binaryPath + default spawner → throws actionable error", async () => {
+  // We can't reliably assert "odiff-bin is not installed" from a test run
+  // where pnpm may have resolved it as an optional peer dep. Instead,
+  // confirm that pointing the adapter at a nonexistent binary surfaces
+  // the failure rather than silently returning an empty diff.
+  const d = new OdiffDiff({ binaryPath: "/this/path/does/not/exist/odiff" });
   await assert.rejects(() => d.diff(WHITE_40, WHITE_40));
 });

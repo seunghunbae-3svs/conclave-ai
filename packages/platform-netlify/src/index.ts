@@ -1,4 +1,4 @@
-import type { Platform, PreviewResolution, ResolvePreviewInput } from "@ai-conclave/core";
+import type { Platform, PreviewResolution, ResolvePreviewInput } from "@conclave-ai/core";
 
 export interface HttpFetch {
   (url: string, init: { method: string; headers: Record<string, string> }): Promise<{

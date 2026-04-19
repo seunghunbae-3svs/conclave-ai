@@ -1,4 +1,4 @@
-import type { Notifier, NotifyReviewInput } from "@ai-conclave/core";
+import type { Notifier, NotifyReviewInput } from "@conclave-ai/core";
 import { renderEmail } from "./format.js";
 import { ResendTransport, type EmailTransport, type HttpFetch } from "./transport.js";
 

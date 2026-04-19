@@ -67,11 +67,11 @@ test("DiscordNotifier: notifyReview POSTs to webhook URL with JSON body", async 
   assert.equal(f.calls[0].init.headers["content-type"], "application/json");
 });
 
-test("DiscordNotifier: default username = Ai-Conclave", async () => {
+test("DiscordNotifier: default username = Conclave AI", async () => {
   const f = mockFetch();
   const n = new DiscordNotifier({ webhookUrl: GOOD_WEBHOOK, fetch: f });
   await n.notifyReview(baseInput);
-  assert.equal(f.calls[0].body.username, "Ai-Conclave");
+  assert.equal(f.calls[0].body.username, "Conclave AI");
 });
 
 test("DiscordNotifier: username override is honored", async () => {

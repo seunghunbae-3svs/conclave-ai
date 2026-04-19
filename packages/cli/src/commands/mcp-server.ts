@@ -3,8 +3,8 @@ import {
   computeAllAgentScores,
   formatAnswerKeyForPrompt,
   formatFailureForPrompt,
-} from "@ai-conclave/core";
-import type { AnswerKey, EpisodicEntry, FailureEntry, MemoryStore } from "@ai-conclave/core";
+} from "@conclave-ai/core";
+import type { AnswerKey, EpisodicEntry, FailureEntry, MemoryStore } from "@conclave-ai/core";
 import { loadConfig, resolveMemoryRoot } from "../lib/config.js";
 
 const HELP = `conclave mcp-server — run an MCP server exposing conclave's memory (decision #11)
@@ -18,7 +18,7 @@ Claude Desktop, Cursor, or Windsurf. Example Claude Desktop config:
 
   {
     "mcpServers": {
-      "ai-conclave": {
+      "conclave-ai": {
         "command": "conclave",
         "args": ["mcp-server"],
         "cwd": "/path/to/your-repo"
@@ -51,7 +51,7 @@ export async function mcpServer(argv: string[]): Promise<void> {
   const { z } = await import("zod");
 
   const server = new McpServer({
-    name: "ai-conclave",
+    name: "conclave-ai",
     version: "0.0.0",
   });
 

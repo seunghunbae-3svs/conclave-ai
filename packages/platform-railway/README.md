@@ -1,6 +1,6 @@
-# @ai-conclave/platform-railway
+# @conclave-ai/platform-railway
 
-Ai-Conclave Railway adapter. Resolves a preview URL for a given commit SHA
+Conclave AI Railway adapter. Resolves a preview URL for a given commit SHA
 via Railway's GraphQL API
 (`POST https://backboard.railway.com/graphql/v2`).
 
@@ -9,7 +9,7 @@ Railway + Cloudflare Pages + `deployment-status`.
 
 ## Install
 
-Bundled with the Ai-Conclave monorepo. Pulled in automatically when the
+Bundled with the Conclave AI monorepo. Pulled in automatically when the
 CLI includes `railway` in `config.visual.platforms`.
 
 ## Environment

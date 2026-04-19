@@ -1,4 +1,4 @@
-import type { Notifier, NotifyReviewInput } from "@ai-conclave/core";
+import type { Notifier, NotifyReviewInput } from "@conclave-ai/core";
 import { formatReviewForDiscord } from "./format.js";
 
 export interface HttpFetch {
@@ -20,7 +20,7 @@ export interface DiscordNotifierOptions {
   fetch?: HttpFetch;
 }
 
-const DEFAULT_USERNAME = "Ai-Conclave";
+const DEFAULT_USERNAME = "Conclave AI";
 
 /**
  * DiscordNotifier — posts review outcomes to a Discord channel via

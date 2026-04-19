@@ -1,7 +1,7 @@
 {
-  "name": "@ai-conclave/platform-deployment-status",
+  "name": "@conclave-ai/platform-deployment-status",
   "version": "0.0.0",
-  "description": "Ai-Conclave generic platform adapter — resolves preview URL via GitHub Deployments API, works with any host that reports back.",
+  "description": "Conclave AI generic platform adapter — resolves preview URL via GitHub Deployments API, works with any host that reports back.",
   "license": "MIT",
   "type": "module",
   "main": "./dist/index.js",
@@ -25,7 +25,7 @@
     "clean": "rm -rf dist .tsbuildinfo"
   },
   "dependencies": {
-    "@ai-conclave/core": "workspace:*"
+    "@conclave-ai/core": "workspace:*"
   },
   "devDependencies": {
     "typescript": "^5.7.0"

@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { FileSystemMemoryStore, OutcomeWriter } from "@ai-conclave/core";
+import { FileSystemMemoryStore, OutcomeWriter } from "@conclave-ai/core";
 import { pollOutcomes, listPendingEpisodics } from "../dist/index.js";
 
 function freshFs() {

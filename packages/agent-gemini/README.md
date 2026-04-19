@@ -1,20 +1,20 @@
-# @ai-conclave/agent-gemini
+# @conclave-ai/agent-gemini
 
-Gemini agent for Ai-Conclave council review. Implements the `Agent`
-interface from `@ai-conclave/core`. Uses Gemini's `responseSchema`
+Gemini agent for Conclave AI council review. Implements the `Agent`
+interface from `@conclave-ai/core`. Uses Gemini's `responseSchema`
 structured output (decision #10, long-context slot).
 
 ## Install
 
 ```bash
-pnpm add @ai-conclave/agent-gemini @ai-conclave/core
+pnpm add @conclave-ai/agent-gemini @conclave-ai/core
 ```
 
 ## Usage
 
 ```ts
-import { GeminiAgent } from "@ai-conclave/agent-gemini";
-import { Council, EfficiencyGate } from "@ai-conclave/core";
+import { GeminiAgent } from "@conclave-ai/agent-gemini";
+import { Council, EfficiencyGate } from "@conclave-ai/core";
 
 const gate = new EfficiencyGate();
 const council = new Council({ agents: [new GeminiAgent({ gate })] });

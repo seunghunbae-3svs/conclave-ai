@@ -1,6 +1,6 @@
-# @ai-conclave/cli
+# @conclave-ai/cli
 
-The `conclave` command-line interface for Ai-Conclave.
+The `conclave` command-line interface for Conclave AI.
 
 Skeleton status: `init` and `review` wired end-to-end through the core
 skeleton. Real PR discovery, efficiency gate, memory write-back, and
@@ -9,9 +9,9 @@ notification dispatch land in later PRs.
 ## Install
 
 ```bash
-pnpm add -g @ai-conclave/cli
+pnpm add -g @conclave-ai/cli
 # or
-npm install -g @ai-conclave/cli
+npm install -g @conclave-ai/cli
 ```
 
 ## Commands

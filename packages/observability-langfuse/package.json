@@ -1,7 +1,7 @@
 {
-  "name": "@ai-conclave/observability-langfuse",
+  "name": "@conclave-ai/observability-langfuse",
   "version": "0.0.0",
-  "description": "Ai-Conclave observability sink — forwards efficiency-gate metrics to Langfuse (self-hosted per decision #13).",
+  "description": "Conclave AI observability sink — forwards efficiency-gate metrics to Langfuse (self-hosted per decision #13).",
   "license": "MIT",
   "type": "module",
   "main": "./dist/index.js",
@@ -25,7 +25,7 @@
     "clean": "rm -rf dist .tsbuildinfo"
   },
   "dependencies": {
-    "@ai-conclave/core": "workspace:*",
+    "@conclave-ai/core": "workspace:*",
     "langfuse": "^3.30.0"
   },
   "devDependencies": {

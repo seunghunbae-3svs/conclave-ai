@@ -1,4 +1,4 @@
-import type { EpisodicEntry, MemoryStore, OutcomeWriter } from "@ai-conclave/core";
+import type { EpisodicEntry, MemoryStore, OutcomeWriter } from "@conclave-ai/core";
 import {
   fetchPrState,
   classifyTransition,

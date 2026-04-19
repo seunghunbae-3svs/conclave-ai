@@ -1,7 +1,7 @@
 {
-  "name": "@ai-conclave/integration-telegram",
+  "name": "@conclave-ai/integration-telegram",
   "version": "0.0.0",
-  "description": "Ai-Conclave Telegram notifier — posts review outcomes to a Telegram chat via Bot API.",
+  "description": "Conclave AI Telegram notifier — posts review outcomes to a Telegram chat via Bot API.",
   "license": "MIT",
   "type": "module",
   "main": "./dist/index.js",
@@ -25,7 +25,7 @@
     "clean": "rm -rf dist .tsbuildinfo"
   },
   "dependencies": {
-    "@ai-conclave/core": "workspace:*"
+    "@conclave-ai/core": "workspace:*"
   },
   "devDependencies": {
     "typescript": "^5.7.0"

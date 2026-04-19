@@ -1,7 +1,7 @@
 {
-  "name": "@ai-conclave/agent-openai",
+  "name": "@conclave-ai/agent-openai",
   "version": "0.0.0",
-  "description": "Ai-Conclave OpenAI agent — wraps the OpenAI SDK with strict-JSON-schema structured output.",
+  "description": "Conclave AI OpenAI agent — wraps the OpenAI SDK with strict-JSON-schema structured output.",
   "license": "MIT",
   "type": "module",
   "main": "./dist/index.js",
@@ -25,7 +25,7 @@
     "clean": "rm -rf dist .tsbuildinfo"
   },
   "dependencies": {
-    "@ai-conclave/core": "workspace:*",
+    "@conclave-ai/core": "workspace:*",
     "openai": "^4.76.0"
   },
   "devDependencies": {

@@ -1,5 +1,5 @@
-import type { Agent, ReviewContext, ReviewResult, Blocker } from "@ai-conclave/core";
-import { EfficiencyGate, estimateTokens } from "@ai-conclave/core";
+import type { Agent, ReviewContext, ReviewResult, Blocker } from "@conclave-ai/core";
+import { EfficiencyGate, estimateTokens } from "@conclave-ai/core";
 import { REVIEW_TOOL_NAME, REVIEW_TOOL_DESCRIPTION, REVIEW_TOOL_INPUT_SCHEMA } from "./review-tool.js";
 import { buildReviewPrompt, buildCacheablePrefix, SYSTEM_PROMPT } from "./prompts.js";
 import { actualCost, estimateCallCost } from "./pricing.js";

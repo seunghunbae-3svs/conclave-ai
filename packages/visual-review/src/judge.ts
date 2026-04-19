@@ -1,4 +1,4 @@
-import type { ReviewContext } from "@ai-conclave/core";
+import type { ReviewContext } from "@conclave-ai/core";
 
 export type VisualJudgmentCategory =
   | "intentional" // deliberate redesign, working as expected
@@ -145,7 +145,7 @@ const SUBMIT_TOOL_SCHEMA = {
   required: ["category", "confidence", "summary", "concerns"],
 } as const;
 
-const SYSTEM_PROMPT = `You are the vision arm of an Ai-Conclave review council. Your job: compare the BEFORE and AFTER screenshots of a web page and classify the change.
+const SYSTEM_PROMPT = `You are the vision arm of an Conclave AI review council. Your job: compare the BEFORE and AFTER screenshots of a web page and classify the change.
 
 Categories:
   intentional    - deliberate redesign / new feature / working as expected.

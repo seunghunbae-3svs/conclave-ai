@@ -9,7 +9,7 @@ export { computeAgentScore, computeAllAgentScores, AGENT_SCORE_WEIGHTS } from ".
 export type { AgentScore, AgentScoreComponents } from "./scoring.js";
 
 // Memory substrate (decision #17: 정답지 + 오답지 duality as core primitive).
-// Re-exported here for convenience; dedicated subpath at @ai-conclave/core/memory.
+// Re-exported here for convenience; dedicated subpath at @conclave-ai/core/memory.
 export {
   FileSystemMemoryStore,
   AnswerKeySchema,
@@ -52,7 +52,7 @@ export type {
 
 // Federated sync (decision #21) — redact answer-keys + failures to the
 // k-anonymous baseline shape and ship them across a pluggable transport.
-// Re-exported here for convenience; dedicated subpath at @ai-conclave/core/federated.
+// Re-exported here for convenience; dedicated subpath at @conclave-ai/core/federated.
 export {
   FederatedBaselineSchema,
   FederatedBaselineKindSchema,
@@ -84,7 +84,7 @@ export type {
 
 // Efficiency Gate (decision #22: first-class from day 1) — every LLM call
 // routes through `EfficiencyGate.run(...)`. Re-exported here for convenience;
-// the dedicated subpath export lives at @ai-conclave/core/efficiency.
+// the dedicated subpath export lives at @conclave-ai/core/efficiency.
 export {
   EfficiencyGate,
   PromptCache,

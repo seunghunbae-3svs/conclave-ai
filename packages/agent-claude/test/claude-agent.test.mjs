@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { EfficiencyGate } from "@ai-conclave/core";
+import { EfficiencyGate } from "@conclave-ai/core";
 import { ClaudeAgent } from "../dist/index.js";
 
 function makeMockClient(responses) {

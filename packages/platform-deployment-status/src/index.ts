@@ -1,6 +1,6 @@
 import { execFile as execFileCallback } from "node:child_process";
 import { promisify } from "node:util";
-import type { Platform, PreviewResolution, ResolvePreviewInput } from "@ai-conclave/core";
+import type { Platform, PreviewResolution, ResolvePreviewInput } from "@conclave-ai/core";
 
 const execFile = promisify(execFileCallback);
 
@@ -39,7 +39,7 @@ interface GhDeploymentStatus {
  * + custom CI workflows — if they post a `deployment_status` event
  * with an environment_url, we can resolve it).
  *
- * Uses `gh api` — same dependency as @ai-conclave/scm-github. No
+ * Uses `gh api` — same dependency as @conclave-ai/scm-github. No
  * separate token setup; `gh auth login` is the single credential.
  *
  * Why this exists:

@@ -1,7 +1,7 @@
 {
-  "name": "@ai-conclave/platform-vercel",
+  "name": "@conclave-ai/platform-vercel",
   "version": "0.0.0",
-  "description": "Ai-Conclave Vercel adapter — resolve preview URL for a commit SHA via Vercel REST API.",
+  "description": "Conclave AI Vercel adapter — resolve preview URL for a commit SHA via Vercel REST API.",
   "license": "MIT",
   "type": "module",
   "main": "./dist/index.js",
@@ -25,7 +25,7 @@
     "clean": "rm -rf dist .tsbuildinfo"
   },
   "dependencies": {
-    "@ai-conclave/core": "workspace:*"
+    "@conclave-ai/core": "workspace:*"
   },
   "devDependencies": {
     "typescript": "^5.7.0"

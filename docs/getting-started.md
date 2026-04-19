@@ -1,4 +1,4 @@
-# Getting started with Ai-Conclave
+# Getting started with Conclave AI
 
 Step-by-step from zero to a real council review. Pre-publish, so the
 path is "clone + link" rather than "npm install".
@@ -13,8 +13,8 @@ path is "clone + link" rather than "npm install".
 ## 1. Clone and build
 
 ```bash
-git clone https://github.com/seunghunbae-3svs/ai-conclave
-cd ai-conclave
+git clone https://github.com/seunghunbae-3svs/conclave-ai
+cd conclave-ai
 pnpm install
 pnpm build
 pnpm test   # optional, confirms everything works on your machine
@@ -44,7 +44,7 @@ The target is whatever repo you want to review. In a new shell:
 
 ```bash
 cd /path/to/your-repo
-node /path/to/ai-conclave/packages/cli/dist/bin/conclave.js init
+node /path/to/conclave-ai/packages/cli/dist/bin/conclave.js init
 ```
 
 This writes `.conclaverc.json` at the repo root and creates
@@ -65,20 +65,20 @@ only the agents you set keys for:
 For a PR:
 
 ```bash
-node /path/to/ai-conclave/packages/cli/dist/bin/conclave.js review --pr 42
+node /path/to/conclave-ai/packages/cli/dist/bin/conclave.js review --pr 42
 ```
 
 For the current branch against its base:
 
 ```bash
-node /path/to/ai-conclave/packages/cli/dist/bin/conclave.js review --base main
+node /path/to/conclave-ai/packages/cli/dist/bin/conclave.js review --base main
 ```
 
 From a diff file:
 
 ```bash
 git diff main... > /tmp/change.diff
-node /path/to/ai-conclave/packages/cli/dist/bin/conclave.js review --diff /tmp/change.diff
+node /path/to/conclave-ai/packages/cli/dist/bin/conclave.js review --diff /tmp/change.diff
 ```
 
 Exit codes:

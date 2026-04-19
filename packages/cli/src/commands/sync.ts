@@ -5,8 +5,8 @@ import {
   HttpFederatedSyncTransport,
   NoopFederatedSyncTransport,
   runFederatedSync,
-} from "@ai-conclave/core";
-import type { FederatedSyncTransport } from "@ai-conclave/core";
+} from "@conclave-ai/core";
+import type { FederatedSyncTransport } from "@conclave-ai/core";
 import { loadConfig, resolveMemoryRoot } from "../lib/config.js";
 
 const HELP = `conclave sync — exchange k-anonymous baseline signal (decision #21)

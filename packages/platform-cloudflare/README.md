@@ -1,6 +1,6 @@
-# @ai-conclave/platform-cloudflare
+# @conclave-ai/platform-cloudflare
 
-Cloudflare Pages adapter. Mirrors `@ai-conclave/platform-vercel` /
+Cloudflare Pages adapter. Mirrors `@conclave-ai/platform-vercel` /
 `platform-netlify` contracts.
 
 ## Env
@@ -12,6 +12,6 @@ Cloudflare Pages adapter. Mirrors `@ai-conclave/platform-vercel` /
 | `CLOUDFLARE_PROJECT_NAME` | ✓ |
 
 ```ts
-import { CloudflarePlatform } from "@ai-conclave/platform-cloudflare";
+import { CloudflarePlatform } from "@conclave-ai/platform-cloudflare";
 const cf = new CloudflarePlatform();  // reads env
 ```

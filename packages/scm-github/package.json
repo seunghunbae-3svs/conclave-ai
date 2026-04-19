@@ -1,7 +1,7 @@
 {
-  "name": "@ai-conclave/scm-github",
+  "name": "@conclave-ai/scm-github",
   "version": "0.0.0",
-  "description": "Ai-Conclave SCM adapter for GitHub — resolve PR state for automatic outcome capture.",
+  "description": "Conclave AI SCM adapter for GitHub — resolve PR state for automatic outcome capture.",
   "license": "MIT",
   "type": "module",
   "main": "./dist/index.js",
@@ -25,7 +25,7 @@
     "clean": "rm -rf dist .tsbuildinfo"
   },
   "dependencies": {
-    "@ai-conclave/core": "workspace:*"
+    "@conclave-ai/core": "workspace:*"
   },
   "devDependencies": {
     "typescript": "^5.7.0"

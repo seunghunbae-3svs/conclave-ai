@@ -1,4 +1,4 @@
-import type { CallMetric, MetricsSink } from "@ai-conclave/core";
+import type { CallMetric, MetricsSink } from "@conclave-ai/core";
 
 /**
  * Minimal subset of the Langfuse SDK surface the sink consumes. Typed
