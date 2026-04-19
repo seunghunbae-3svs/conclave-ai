@@ -3,6 +3,14 @@
 ## Unreleased
 
 ### Added
+- **Retrieval-side merge of federated baselines (decision #21)** — closes the gap the sync skeleton left. `conclave sync` now persists pulled baselines to `.conclave/federated/baselines.jsonl` (JSONL, deduped by `contentHash`); `conclave review` reads that cache when `federated.enabled = true` and boosts retrieval proportionally.
+  - `computeBaselineHash` / `hashAnswerKey` / `hashFailure` exported from `core/federated` so retrieval-time code can recompute the hash a local doc would produce.
+  - `buildFrequencyMap(baselines)` aggregates by `contentHash`; `rerankByFrequency(scored, map, hashDoc, { boost, saturationAt })` applies a logarithmic boost — `factor = 1 + min(1, log2(1+freq) / log2(1+saturationAt)) * (boost - 1)`. Default `boost = 2.0`, `saturationAt = 256`. Docs with zero matches keep their score.
+  - `FileSystemFederatedBaselineStore` — JSONL on disk, `read` / `write` / `append` (dedupe by hash) / `clear`. Malformed lines are skipped silently to survive partial writes.
+  - `MemoryReadQuery` gains optional `federatedFrequency?: ReadonlyMap<string, number>`; `FileSystemMemoryStore.retrieve` reranks answer-keys + failures when it's set. No-op when absent — legacy callers unaffected.
+  - `conclave sync` output adds a `cached: N` field (baselines written to local cache).
+  - 21 new core tests (9 frequency + 8 baseline-store + 4 fs-store rerank). Full suite: 33/33 tasks, core 159 → 180.
+
 - **Cosmiconfig loader (decision #16)** — `.conclaverc.json` still works; now accepts any of `.conclaverc[.json|.yaml|.yml|.js|.cjs|.mjs]`, `conclave.config.{js,cjs,mjs}`, and a top-level `conclave` field in `package.json`. Search strategy "global" walks from cwd to filesystem root (matches the original manual walker). searchPlaces reorders cosmiconfig's defaults so an explicit rc file wins over an incidental `conclave` field in package.json. Four new loader tests (YAML, package.json field, cjs, rc-vs-package.json precedence); `docs/configuration.md` gets a Config Discovery section with YAML / JS / package.json examples.
 
 ### Docs

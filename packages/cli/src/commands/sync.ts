@@ -1,4 +1,6 @@
+import path from "node:path";
 import {
+  FileSystemFederatedBaselineStore,
   FileSystemMemoryStore,
   HttpFederatedSyncTransport,
   NoopFederatedSyncTransport,
@@ -100,12 +102,24 @@ export async function sync(argv: string[]): Promise<void> {
     ...(args.since ? { since: args.since } : {}),
   });
 
+  // Persist pulled baselines so `conclave review` can boost retrieval
+  // by federated frequency (decision #21 — retrieval merge).
+  let cachedCount = 0;
+  if (!result.dryRun && result.pulled.length > 0) {
+    const baselineStore = new FileSystemFederatedBaselineStore({
+      root: path.join(memoryRoot, "federated"),
+    });
+    await baselineStore.append(result.pulled);
+    cachedCount = result.pulled.length;
+  }
+
   const summary = {
     transport: result.transportId,
     dryRun: result.dryRun,
     pushed: result.pushed.length,
     accepted: result.accepted,
     pulled: result.pulled.length,
+    cached: cachedCount,
     reason,
   };
 
@@ -116,7 +130,7 @@ export async function sync(argv: string[]): Promise<void> {
 
   if (reason) process.stderr.write(`conclave sync: ${reason}\n`);
   process.stdout.write(
-    `conclave sync: transport=${summary.transport} dryRun=${summary.dryRun} pushed=${summary.pushed} accepted=${summary.accepted} pulled=${summary.pulled}\n`,
+    `conclave sync: transport=${summary.transport} dryRun=${summary.dryRun} pushed=${summary.pushed} accepted=${summary.accepted} pulled=${summary.pulled} cached=${summary.cached}\n`,
   );
   if (args.dryRun && result.pushed.length > 0) {
     process.stdout.write("\nBaselines that would be uploaded:\n");

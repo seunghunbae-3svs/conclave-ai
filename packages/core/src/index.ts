@@ -60,17 +60,26 @@ export {
   redactFailure,
   redactAll,
   normalizeTags,
+  computeBaselineHash,
+  hashAnswerKey,
+  hashFailure,
+  buildFrequencyMap,
+  rerankByFrequency,
   HttpFederatedSyncTransport,
   NoopFederatedSyncTransport,
   runFederatedSync,
+  FileSystemFederatedBaselineStore,
 } from "./federated/index.js";
 export type {
   FederatedBaseline,
   FederatedBaselineKind,
   FederatedSyncTransport,
   HttpTransportOptions,
+  RerankedDoc,
   RunSyncInput,
   RunSyncResult,
+  FederatedBaselineStore,
+  FileSystemBaselineStoreOptions,
 } from "./federated/index.js";
 
 // Efficiency Gate (decision #22: first-class from day 1) — every LLM call

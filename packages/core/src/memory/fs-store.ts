@@ -12,6 +12,8 @@ import {
 } from "./schema.js";
 import type { MemoryReadQuery, MemoryRetrieval, MemoryStore } from "./store.js";
 import { retrieve } from "./retrieval.js";
+import { hashAnswerKey, hashFailure } from "../federated/redact.js";
+import { rerankByFrequency } from "../federated/frequency.js";
 
 export interface FsStoreOptions {
   root: string;
@@ -42,7 +44,7 @@ export class FileSystemMemoryStore implements MemoryStore {
     const failureCorpus = await this.listFailures(q.domain);
     const ruleCorpus = await this.listRules();
 
-    const answerKeys = retrieve(
+    const answerKeyScored = retrieve(
       answerKeyCorpus,
       q.query,
       {
@@ -52,9 +54,9 @@ export class FileSystemMemoryStore implements MemoryStore {
       },
       k,
       { queryRepo: q.repo },
-    ).map((s) => s.doc);
+    );
 
-    const failures = retrieve(
+    const failureScored = retrieve(
       failureCorpus,
       q.query,
       {
@@ -62,7 +64,15 @@ export class FileSystemMemoryStore implements MemoryStore {
         tags: (d) => [d.category, ...d.tags],
       },
       k,
-    ).map((s) => s.doc);
+    );
+
+    const answerKeys = q.federatedFrequency
+      ? rerankByFrequency(answerKeyScored, q.federatedFrequency, hashAnswerKey).map((s) => s.doc)
+      : answerKeyScored.map((s) => s.doc);
+
+    const failures = q.federatedFrequency
+      ? rerankByFrequency(failureScored, q.federatedFrequency, hashFailure).map((s) => s.doc)
+      : failureScored.map((s) => s.doc);
 
     const rules = retrieve(
       ruleCorpus,

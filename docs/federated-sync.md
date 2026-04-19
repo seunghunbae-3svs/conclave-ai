@@ -149,16 +149,27 @@ conclave sync --since 2026-04-19T00:00:00Z
 
 ## What the pulled baselines are FOR
 
-Today: diagnostic — `conclave sync` returns them in the CLI output but
-the review path does not merge them yet. This is deliberate; retrieval
-merge lands after a live federation endpoint exists and the tag
-vocabulary is validated in practice.
+`conclave sync` persists pulled baselines to
+`.conclave/federated/baselines.jsonl` (JSONL, deduped by `contentHash`).
+`conclave review` reads that cache when `federated.enabled = true` and
+boosts local retrieval by federated frequency.
 
-Future (retrieval merge): pulled baselines will boost local retrieval
-of answer-keys / failures that share tag-vector fingerprints with the
-federated frequency signal, so a pattern that's "seen 487 times across
-the fleet" outranks a pattern that's "seen 2 times in your local
-history" — weighted by how well the tag match holds up.
+Boost mechanics (`packages/core/src/federated/frequency.ts`):
+
+```
+factor = 1 + min(1, log2(1 + freq) / log2(1 + saturationAt)) * (boost - 1)
+```
+
+- Default `boost = 2.0`, `saturationAt = 256`.
+- Docs with zero federated matches keep their original score (factor = 1).
+- Logarithmic so "seen 10,000×" doesn't drown out "seen 100×" — it just
+  moves ahead.
+
+A local answer-key or failure that shares `(kind, domain, category,
+severity, normalized-tags)` with a federated baseline gets this boost.
+Hash parity is computed with `hashAnswerKey` / `hashFailure`, which
+use the same `computeBaselineHash` that redaction uses — guarantees
+the match semantics stay identical across the pipeline.
 
 ## Opting out
 
