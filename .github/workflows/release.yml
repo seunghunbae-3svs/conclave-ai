@@ -86,11 +86,25 @@ jobs:
             git commit -m "chore(release): v$ROOT_VERSION"
             git push origin HEAD:main
           fi
-          # Remote-aware idempotent tag. `git rev-parse` sees only the
-          # runner's local refs, so a pure-local check can miss a tag
-          # that already exists on `origin`. Ask the remote directly.
+          # Remote-aware idempotent tag.
+          #
+          # `^{}` peels annotated tags to the commit they point at — without
+          # it, `git ls-remote` returns the tag OBJECT hash for annotated
+          # tags, which never equals any commit SHA and would cause a
+          # spurious mismatch on re-runs of a signed/annotated release.
+          #
+          # Push-path is wrapped so a race (another runner pushed the same
+          # tag between our check and push) retries the remote lookup and
+          # accepts the run when the remote tag resolves to our HEAD.
+          # Concurrency group already serializes release runs for this
+          # workflow, so this is defense-in-depth against anything else
+          # that might push the same vX.Y.Z tag.
           CURRENT_HEAD=$(git rev-parse --verify HEAD)
-          REMOTE_TAG_HASH=$(git ls-remote --tags origin "refs/tags/v$ROOT_VERSION" | awk '{print $1}' || true)
+          lookup_remote_tag() {
+            git ls-remote --tags origin "refs/tags/v$ROOT_VERSION^{}" \
+              | awk '{print $1}'
+          }
+          REMOTE_TAG_HASH=$(lookup_remote_tag || true)
           if [ -n "$REMOTE_TAG_HASH" ]; then
             if [ "$REMOTE_TAG_HASH" = "$CURRENT_HEAD" ]; then
               echo "Tag v$ROOT_VERSION already on remote at HEAD; skipping create + push."
@@ -100,7 +114,15 @@ jobs:
             fi
           else
             git tag "v$ROOT_VERSION"
-            git push origin "v$ROOT_VERSION"
+            if ! git push origin "v$ROOT_VERSION" 2>push.err; then
+              RACE_TAG_HASH=$(lookup_remote_tag || true)
+              if [ "$RACE_TAG_HASH" = "$CURRENT_HEAD" ]; then
+                echo "Push raced with another runner, but remote tag now resolves to HEAD — accepting."
+              else
+                cat push.err >&2
+                exit 1
+              fi
+            fi
           fi
 
       - name: Publish to npm
