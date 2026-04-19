@@ -5,6 +5,8 @@ export { ReviewResultSchema, BlockerSchema } from "./schema.js";
 export type { Notifier, NotifyReviewInput } from "./notifier.js";
 export { resolveFirstPreview } from "./platform.js";
 export type { Platform, PreviewResolution, ResolvePreviewInput } from "./platform.js";
+export { computeAgentScore, computeAllAgentScores, AGENT_SCORE_WEIGHTS } from "./scoring.js";
+export type { AgentScore, AgentScoreComponents } from "./scoring.js";
 
 // Memory substrate (decision #17: 정답지 + 오답지 duality as core primitive).
 // Re-exported here for convenience; dedicated subpath at @ai-conclave/core/memory.
