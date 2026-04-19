@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+### Changed
+- **Telegram notification rewritten for non-developer readability (dogfood feedback).** The old per-agent wall-of-technical-jargon format buried the actual action items in paragraphs and repeated the same file:line blocker once per agent. New format:
+  - **Plain-language verdict label** — `APPROVE` / `REWORK` / `REJECT` → `Approved` / `Needs changes` / `Rejected`.
+  - **Cross-agent blocker deduplication** — blockers pointing at the same `file:line` merge into one entry with an `"Claude + OpenAI agree"` marker so consensus is obvious.
+  - **Humanized category labels** — `workflow-security` → `CI workflow security`, `secrets-exposure` → `Possible secret leak`, `supply-chain` → `Supply-chain risk`, `type-error` → `Type mismatch`, plus ~10 more. Unknown categories pass through verbatim so custom tags aren't rewritten.
+  - **Top-3 distinct blockers** across all agents (was: top-3 per agent, so 9 with 3 agents and massive overlap). Remainder shown as `"+ N more issues"`.
+  - **Compact footer** — `💰 $0.37 · agents: 3` instead of `cost: 0.3664 · episodic: ep-abc…`. Episodic id kept on its own line for ops lookup.
+  - `approve` verdict gets a friendly single-line blessing (`All agents agreed the change is ready to ship`) instead of empty per-agent blocks.
+  - 11 tests cover verdict labels, category humanization, cross-agent merge, severity ordering, truncation at the 4096-char Telegram limit, HTML escape.
+
 ### Fixed
 - **P0: `Council.deliberate()` no longer dies when one agent throws.** `Promise.all` → `Promise.allSettled`. Previously, any single agent 4xx/5xx/network error (e.g. Gemini free-tier 429, provider timeout, invalid key) killed the entire round and surfaced as a top-level CLI crash. Now failed agents drop out of the tally with a synthesized `rework` result carrying a `category: "agent-failure"` blocker explaining the cause. Only throws when ALL agents fail (aggregated reasons in the message). Dogfood on eventbadge PR surfaced this: Gemini 429 crashed Claude + OpenAI's otherwise-successful tier-1 pass. 3 new regression tests.
 
