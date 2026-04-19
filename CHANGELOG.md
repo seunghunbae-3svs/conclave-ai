@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+### Fixed
+- **P0: `Council.deliberate()` no longer dies when one agent throws.** `Promise.all` → `Promise.allSettled`. Previously, any single agent 4xx/5xx/network error (e.g. Gemini free-tier 429, provider timeout, invalid key) killed the entire round and surfaced as a top-level CLI crash. Now failed agents drop out of the tally with a synthesized `rework` result carrying a `category: "agent-failure"` blocker explaining the cause. Only throws when ALL agents fail (aggregated reasons in the message). Dogfood on eventbadge PR surfaced this: Gemini 429 crashed Claude + OpenAI's otherwise-successful tier-1 pass. 3 new regression tests.
+
 ### Added
 - **`@conclave-ai/platform-render` — first v2.1 platform adapter.** Ranked #1 in the 2026-04 adapter-scope study (solo-maker default outside the v2.0 five). REST API at `api.render.com/v1` — GET service for canonical URL, GET deploys filtered client-side by `commit.id === sha` AND `status === "live"`. Pattern mirrors `platform-railway` (Bearer-token + URL-encode serviceId), so the next v2.1 platforms (Fly / Firebase if ranked in) plug in the same shape. 12 unit tests use the shared `mockFetch` harness. `RENDER_API_TOKEN` + `RENDER_SERVICE_ID` env vars; missing either → factory skips with reason. CLI `visual.platforms` default list adds `"render"` so it participates automatically once the user configures credentials. Service Previews caveat documented in the README — for per-PR preview URLs, point the adapter at the preview service's `srv-...` id rather than the main one.
 
