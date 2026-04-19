@@ -146,6 +146,35 @@
     flows, response_format shape assertion, refusal throw, invalid-JSON
     throw, invalid-verdict throw, no-key constructor throw, metrics
     aggregation, pre-flight budget short-circuits the network call.
+- **`@ai-conclave/integration-email`** — fourth notification surface,
+  completes decision #24's equal-weight set (CLI + Telegram + Discord +
+  Slack + Email):
+  - `EmailNotifier` implements `Notifier` using a pluggable
+    `EmailTransport` interface. Default transport = `ResendTransport`
+    (Resend REST API via native fetch; no SDK dependency).
+  - Swap transports for SMTP (nodemailer) / SES / Postmark / SendGrid /
+    Mailgun by passing `opts.transport` — the transport interface is
+    `{ id, send({ from, to, subject, text, html }) }`.
+  - Renders BOTH plaintext AND HTML bodies from the same source
+    (`renderEmail(input)`). HTML uses inline styles only; no `<style>`
+    blocks, no external stylesheets, email-client safe.
+  - Subject: `[conclave] VERDICT — repo #N` (override with
+    `subjectOverride`). Color-coded HTML headline (green/amber/red).
+    HTML escapes `< > & "`.
+  - Env: `RESEND_API_KEY` (default transport), `CONCLAVE_EMAIL_FROM`,
+    `CONCLAVE_EMAIL_TO` (comma-separated multi-recipient support).
+  - CLI `integrations.email.{enabled, from, to, subjectOverride}`.
+    Single recipient (string) or array accepted.
+  - 21 test cases across `format` (subject format with + without PR,
+    text body lines, no-consensus tag, severity-sorted top-5 + `+N
+    more`, footer cost + episodic id, HTML inline-styles-only
+    enforcement, HTML-special-char escape, HTML PR link, color-coded
+    verdict, no-blockers placeholder in both bodies) and `notifier`
+    (missing RESEND_API_KEY throws, Resend POST wire shape, `to` array
+    passthrough, non-200 throw; missing from + missing to throws,
+    comma-separated env fallback, subjectOverride wins, custom
+    transport plugs in, text + html both sent, Notifier interface
+    conformance).
 - **`@ai-conclave/integration-slack`** — third notification surface
   (decision #24, Block Kit format, webhook-based same as Discord):
   - `SlackNotifier` implements `Notifier`. Posts to a Slack incoming

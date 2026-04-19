@@ -64,6 +64,16 @@ export const ConclaveConfigSchema = z.object({
           iconEmoji: z.string().optional(),
         })
         .optional(),
+      email: z
+        .object({
+          enabled: z.boolean().default(true),
+          from: z.string().email().optional(),
+          to: z
+            .union([z.string().email(), z.array(z.string().email()).min(1)])
+            .optional(),
+          subjectOverride: z.string().optional(),
+        })
+        .optional(),
     })
     .optional(),
 });

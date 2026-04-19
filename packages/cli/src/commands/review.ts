@@ -17,6 +17,7 @@ import { LangfuseMetricsSink } from "@ai-conclave/observability-langfuse";
 import { TelegramNotifier } from "@ai-conclave/integration-telegram";
 import { DiscordNotifier } from "@ai-conclave/integration-discord";
 import { SlackNotifier } from "@ai-conclave/integration-slack";
+import { EmailNotifier } from "@ai-conclave/integration-email";
 import type { Notifier } from "@ai-conclave/core";
 import { loadConfig, resolveMemoryRoot } from "../lib/config.js";
 import { loadPrDiff, loadGitDiff, loadFileDiff, type LoadedDiff } from "../lib/diff-source.js";
@@ -237,6 +238,27 @@ export async function review(argv: string[]): Promise<void> {
         notifiers.push(new SlackNotifier(opts));
       } catch (err) {
         process.stderr.write(`conclave review: Slack notifier init failed — ${(err as Error).message}\n`);
+      }
+    }
+  }
+  const em = config.integrations?.email;
+  if (em?.enabled !== false) {
+    const fromConfigured = !!(em?.from || process.env["CONCLAVE_EMAIL_FROM"]);
+    const toConfigured = !!(em?.to || process.env["CONCLAVE_EMAIL_TO"]);
+    const transportReady = !!process.env["RESEND_API_KEY"];
+    if (em?.enabled === true && (!fromConfigured || !toConfigured || !transportReady)) {
+      process.stderr.write(
+        "conclave review: email integration enabled but missing from / to / RESEND_API_KEY — skipping\n",
+      );
+    } else if (fromConfigured && toConfigured && transportReady) {
+      const opts: ConstructorParameters<typeof EmailNotifier>[0] = {};
+      if (em?.from) opts.from = em.from;
+      if (em?.to) opts.to = em.to;
+      if (em?.subjectOverride) opts.subjectOverride = em.subjectOverride;
+      try {
+        notifiers.push(new EmailNotifier(opts));
+      } catch (err) {
+        process.stderr.write(`conclave review: Email notifier init failed — ${(err as Error).message}\n`);
       }
     }
   }
