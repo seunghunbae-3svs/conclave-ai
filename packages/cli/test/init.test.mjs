@@ -160,6 +160,8 @@ test("writeWorkflow: creates file with reusable-workflow ref", async () => {
     assert.ok(body.includes(REUSABLE_REF), `workflow body missing ref: ${REUSABLE_REF}`);
     assert.ok(body.includes("secrets: inherit"), "workflow body missing secrets: inherit");
     assert.ok(body.includes("pull_request"), "workflow body missing pull_request trigger");
+    assert.ok(body.includes("pull-requests: write"), "workflow body missing pull-requests: write permission");
+    assert.ok(body.includes("contents: read"), "workflow body missing contents: read permission");
   } finally {
     await fs.rm(dir, { recursive: true, force: true });
   }

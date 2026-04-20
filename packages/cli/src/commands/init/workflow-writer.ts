@@ -31,6 +31,9 @@ on:
 jobs:
   conclave:
     uses: ${REUSABLE_REF}
+    permissions:
+      contents: read
+      pull-requests: write
     secrets: inherit
 `;
 
