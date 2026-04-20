@@ -1,0 +1,27 @@
+{
+  "name": "@conclave-ai/central-plane",
+  "version": "0.4.0-alpha.1",
+  "private": true,
+  "description": "Conclave AI central control plane — Cloudflare Worker + D1 backing the v0.4 install model.",
+  "license": "MIT",
+  "type": "module",
+  "main": "./dist/index.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "test": "node --test test/*.test.mjs",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "clean": "rm -rf dist .tsbuildinfo",
+    "migrate:local": "wrangler d1 execute conclave-ai --local --file=./migrations/0001_initial.sql",
+    "migrate:prod": "wrangler d1 execute conclave-ai --remote --file=./migrations/0001_initial.sql"
+  },
+  "dependencies": {
+    "hono": "^4.6.14"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20250101.0",
+    "typescript": "^5.7.0",
+    "wrangler": "^3.100.0"
+  }
+}

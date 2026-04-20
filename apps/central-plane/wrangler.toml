@@ -1,0 +1,18 @@
+name = "conclave-ai"
+main = "src/index.ts"
+compatibility_date = "2026-04-20"
+compatibility_flags = ["nodejs_compat"]
+
+# D1 binding. `database_id` must be replaced with the id returned by
+# `wrangler d1 create conclave-ai` on first setup.
+[[d1_databases]]
+binding = "DB"
+database_name = "conclave-ai"
+database_id = "REPLACE_WITH_wrangler_d1_create_OUTPUT"
+
+[vars]
+ENVIRONMENT = "production"
+
+# Observability. Logs retained 3 days on free tier, sufficient for v0.4-alpha.
+[observability]
+enabled = true
