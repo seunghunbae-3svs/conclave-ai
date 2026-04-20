@@ -2,7 +2,15 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 
 export const WORKFLOW_PATH = ".github/workflows/conclave.yml";
-export const REUSABLE_REF = "conclave-ai/conclave-ai/.github/workflows/review.yml@v0.4";
+/**
+ * Reusable workflow source — GitHub ref for the hosted review workflow.
+ * Currently served from `seunghunbae-3svs/conclave-ai`; planned to move to
+ * a dedicated `conclave-ai` org once the repo is transferred. When that
+ * rename happens, change this one string and all new `conclave init` runs
+ * pick up the new path. Existing installs continue to resolve the old
+ * path until they re-run `conclave init --reconfigure`.
+ */
+export const REUSABLE_REF = "seunghunbae-3svs/conclave-ai/.github/workflows/review.yml@v0.4";
 
 /**
  * The 3-line (effective) wrapper workflow per D7. Users DO NOT edit this
