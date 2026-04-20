@@ -9,12 +9,12 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "dev": "wrangler dev",
-    "deploy": "wrangler deploy",
+    "ship": "node scripts/preflight.mjs && wrangler deploy",
     "test": "node --test test/*.test.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "clean": "rm -rf dist .tsbuildinfo",
     "migrate:local": "wrangler d1 execute conclave-ai --local --file=./migrations/0001_initial.sql",
-    "migrate:prod": "wrangler d1 execute conclave-ai --remote --file=./migrations/0001_initial.sql"
+    "migrate:prod": "node scripts/preflight.mjs && wrangler d1 execute conclave-ai --remote --file=./migrations/0001_initial.sql"
   },
   "dependencies": {
     "hono": "^4.6.14"
