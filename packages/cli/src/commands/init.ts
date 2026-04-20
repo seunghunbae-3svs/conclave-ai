@@ -10,7 +10,7 @@ import { CentralClient, DEFAULT_CENTRAL_URL } from "./init/central-client.js";
  * `CONCLAVE_BOT_USERNAME` env var if Bae ends up using a different
  * handle after BotFather negotiations.
  */
-const DEFAULT_BOT_USERNAME = process.env["CONCLAVE_BOT_USERNAME"] ?? "conclave_ai_bot";
+const DEFAULT_BOT_USERNAME = process.env["CONCLAVE_BOT_USERNAME"] ?? "Conclave_ai_bot";
 
 const HELP = `conclave init — set up conclave-ai on this repo (v0.4 wizard)
 
