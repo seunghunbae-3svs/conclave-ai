@@ -47,19 +47,6 @@ importers:
         specifier: ^5.7.0
         version: 5.9.3
 
-  packages/agent-deepseek:
-    dependencies:
-      '@conclave-ai/core':
-        specifier: workspace:*
-        version: link:../core
-      openai:
-        specifier: ^4.76.0
-        version: 4.104.0(ws@8.20.0)(zod@3.25.76)
-    devDependencies:
-      typescript:
-        specifier: ^5.7.0
-        version: 5.9.3
-
   packages/agent-gemini:
     dependencies:
       '@conclave-ai/core':
@@ -130,9 +117,6 @@ importers:
       '@conclave-ai/agent-claude':
         specifier: workspace:*
         version: link:../agent-claude
-      '@conclave-ai/agent-deepseek':
-        specifier: workspace:*
-        version: link:../agent-deepseek
       '@conclave-ai/agent-gemini':
         specifier: workspace:*
         version: link:../agent-gemini

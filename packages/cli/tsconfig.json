@@ -10,7 +10,6 @@
     { "path": "../core" },
     { "path": "../agent-claude" },
     { "path": "../agent-worker" },
-    { "path": "../agent-deepseek" },
     { "path": "../agent-gemini" },
     { "path": "../agent-grok" },
     { "path": "../agent-ollama" },

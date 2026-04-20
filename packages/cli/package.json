@@ -1,6 +1,6 @@
 {
   "name": "@conclave-ai/cli",
-  "version": "0.4.2",
+  "version": "0.4.3",
   "description": "Conclave AI CLI — the `conclave` binary.",
   "license": "MIT",
   "type": "module",
@@ -24,7 +24,6 @@
   "dependencies": {
     "@conclave-ai/agent-claude": "workspace:*",
     "@conclave-ai/agent-worker": "workspace:*",
-    "@conclave-ai/agent-deepseek": "workspace:*",
     "@conclave-ai/agent-gemini": "workspace:*",
     "@conclave-ai/agent-grok": "workspace:*",
     "@conclave-ai/agent-ollama": "workspace:*",

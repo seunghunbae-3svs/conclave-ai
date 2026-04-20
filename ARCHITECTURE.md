@@ -50,9 +50,9 @@ truth for scaffolding.
 │  (pluggable npm pkgs)  │  │  packages                      │
 │  claude, openai,       │  │  GitHub/Vercel/Netlify/...     │
 │  gemini, grok,         │  │  Telegram/Discord/Slack/Email  │
-│  deepseek, qwen,       │  │                                │
-│  bedrock, vertex,      │  │                                │
-│  cheetah (Triton),     │  │                                │
+│  qwen, bedrock,        │  │                                │
+│  vertex, cheetah       │  │                                │
+│  (Triton),             │  │                                │
 │  ollama (local),       │  │                                │
 │  custom user-authored  │  │                                │
 └────────────────────────┘  └────────────────────────────────┘
@@ -173,7 +173,7 @@ conclave-ai/
 │   ├── agent-claude/             # wraps @anthropic-ai/claude-agent-sdk
 │   ├── agent-openai/             # wraps @openai/agents          (v2.1)
 │   ├── agent-gemini/             # (v2.1)
-│   ├── agent-{grok,deepseek,qwen,bedrock,vertex,cheetah,ollama}/ (v2.1)
+│   ├── agent-{grok,qwen,bedrock,vertex,cheetah,ollama}/ (v2.1)
 │   ├── scm-github/               # v2.0
 │   ├── scm-{gitlab,bitbucket,gitea}/                              (v2.1)
 │   ├── platform-{vercel,netlify,railway,cloudflare,fly,render,

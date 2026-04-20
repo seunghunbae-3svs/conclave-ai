@@ -8,7 +8,7 @@ except `version`.
 ```json
 {
   "version": 1,
-  "agents": ["claude", "openai", "gemini", "deepseek"],
+  "agents": ["claude", "openai", "gemini"],
   "budget": { "perPrUsd": 0.5 },
   "efficiency": { "cacheEnabled": true, "compactEnabled": true },
   "council": { "maxRounds": 3, "enableDebate": true },
@@ -51,7 +51,7 @@ rejects unknown versions.
 
 ### `agents`
 
-Array of `"claude"`, `"openai"`, `"gemini"`, `"deepseek"`, `"ollama"`, `"grok"`. An agent is only
+Array of `"claude"`, `"openai"`, `"gemini"`, `"ollama"`, `"grok"`. An agent is only
 instantiated if its env var is set — missing keys cleanly skip.
 
 | Agent | Env var |
@@ -59,7 +59,6 @@ instantiated if its env var is set — missing keys cleanly skip.
 | `claude` | `ANTHROPIC_API_KEY` |
 | `openai` | `OPENAI_API_KEY` |
 | `gemini` | `GOOGLE_API_KEY` (or `GEMINI_API_KEY`) |
-| `deepseek` | `DEEPSEEK_API_KEY` |
 | `ollama` | none (local); optional `OLLAMA_BASE_URL`, default `http://localhost:11434/v1` |
 | `grok` | `XAI_API_KEY` |
 
