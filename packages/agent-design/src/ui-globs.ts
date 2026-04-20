@@ -2,11 +2,12 @@
  * UI file globs — used by DesignAgent's Mode B (text-UI review) to detect
  * whether a code-only diff touches any UI surfaces.
  *
- * TODO: when `packages/cli/src/lib/domain-detect.ts` (v0.5.3 autodetect PR)
- * merges to main, replace this file with a re-export from that module so
- * the CLI-side domain detector and the agent-side mode selector stay in
- * lockstep. For now we duplicate the glob set and the match logic locally
- * to avoid a cross-package coupling on an unmerged branch.
+ * TODO(v0.5.5 refactor): `packages/cli/src/lib/domain-detect.ts` (v0.5.3) is
+ * now on main. The shared glob + match logic belongs in `@conclave-ai/core`
+ * — both CLI (domain-detect) and agent-design (this file) should re-export
+ * from core so the two detectors can't drift. For v0.5.4 we keep the local
+ * copy to avoid inverting the package dependency graph (agent → cli). Move
+ * it in a dedicated v0.5.5 cleanup PR.
  *
  * The list deliberately errs on the inclusive side: it's better to run
  * Mode B on a diff with some non-UI files than to miss a UI change buried
