@@ -12,4 +12,15 @@ export interface Env {
    * while the central plane is run without OAuth integration.
    */
   GITHUB_CLIENT_ID?: string;
+  /**
+   * Telegram bot token. Set via `wrangler secret put TELEGRAM_BOT_TOKEN` —
+   * never paste into wrangler.toml. Required by /telegram/webhook.
+   */
+  TELEGRAM_BOT_TOKEN?: string;
+  /**
+   * Optional shared secret for Telegram webhook verification. Pass this
+   * as `secret_token` when calling setWebhook and the Worker will reject
+   * updates without a matching `X-Telegram-Bot-Api-Secret-Token` header.
+   */
+  TELEGRAM_WEBHOOK_SECRET?: string;
 }

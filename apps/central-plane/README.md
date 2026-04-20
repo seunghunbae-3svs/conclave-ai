@@ -14,6 +14,33 @@ See `docs/architecture-v0.4.md` for the full design; this package is the concret
 | POST   | `/oauth/device/poll`          | ✅ real — returns CONCLAVE_TOKEN on success | none |
 | POST   | `/episodic/push`              | ✅ real — federated aggregate upsert | Bearer CONCLAVE_TOKEN |
 | GET    | `/memory/pull`                | ✅ real — frequency baseline for retrieval re-rank | Bearer CONCLAVE_TOKEN |
+| POST   | `/telegram/webhook`           | ✅ real — central @conclave_ai bot | Telegram secret_token (optional) |
+
+## Central Telegram bot (milestone 4)
+
+One `@conclave_ai` bot serves all installs. Users DM `/link <CONCLAVE_TOKEN>` to associate their chat with a repo; subsequent 🔧 / ✅ / ❌ clicks fire `repository_dispatch` on behalf of the user via the GitHub token captured during OAuth.
+
+### One-time bot setup (after `ship`)
+
+```bash
+# 1. Register a bot with BotFather on Telegram — copy the token
+#    https://t.me/BotFather → /newbot
+
+# 2. Store the token in CF
+cd apps/central-plane
+echo <BOT_TOKEN> | pnpm wrangler secret put TELEGRAM_BOT_TOKEN
+
+# 3. (optional, recommended) generate a random webhook secret and store it
+openssl rand -hex 32 | pnpm wrangler secret put TELEGRAM_WEBHOOK_SECRET
+
+# 4. Register the webhook
+curl -X POST "https://api.telegram.org/bot<BOT_TOKEN>/setWebhook" \
+  -d "url=https://<your-worker>.workers.dev/telegram/webhook" \
+  -d "secret_token=<SECRET_FROM_STEP_3>" \
+  -d "allowed_updates=[\"message\",\"callback_query\"]"
+```
+
+After this, DM the bot `/start` to see onboarding. `/link c_...` creates the chat↔install association.
 
 ### Federated memory shape
 

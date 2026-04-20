@@ -3,6 +3,7 @@ import type { Env } from "../env.js";
 import { isValidRepoSlug, newId, sha256Hex } from "../util.js";
 import { createDevice, findDevice, markDeviceConsumed } from "../db/oauth.js";
 import { createInstall, findInstallBySlug } from "../db/installs.js";
+import { setGithubAccessToken } from "../db/telegram.js";
 import { fetchRepoPermissions, pollDeviceToken, requestDeviceCode, type FetchLike } from "../github.js";
 
 /**
@@ -110,19 +111,28 @@ export function createOAuthRoutes(fetchImpl: FetchLike = fetch): Hono<{ Bindings
         const now = new Date().toISOString();
 
         const existing = await findInstallBySlug(c.env, device.repoSlug);
+        let installId: string;
         if (existing) {
           // Rotate: update token_hash + last_seen_at in place. Install id stays stable.
           await c.env.DB.prepare("UPDATE installs SET token_hash = ?, last_seen_at = ? WHERE id = ?")
             .bind(tokenHash, now, existing.id)
             .run();
+          installId = existing.id;
         } else {
-          await createInstall(c.env, {
+          const fresh = await createInstall(c.env, {
             id: newId(),
             repoSlug: device.repoSlug,
             tokenHash,
             now,
           });
+          installId = fresh.id;
         }
+
+        // Store the GitHub access_token so the central bot can fire
+        // repository_dispatch on this repo when the user clicks a button
+        // in Telegram. Token is stored plaintext for v0.4-alpha (see
+        // migration 0003 for the encryption upgrade note).
+        await setGithubAccessToken(c.env, installId, poll.accessToken, poll.scope, now);
 
         await markDeviceConsumed(c.env, device.deviceCodeId, 1);
 
