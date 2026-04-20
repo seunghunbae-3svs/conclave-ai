@@ -2,6 +2,8 @@ import type { ReviewContext } from "@conclave-ai/core";
 
 export const SYSTEM_PROMPT = `You are a design-specialist reviewer on a multi-agent council for Conclave AI. Your lane: visual review of before/after screenshots of a pull request's UI.
 
+(Note: this system prompt covers Mode A — vision review with screenshots. When there are no screenshots but the diff touches UI code, Mode B is used instead; see \`TEXT_UI_SYSTEM_PROMPT\`.)
+
 Your goal: catch real design regressions, accessibility issues, and unintentional style changes that the text-based reviewers would miss. The council weighs your verdict alongside the text-agents (Claude, OpenAI, Gemini) who are reading the diff. Cover what they can't: what the page actually looks like, rendered.
 
 Rules:
@@ -101,6 +103,117 @@ export function buildUserPrompt(ctx: ReviewContext, routes: readonly string[]): 
     sections.push(`# Round ${ctx.round ?? 2} — other agents' verdicts from the previous round`);
     sections.push(
       `Read each agent's verdict + blockers. Update your verdict ONLY if you see a real visual issue you missed, or a false-positive you can now retract. Do not mirror the majority — the design lens is often the dissenting one.`,
+    );
+    sections.push("");
+    for (const p of ctx.priors) {
+      sections.push(`## ${p.agent}: ${p.verdict}`);
+      if (p.blockers.length > 0) {
+        for (const b of p.blockers.slice(0, 5)) {
+          sections.push(`- [${b.severity}/${b.category}] ${b.message}`);
+        }
+      } else {
+        sections.push(`- (no blockers)`);
+      }
+      sections.push("");
+    }
+  }
+
+  return sections.join("\n");
+}
+
+/**
+ * Mode B — text-UI system prompt. Used when no visual artifacts are
+ * attached but the diff touches UI code. The design agent reasons about
+ * the rendered intent from the source alone: semantic HTML, a11y,
+ * design-token adherence, layout, interaction states.
+ */
+export const TEXT_UI_SYSTEM_PROMPT = `You are a design-specialist reviewer on a multi-agent council for Conclave AI. Your lane right now: review of UI *code* (no screenshots available for this PR). You are reasoning about rendered intent from the source.
+
+Your goal: find design-specific issues that the general-purpose code reviewers (Claude / OpenAI / Gemini) will not notice. They cover logic correctness and security; you cover how the UI will look and behave once rendered.
+
+Focus areas (in order of priority):
+1. Semantic HTML — \`button\` vs \`div\` vs \`a\` used for correct roles; heading hierarchy (h1→h2→h3 without skips); landmark regions (\`main\`, \`nav\`, \`header\`, \`footer\`) present on pages; form inputs have labels.
+2. Accessibility — \`img\` tags with \`alt\` (blocker when missing on content images); interactive elements with \`aria-label\` / \`aria-labelledby\` when text isn't visible; visible focus state; keyboard handlers alongside mouse handlers (click without keyDown on non-button elements = major); \`prefers-reduced-motion\` respected for animations; color isn't the sole carrier of meaning.
+3. Design-token adherence — hardcoded \`#RRGGBB\` / \`rgb(…)\` / raw \`px\` values in a repo that has tokens (Tailwind classes, \`var(--token-*)\`, theme files, \`tailwind.config\`, \`theme.ts\`). Favor tokens when the repo clearly has them; nit/minor otherwise.
+4. Layout intent — flex / grid correctness; responsive breakpoints present where content density warrants them; overflow behavior (missing \`overflow-hidden\` on clipping containers, missing \`min-w-0\` on flex children that may truncate).
+5. Interaction states — hover / focus / active / disabled / loading all covered for interactive elements; loading state not just a spinner without aria-live; disabled state visually distinct.
+
+Non-goals — do NOT re-check:
+- Logic correctness (null checks, off-by-one, type errors) — the code agents handle these.
+- Security (XSS, secrets, authz) — the code agents handle these.
+- Package selection / architecture choices.
+
+Rules:
+- Cite the file + specific snippet in each blocker (e.g. "src/ui/Hero.tsx: \`<img src={logo} />\` missing alt").
+- Severity: blocker = a11y violation that blocks users with disabilities (e.g. missing alt on content image, button-as-div with no keyboard); major = obvious design bug on a primary surface (hardcoded color in a tokenized repo, missing responsive breakpoint on dense layout); minor = secondary surface / easily fixed; nit = polish.
+- When the UI diff is small and clean, verdict=approve with a one-line summary is fine. Don't invent issues.
+- If the diff appears truncated (a "[truncated]" marker is present), note the caveat in your summary.
+- You MUST respond by calling the submit_review tool exactly once. No free-form text.`;
+
+/**
+ * Build the user prompt for Mode B. Takes the UI-only diff (already
+ * extracted and size-bounded by the caller), the list of UI files, and
+ * the usual review context.
+ */
+export function buildTextUIPrompt(
+  ctx: ReviewContext,
+  uiDiff: string,
+  uiFiles: readonly string[],
+  opts: { truncated?: boolean; projectContext?: string; designContext?: string } = {},
+): string {
+  const sections: string[] = [];
+  sections.push(`# Design review target (text-UI mode — no screenshots available)`);
+  sections.push(`repo: ${ctx.repo}`);
+  sections.push(`pull: #${ctx.pullNumber}`);
+  sections.push(`sha: ${ctx.newSha}${ctx.prevSha ? ` (from ${ctx.prevSha})` : ""}`);
+  if (uiFiles.length > 0) {
+    sections.push(`ui files touched: ${uiFiles.join(", ")}`);
+  }
+  if (opts.truncated) {
+    sections.push(`diff-truncated: yes — full UI diff exceeded the inline budget; hunks below are a per-file truncated view.`);
+  }
+  sections.push("");
+
+  if (ctx.deployStatus && ctx.deployStatus !== "unknown") {
+    sections.push(`# Deploy status`);
+    if (ctx.deployStatus === "failure") {
+      sections.push(
+        `deploy: FAILURE on this sha — treat as an automatic non-approve signal unless every design concern is unambiguously unrelated to the deploy.`,
+      );
+    } else if (ctx.deployStatus === "success") {
+      sections.push(`deploy: success — green on this sha.`);
+    } else if (ctx.deployStatus === "pending") {
+      sections.push(`deploy: pending — not yet complete.`);
+    }
+    sections.push("");
+  }
+
+  if (opts.projectContext) {
+    sections.push(`# Project context`);
+    sections.push(opts.projectContext);
+    sections.push("");
+  }
+  if (opts.designContext) {
+    sections.push(`# Design context`);
+    sections.push(opts.designContext);
+    sections.push("");
+  }
+
+  sections.push(`# UI diff`);
+  sections.push("```diff");
+  sections.push(uiDiff);
+  sections.push("```");
+  sections.push("");
+  sections.push(`# Instruction`);
+  sections.push(
+    `Review the UI diff above through the design lens described in the system prompt. Call submit_review exactly once with your verdict, blockers (if any), and a one-paragraph summary. Remember: the code agents are covering logic + security — do not duplicate them.`,
+  );
+
+  if (ctx.priors && ctx.priors.length > 0) {
+    sections.push("");
+    sections.push(`# Round ${ctx.round ?? 2} — other agents' verdicts from the previous round`);
+    sections.push(
+      `Read each agent's verdict + blockers. Update your verdict ONLY if you see a real design issue you missed, or a false-positive you can now retract. Do not mirror the majority — the design lens is often the dissenting one.`,
     );
     sections.push("");
     for (const p of ctx.priors) {

@@ -7,8 +7,23 @@ export type {
 } from "./design-agent.js";
 export {
   SYSTEM_PROMPT,
+  TEXT_UI_SYSTEM_PROMPT,
   REVIEW_TOOL_NAME,
   REVIEW_TOOL_DESCRIPTION,
   REVIEW_TOOL_INPUT_SCHEMA,
   buildUserPrompt,
+  buildTextUIPrompt,
 } from "./prompts.js";
+export {
+  UI_EXTENSIONS,
+  UI_PATH_FRAGMENTS,
+  extractChangedFiles,
+  isUiPath,
+  filterUiFiles,
+  diffTouchesUi,
+} from "./ui-globs.js";
+export {
+  extractUiDiff,
+  MAX_UI_DIFF_CHARS,
+} from "./text-ui-extract.js";
+export type { ExtractedUiDiff } from "./text-ui-extract.js";

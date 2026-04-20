@@ -5,8 +5,12 @@ import {
   REVIEW_TOOL_DESCRIPTION,
   REVIEW_TOOL_INPUT_SCHEMA,
   SYSTEM_PROMPT,
+  TEXT_UI_SYSTEM_PROMPT,
   buildUserPrompt,
+  buildTextUIPrompt,
 } from "./prompts.js";
+import { diffTouchesUi } from "./ui-globs.js";
+import { extractUiDiff, MAX_UI_DIFF_CHARS } from "./text-ui-extract.js";
 
 /**
  * Minimal shape of the Anthropic vision-capable messages API. Narrowed so
@@ -129,16 +133,32 @@ export class DesignAgent implements Agent {
 
   async review(ctx: ReviewContext): Promise<ReviewResult> {
     const artifacts = ctx.visualArtifacts ?? [];
-    if (artifacts.length === 0) {
-      return {
-        agent: this.id,
-        verdict: "approve",
-        blockers: [],
-        summary:
-          "skipped — no visual artifacts captured for this PR. Design agent cannot infer visual regressions from the text diff alone; approving by default. (Follow-up: wire screenshot capture into the review pipeline.)",
-      };
+    // Mode A — vision: screenshots present. Highest-signal mode; always
+    // wins over Mode B when both are available.
+    if (artifacts.length > 0) {
+      return this.reviewVision(ctx, artifacts);
     }
+    // Mode B — text-UI: no screenshots, but the diff touches UI code.
+    // Reason about rendered intent from the source alone.
+    if (diffTouchesUi(ctx.diff)) {
+      return this.reviewTextUI(ctx);
+    }
+    // Mode C — skip: no screenshots, no UI code. Graceful approve so
+    // the council doesn't treat the absence of signal as a block.
+    return {
+      agent: this.id,
+      verdict: "approve",
+      blockers: [],
+      summary:
+        "skipped — no visual artifacts and no UI-relevant files in the diff. Design agent has nothing to review; approving by default.",
+    };
+  }
 
+  /** Mode A — vision review. Original behavior, unchanged. */
+  private async reviewVision(
+    ctx: ReviewContext,
+    artifacts: NonNullable<ReviewContext["visualArtifacts"]>,
+  ): Promise<ReviewResult> {
     const routes = artifacts.map((a) => a.route);
     const userText = buildUserPrompt(ctx, routes);
     // Rough token estimate for budget reservation. Images cost ~1.5k tokens
@@ -170,6 +190,85 @@ export class DesignAgent implements Agent {
           max_tokens: this.maxTokens,
           system: [{ type: "text", text: SYSTEM_PROMPT, cache_control: { type: "ephemeral" } }],
           messages: [{ role: "user", content }],
+          tools: [
+            {
+              name: REVIEW_TOOL_NAME,
+              description: REVIEW_TOOL_DESCRIPTION,
+              input_schema: REVIEW_TOOL_INPUT_SCHEMA,
+            },
+          ],
+          tool_choice: { type: "tool", name: REVIEW_TOOL_NAME },
+        });
+        const latencyMs = Date.now() - started;
+
+        const parsed = parseReviewResponse(response, this.id);
+        const usage = response.usage ?? { input_tokens: 0, output_tokens: 0 };
+        const costUsd = estimateActualCost(model, usage);
+
+        return {
+          result: {
+            ...parsed,
+            tokensUsed: usage.input_tokens + usage.output_tokens,
+            costUsd,
+          },
+          inputTokens: usage.input_tokens,
+          outputTokens: usage.output_tokens,
+          costUsd,
+          latencyMs,
+        };
+      },
+    );
+
+    return outcome.result;
+  }
+
+  /**
+   * Mode B — text-UI review. No screenshots, but the diff touches UI
+   * files. Extract the UI-only hunks, cap to `MAX_UI_DIFF_CHARS`, and
+   * send to a design-focused prompt that reasons about rendered intent.
+   *
+   * Uses the same `submit_review` tool schema as Mode A so response
+   * parsing is shared.
+   */
+  private async reviewTextUI(ctx: ReviewContext): Promise<ReviewResult> {
+    const extracted = extractUiDiff(ctx.diff, MAX_UI_DIFF_CHARS);
+    const userText = buildTextUIPrompt(ctx, extracted.text, extracted.files, {
+      truncated: extracted.truncated,
+    });
+    const inputTokenEstimate =
+      estimateTokens(TEXT_UI_SYSTEM_PROMPT) + estimateTokens(userText);
+    const estimatedCostUsd =
+      (inputTokenEstimate * 15) / 1_000_000 + (this.maxTokens * 75) / 1_000_000;
+
+    const outcome = await this.gate.run<ReviewResult>(
+      {
+        agent: this.id,
+        cacheablePrefix: TEXT_UI_SYSTEM_PROMPT,
+        prompt: TEXT_UI_SYSTEM_PROMPT + "\n" + userText,
+        estimatedCostUsd,
+        forceModel: this.model,
+      },
+      async ({ model }) => {
+        const started = Date.now();
+        const client = await this.getClient();
+        const response = await client.messages.create({
+          model,
+          max_tokens: this.maxTokens,
+          system: [
+            { type: "text", text: TEXT_UI_SYSTEM_PROMPT, cache_control: { type: "ephemeral" } },
+          ],
+          messages: [
+            {
+              role: "user",
+              content: [
+                { type: "text", text: userText },
+                {
+                  type: "text",
+                  text: "Respond by calling submit_review exactly once.",
+                },
+              ],
+            },
+          ],
           tools: [
             {
               name: REVIEW_TOOL_NAME,
