@@ -333,10 +333,26 @@ export async function review(argv: string[]): Promise<void> {
   const notifiers: Notifier[] = [];
   const tg = config.integrations?.telegram;
   if (tg?.enabled !== false) {
+    // v0.4.4 — dual-path: CONCLAVE_TOKEN routes through the central plane
+    // (no per-repo bot token needed). Direct-bot path still works when
+    // CONCLAVE_TOKEN is absent (self-hosted / v0.3-style installs).
+    const hasConclaveToken = !!process.env["CONCLAVE_TOKEN"];
     const hasToken = !!process.env["TELEGRAM_BOT_TOKEN"];
     const hasChat = tg?.chatId !== undefined || !!process.env["TELEGRAM_CHAT_ID"];
-    if (tg?.enabled === true && !hasToken) {
-      process.stderr.write("conclave review: TELEGRAM_BOT_TOKEN not set — skipping Telegram notifier\n");
+    if (hasConclaveToken) {
+      const opts: ConstructorParameters<typeof TelegramNotifier>[0] = {};
+      if (tg?.includeActionButtons !== undefined) opts.includeActionButtons = tg.includeActionButtons;
+      try {
+        notifiers.push(new TelegramNotifier(opts));
+      } catch (err) {
+        process.stderr.write(
+          `conclave review: Telegram notifier (central) init failed — ${(err as Error).message}\n`,
+        );
+      }
+    } else if (tg?.enabled === true && !hasToken) {
+      process.stderr.write(
+        "conclave review: neither CONCLAVE_TOKEN nor TELEGRAM_BOT_TOKEN set — skipping Telegram notifier\n",
+      );
     } else if (hasToken && hasChat) {
       const opts: ConstructorParameters<typeof TelegramNotifier>[0] = {};
       if (tg?.chatId !== undefined) opts.chatId = tg.chatId;

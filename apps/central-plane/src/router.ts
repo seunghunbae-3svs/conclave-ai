@@ -6,6 +6,7 @@ import { episodicRoutes } from "./routes/episodic.js";
 import { memoryRoutes } from "./routes/memory.js";
 import { createOAuthRoutes } from "./routes/oauth.js";
 import { createTelegramRoutes } from "./routes/telegram.js";
+import { createReviewRoutes } from "./routes/review.js";
 import type { FetchLike } from "./github.js";
 
 export function createApp(opts: { fetch?: FetchLike } = {}): Hono<{ Bindings: Env }> {
@@ -16,6 +17,7 @@ export function createApp(opts: { fetch?: FetchLike } = {}): Hono<{ Bindings: En
   app.route("/", memoryRoutes);
   app.route("/", createOAuthRoutes(opts.fetch));
   app.route("/", createTelegramRoutes(opts.fetch));
+  app.route("/", createReviewRoutes(opts.fetch));
   app.onError((err, c) => {
     console.error("central-plane error:", err);
     return c.json({ error: err.message || "internal error" }, 500);

@@ -17,15 +17,28 @@
 #   ANTHROPIC_API_KEY       required
 #   OPENAI_API_KEY          optional (enables 3-agent tier-1; otherwise 1-agent)
 #   GEMINI_API_KEY          optional (same)
-#   TELEGRAM_BOT_TOKEN      optional (disables Telegram notifier if missing)
-#   TELEGRAM_CHAT_ID        optional (same)
+#   CONCLAVE_TOKEN          required for Telegram notifications — installed
+#                           by `conclave init`. Routes notifications through
+#                           the central @Conclave_ai_bot, so you never need
+#                           your own bot token. If absent, review still runs
+#                           but posts no Telegram notification.
 #   ORCHESTRATOR_PAT        optional — REQUIRED for the rework button loop
 #                           (persist-episodic-to-main step + rework push-back).
 #                           Without it, review runs but rework cannot resolve
 #                           the episodic id later.
 #
-# v0.4.0-beta will migrate this to call the central plane for memory sync
-# and CONCLAVE_TOKEN-based auth; the consumer wrapper file will not change.
+# Optional repo variables (GitHub Actions `vars`, not secrets):
+#   CONCLAVE_CENTRAL_URL    override the central plane base URL. Leave unset
+#                           for the production default. Useful for staging
+#                           or self-hosted deployments.
+#
+# v0.4.4 — Telegram now routes through the central plane by default.
+# The legacy TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID secrets are no longer
+# consulted by this workflow. Drop them with:
+#     gh secret delete TELEGRAM_BOT_TOKEN --repo <slug>
+#     gh secret delete TELEGRAM_CHAT_ID   --repo <slug>
+# Self-hosted users who still want the direct-bot path can invoke the CLI
+# outside this reusable workflow.
 
 name: Conclave AI Review (reusable)
 
@@ -87,8 +100,8 @@ jobs:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          CONCLAVE_TOKEN: ${{ secrets.CONCLAVE_TOKEN }}
+          CONCLAVE_CENTRAL_URL: ${{ vars.CONCLAVE_CENTRAL_URL || '' }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           conclave review \

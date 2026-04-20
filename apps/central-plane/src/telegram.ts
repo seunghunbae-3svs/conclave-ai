@@ -23,6 +23,9 @@ export class TelegramClient {
     text: string;
     parseMode?: "HTML" | "MarkdownV2";
     replyToMessageId?: number;
+    replyMarkup?: {
+      inline_keyboard: Array<Array<{ text: string; callback_data?: string; url?: string }>>;
+    };
   }): Promise<void> {
     const body: Record<string, unknown> = {
       chat_id: opts.chatId,
@@ -31,6 +34,7 @@ export class TelegramClient {
     };
     if (opts.parseMode) body.parse_mode = opts.parseMode;
     if (opts.replyToMessageId) body.reply_to_message_id = opts.replyToMessageId;
+    if (opts.replyMarkup) body.reply_markup = opts.replyMarkup;
     const resp = await this.fetchImpl(this.url("sendMessage"), {
       method: "POST",
       headers: { "content-type": "application/json" },
