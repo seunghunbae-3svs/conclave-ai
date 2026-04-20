@@ -1,6 +1,6 @@
 # Conclave AI v0.4 — Central Control Plane
 
-**Status:** DRAFT — awaiting Bae's decisions on the checkboxes below.
+**Status:** LOCKED (2026-04-20) — all 12 decisions below are resolved. Implementation starts with `conclave init` wizard; milestone schedule in §5 governs.
 **Supersedes for distribution only:** `ARCHITECTURE.md` (v2.0) stays the source of truth for pipeline / council / efficiency-gate / memory substrate. This doc only redefines how users *install and operate* conclave.
 **Tracks:** dogfood feedback from 2026-04-20 eventbadge session (see `memory/project_conclave_known_bugs.md` for the six failure modes that drove this rewrite).
 
@@ -82,97 +82,58 @@ The council and worker agents **still run on the user's Actions runner**, using 
 
 ---
 
-## 4. The twelve open decisions
+## 4. Twelve decisions — LOCKED 2026-04-20
 
-Each is a branch point. Many lock downstream code shape, so they need Bae's call before implementation starts.
+| ID | Decision | Choice (LOCKED) |
+|----|----------|-----------------|
+| D1 | Distribution | **A: Reusable workflow + CLI** for v0.4. **B (GitHub App + LLM proxy) planned for v1.0** as the paid SaaS tier. |
+| D2 | Central host | **Cloudflare Workers + D1 (SQLite).** |
+| D3 | Auth | **GitHub OAuth + CONCLAVE_TOKEN.** |
+| D4 | Data sharing | **Hashes default, full-content opt-in.** This is the **core enterprise-sales differentiator** — emphasised in landing copy, docs, and SaaS transition messaging. Decision #21's federated-baseline skeleton ships verbatim. |
+| D5 | Telegram | **Central `@conclave_ai` bot, users DM `/link <token>`.** Per-user bots removed from docs. Cost breakdown: §4b below. |
+| D6 | LLM keys | **User-owned for v0.4.** SaaS transition (v1.0) switches paid-tier users to Conclave-proxied. Free tier keeps user-owned. |
+| D7 | Wrapper workflow | 3 lines + `secrets: inherit`. Named-secrets alternative documented. |
+| D8 | `conclave init` | 8-step interactive wizard + `--yes` for CI/IaC. `--reconfigure` to re-run on existing installs. |
+| D9 | v0.3 migration | **Breaking + 1-page migration doc.** Until public release, keep the cheapest path — no automatic migrate CLI. |
+| D10 | Deploy-status in ReviewContext | **a + b ship in v0.4:** add `deployStatus` field + agent prompts treat "deploy failed" as auto-non-approve. **c (central polling of Vercel/Netlify webhooks) deferred to v0.5.** |
+| D11 | Cost / quota | **v0.4: local `perPrUsd` only.** Central plane keeps a lightweight usage counter (increment only, no rate-limit). v0.5 transition triggers: §4c below. |
+| D12 | v0.5 deferrals | Dashboard UI · LLM proxy (paid tier per D6) · self-hosted enterprise · i18n (per `feedback_conclave_ux_i18n.md`) · nightly memory classification scheduler · central deploy-status polling (D10c) · `conclave migrate` CLI (D9). |
 
-### D1. Distribution model
-- [ ] **A. Reusable workflow + CLI** — user repo has one 3-line workflow that calls `conclave-ai/conclave-ai/.github/workflows/review.yml@v0.4`. CLI + Actions only. Zero hosted infra.
-- [ ] **B. GitHub App + hosted runner** — user installs an App; conclave runs everything on its own infra. Zero YAMLs in user repo. Needs real hosting + billing.
-- [ ] **C. Hybrid** — A for now, B layered on top once we have paid tier.
-- **Recommended: A for v0.4, path to C for v1.0.** A ships in 2–3 weeks; B needs a month of infra work + ongoing ops.
+---
 
-### D2. Where does the central service live?
-- [ ] **Cloudflare Workers** (free tier generous, fast cold start, good for webhooks)
-- [ ] **Vercel** (ergonomic, $20/mo, same stack as most users)
-- [ ] **Railway / Fly** (more control, Postgres easy)
-- [ ] **GitHub Pages + GitHub Actions only** (free, but no real server; rules out webhook)
-- **Recommended: Cloudflare Workers + D1 (SQLite).** Zero ops until >100k reviews/mo.
+### 4b. D5 follow-up — central Telegram bot cost
 
-### D3. Auth model
-- [ ] **GitHub OAuth + CONCLAVE_TOKEN** — `conclave init` opens browser, user authorises conclave.ai GitHub App, we mint a scoped token stored as a repo secret. One token per repo.
-- [ ] **Personal API key from dashboard** — user signs in, creates a token, pastes it into `conclave init`.
-- **Recommended: OAuth.** Zero-friction install; revocable from GitHub settings; standard pattern.
+Bae asked: if Conclave runs a single `@conclave_ai` bot for all users, does that create recurring cost on my side?
 
-### D4. What data crosses the central plane?
-- [ ] **Episodic entries pushed verbatim** — simplest, but leaks diff content + blocker text across orgs.
-- [ ] **Pattern hashes only** (already the decision #21 baseline) — k-anonymous, safe, but loses rich context.
-- [ ] **Hashes by default, full content opt-in** per repo.
-- **Recommended: hashes by default, full-content opt-in.** A single repo opting in contributes labelled data; everyone else gets aggregated frequencies.
+**Short answer: $0/month at any realistic v0.4 volume.** Breakdown:
 
-### D5. Telegram centralization
-- [ ] **A. Keep per-user bots** (current) — simple, zero central infra, but every user creates a bot.
-- [ ] **B. Central `@conclave_ai` bot, users DM `/link <token>`** — one global bot, per-user channels.
-- [ ] **C. Both — central is default, per-user is an override.**
-- **Recommended: B.** Kills the bot-creation step entirely. Infra cost: one Cloudflare Worker running getUpdates long-poll.
+| Component | Free tier | v0.4 projected | Headroom |
+|-----------|-----------|----------------|----------|
+| Telegram Bot API itself | Unlimited, free forever | — | n/a |
+| Cloudflare Workers (bot runner) | 100,000 requests/day | long-poll every 5 min = 288 req/day | 346× |
+| Cloudflare Workers (sendMessage on notifications) | Same 100K/day | ~5 sends per PR × thousands of PRs = still well under | 10× |
+| D1 SQLite (chat_id ↔ repo_id mapping) | 5 GB, 25M row reads/day | kilobytes, thousands of reads/day | millions× |
+| Telegram outbound rate limits | 30 msg/sec global, 1 msg/sec per chat | far below | n/a |
 
-### D6. How do users provide LLM API keys?
-- [ ] **A. User-owned (current)** — they pay Anthropic/OpenAI directly. Conclave never sees the key.
-- [ ] **B. Conclave-proxied** — we proxy the LLM call, aggregate billing, charge subscription.
-- [ ] **C. A now, B as future paid tier.**
-- **Recommended: A for v0.4.** B is a billing/legal lift worth its own quarter.
+Conclave stops being free only when it crosses **~80K Telegram events/day**, which at current projections = tens of thousands of concurrent active users. At that point the revenue-side (SaaS tier per D6) is already live.
 
-### D7. Reusable workflow shape
-v0.4's user wrapper file should be about 3 lines. Everything else lives in the reusable workflow we publish:
-```yaml
-# Proposed user wrapper (.github/workflows/conclave.yml):
-on: { pull_request: { types: [opened, synchronize, reopened] } }
-jobs:
-  conclave:
-    uses: conclave-ai/conclave-ai/.github/workflows/review.yml@v0.4
-    secrets: inherit
-```
-- [ ] Confirm this is the target shape
-- [ ] Confirm `secrets: inherit` is acceptable (alternative: named `secrets:` block)
+**One caveat:** if a user opts in to verbatim content sharing (D4), their notification bodies get larger. Still fits in CF Workers' 10ms CPU / 128MB budget per request. No impact.
 
-### D8. `conclave init` wizard — what does it actually do?
-Proposed steps, in order:
-1. Detect `git remote get-url origin` -> infer repo
-2. Detect existing `.conclaverc.json` -> skip / upgrade / replace prompt
-3. Open browser -> OAuth -> mint CONCLAVE_TOKEN -> GitHub API write as repo secret
-4. Prompt for ANTHROPIC_API_KEY (required); OPENAI / GEMINI (optional, gate agent selection)
-5. Prompt for Telegram link step (`/link <token>` generated locally, user taps)
-6. Write `.conclaverc.json` with sensible defaults (tier1: claude+openai+gemini, budget: $2/PR)
-7. Write `.github/workflows/conclave.yml` (3 lines)
-8. Print "Open a PR to test"
-- [ ] Confirm this is the sequence
-- [ ] Any step you want gated by explicit `--yes` vs interactive?
+---
 
-### D9. Migration from v0.3
-- [ ] **A. `conclave migrate`** — existing distributed installs run this; it detects .conclave/ + old workflows and offers to consolidate.
-- [ ] **B. Breaking change** — v0.3 installs continue working on their own until they re-init.
-- [ ] **C. Dual-mode forever** — users pick per-repo.
-- **Recommended: B + doc'd migration path.** Most real installs are eventbadge-style hand-rolled; forcing migration will hurt no one because there ARE no production installs yet.
+### 4c. D11 follow-up — v0.5 transition triggers
 
-### D10. Deploy-status integration (Bae's explicit ask)
-Council should read Vercel / Netlify / Cloudflare deploy status as context. Currently the `@conclave-ai/platform-*` packages exist but aren't wired into `ReviewContext`.
-- [ ] Add `deployStatus` field to `ReviewContext`
-- [ ] Central plane polls deploys on dispatch; passes result into the workflow env
-- [ ] Agent prompts updated to treat "deploy failed" as an automatic non-approve signal
+Bae asked for a concrete signal that says "it's time to build billing/quota."
 
-### D11. Cost / quota
-In v0.3, the user's `perPrUsd` budget is local-only. In v0.4:
-- [ ] Central plane tracks cumulative spend per repo
-- [ ] Rate-limits dispatches if the user's API account hits a threshold (based on LLM provider billing webhooks — complex)
-- [ ] Or: leave it local, only track free-tier requests against central infra
+**Trigger — when any 3 of these hit, start the v0.5 spec PR:**
 
-### D12. What slides to v0.5
-Things tempting to pile in but explicitly OUT of v0.4 scope:
-- Dashboard web UI (table stakes eventually; not in v0.4 — CLI is enough)
-- Paid subscription tier
-- Self-hosted control plane (enterprise)
-- Multi-language / i18n (per the `feedback_conclave_ux_i18n.md` memory — v0.5 work)
-- Scheduler for nightly memory classification (decision #25, still pending)
+1. **20+ distinct repos registered** via `conclave init`
+2. **Average monthly LLM spend per user > $10** (pulled from the `metrics.totalCostUsd` reported back to the central plane)
+3. **2+ inbound enterprise-sized requests** (via dashboard contact form, GitHub issues, or direct email — "can we get a managed-billing option?")
+4. **Any single user reports their Anthropic bill surprise** (explicit signal that self-managed quota isn't enough)
+5. **Central CF Worker hits 80% of free-tier daily limit** for any rolling 7-day average
+
+I'll add a lightweight metrics dashboard (just a terminal command, `conclave metrics`, that reads the counter) so Bae can eyeball these numbers without infrastructure work. Alert email when threshold crossed is a v0.5 feature.
 
 ---
 
