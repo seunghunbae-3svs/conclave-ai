@@ -34,6 +34,11 @@ import { loadConfig, resolveMemoryRoot } from "../lib/config.js";
 import { loadPrDiff, loadGitDiff, loadFileDiff, type LoadedDiff } from "../lib/diff-source.js";
 import { renderReview, verdictToExitCode } from "../lib/output.js";
 import { buildPlatforms, type PlatformId } from "../lib/platform-factory.js";
+import {
+  detectDomain,
+  extractChangedFilesFromDiff,
+  type DomainDetectionResult,
+} from "../lib/domain-detect.js";
 
 type ReviewDomainInput = "code" | "design";
 function parseArgv(argv: string[]): {
@@ -87,7 +92,9 @@ Options:
   --pr N         Review PR N using gh CLI (preferred — includes repo context).
   --diff <file>  Review a unified-diff file directly.
   --base <ref>   Base ref for 'git diff' when neither --pr nor --diff given (default: origin/main).
-  --domain       "code" (default) or "design". Design always escalates to tier-2 cross-review.
+  --domain       "code" or "design" — explicit override. Omit to let Conclave
+                 auto-detect from the diff (v0.5.3+). UI-signal files flip the
+                 run to "mixed" (code agents + Design agent).
   --visual       Force-enable before/after visual diff (needs platform tokens + playwright).
   --no-visual    Force-disable visual diff for this run (overrides .conclaverc.json).
 
@@ -166,13 +173,55 @@ export async function review(argv: string[]): Promise<void> {
   const metrics = sink ? new MetricsRecorder({ sink }) : new MetricsRecorder();
   const gate = new EfficiencyGate({ budget, metrics });
 
-  // 4. Build agents. Per-tier if config.council.domains[domain] is
-  //    present; else a single flat agent list (legacy flat-Council).
-  //    An agent is only included if its credentials are available;
-  //    others are skipped with a warning so a missing key doesn't
-  //    block the review.
-  const domain: ReviewDomain = args.domain ?? "code";
-  const domainConfig = config.council.domains?.[domain];
+  // 4. Resolve the review domain.
+  //    - Explicit `--domain code|design` always wins (Level-3 override,
+  //      mirrors pre-v0.5.3 behavior).
+  //    - Otherwise, when `autoDetect.enabled` (default true), inspect
+  //      the diff's changed-file list. Any UI-signal hit flips the run
+  //      into "mixed" mode — code agents + Design agent together.
+  //    - When `autoDetect.enabled: false` and no `--domain`, fall back
+  //      to "code" (legacy v0.5.2 default).
+  const autoDetectCfg = config.autoDetect ?? { enabled: true };
+  let resolvedDomain: "code" | "design" | "mixed";
+  let detection: DomainDetectionResult | null = null;
+  if (args.domain) {
+    resolvedDomain = args.domain;
+    process.stdout.write(
+      `conclave review: domain: ${resolvedDomain} (explicit --domain)\n`,
+    );
+  } else if (autoDetectCfg.enabled === false) {
+    resolvedDomain = "code";
+    process.stdout.write(
+      `conclave review: domain: code (autoDetect disabled)\n`,
+    );
+  } else {
+    const changed = extractChangedFilesFromDiff(loaded.diff);
+    const detectOpts: Parameters<typeof detectDomain>[1] = {};
+    if (autoDetectCfg.uiSignals) detectOpts.uiSignals = autoDetectCfg.uiSignals;
+    if (autoDetectCfg.excludes) detectOpts.excludes = autoDetectCfg.excludes;
+    detection = detectDomain(changed, detectOpts);
+    resolvedDomain = detection.domain;
+    process.stdout.write(
+      `conclave review: auto-detected domain: ${detection.domain} (reason: ${detection.reason})\n`,
+    );
+  }
+
+  // The core `ReviewDomain` is "code" | "design" — "mixed" is a
+  // CLI-layer concept. When mixed, send "design" to the context so
+  // DesignAgent's branch logic (and any design-tuned config in
+  // `domains.design.*`) lights up; code agents ignore the label.
+  const ctxDomain: ReviewDomain = resolvedDomain === "code" ? "code" : "design";
+
+  // For tier-build we may need the "code" domain config (mixed pulls
+  // from BOTH). For non-mixed, fall through to the standard path.
+  const codeDomainCfg = config.council.domains?.["code"];
+  const designDomainCfg = config.council.domains?.["design"];
+  const domainConfig =
+    resolvedDomain === "code"
+      ? codeDomainCfg
+      : resolvedDomain === "design"
+        ? designDomainCfg
+        : (codeDomainCfg ?? designDomainCfg);
   const useTiered = Boolean(domainConfig);
 
   function buildAgent(id: string, modelOverride?: string): Agent | null {
@@ -224,31 +273,84 @@ export async function review(argv: string[]): Promise<void> {
   let council: CouncilLike;
 
   if (useTiered && domainConfig) {
-    const tier1Models = domainConfig.models?.tier1 ?? {};
-    const tier2Models = domainConfig.models?.tier2 ?? {};
+    // For "mixed" runs, union tier-1 / tier-2 across code + design
+    // domain configs (deduped, preserving order: code first, then any
+    // design-only additions). Tier depth settings inherit from the
+    // design config when present (design always-escalate wins so the
+    // Design agent always gets a chance at tier-2), else code's.
+    function mergedTierIds(pick: (c: typeof codeDomainCfg) => readonly string[]): string[] {
+      const seen = new Set<string>();
+      const out: string[] = [];
+      const push = (ids: readonly string[] | undefined) => {
+        if (!ids) return;
+        for (const id of ids) {
+          if (!seen.has(id)) {
+            seen.add(id);
+            out.push(id);
+          }
+        }
+      };
+      if (resolvedDomain === "mixed") {
+        push(codeDomainCfg ? pick(codeDomainCfg) : undefined);
+        push(designDomainCfg ? pick(designDomainCfg) : undefined);
+      } else {
+        push(pick(domainConfig));
+      }
+      return out;
+    }
+    function mergedModels(tier: "tier1" | "tier2"): Record<string, string> {
+      if (resolvedDomain !== "mixed") {
+        return domainConfig!.models?.[tier] ?? {};
+      }
+      // design overrides code — design's model picks are tuned for
+      // design work; code agents keep whichever override code supplied
+      // unless design explicitly pinned the same agent.
+      return {
+        ...(codeDomainCfg?.models?.[tier] ?? {}),
+        ...(designDomainCfg?.models?.[tier] ?? {}),
+      };
+    }
+    const tier1Ids = mergedTierIds((c) => c?.tier1 ?? []);
+    const tier2Ids = mergedTierIds((c) => c?.tier2 ?? []);
+    const tier1Models = mergedModels("tier1");
+    const tier2Models = mergedModels("tier2");
     const tier1: Agent[] = [];
-    for (const id of domainConfig.tier1) {
+    for (const id of tier1Ids) {
       const a = buildAgent(id, tier1Models[id]);
       if (a) tier1.push(a);
     }
     const tier2: Agent[] = [];
-    for (const id of domainConfig.tier2) {
+    for (const id of tier2Ids) {
       const a = buildAgent(id, tier2Models[id]);
       if (a) tier2.push(a);
     }
     if (tier1.length === 0) {
       process.stderr.write(
-        `conclave review: no tier-1 agents available for domain "${domain}". Set at least one agent's API key.\n`,
+        `conclave review: no tier-1 agents available for domain "${resolvedDomain}". Set at least one agent's API key.\n`,
       );
       process.exit(1);
       return;
     }
+    // Mixed always escalates (design always-escalates per decision #26;
+    // code portion benefits from tier-2 cross-review anyway).
+    const alwaysEscalate =
+      resolvedDomain === "mixed"
+        ? (designDomainCfg?.alwaysEscalate ?? domainConfig.alwaysEscalate ?? true)
+        : domainConfig.alwaysEscalate;
+    const tier1MaxRounds =
+      resolvedDomain === "mixed"
+        ? (designDomainCfg?.tier1MaxRounds ?? domainConfig.tier1MaxRounds)
+        : domainConfig.tier1MaxRounds;
+    const tier2MaxRounds =
+      resolvedDomain === "mixed"
+        ? (designDomainCfg?.tier2MaxRounds ?? domainConfig.tier2MaxRounds)
+        : domainConfig.tier2MaxRounds;
     council = new TieredCouncil({
       tier1Agents: tier1,
       tier2Agents: tier2,
-      tier1MaxRounds: domainConfig.tier1MaxRounds,
-      tier2MaxRounds: domainConfig.tier2MaxRounds,
-      alwaysEscalate: domainConfig.alwaysEscalate,
+      tier1MaxRounds,
+      tier2MaxRounds,
+      alwaysEscalate,
     });
   } else {
     // Legacy flat-Council path — used when config.council.domains is absent.
@@ -285,7 +387,7 @@ export async function review(argv: string[]): Promise<void> {
     newSha: loaded.newSha,
     answerKeys: retrieval.answerKeys.map(formatAnswerKeyForPrompt),
     failureCatalog: retrieval.failures.map(formatFailureForPrompt),
-    domain,
+    domain: ctxDomain,
     deployStatus,
   };
   if (loaded.prevSha) reviewCtx.prevSha = loaded.prevSha;
@@ -317,7 +419,7 @@ export async function review(argv: string[]): Promise<void> {
     results: outcome.results,
     metrics: gate.metrics.summary(),
     rounds: outcome.rounds,
-    domain,
+    domain: resolvedDomain,
     ...(outcome.earlyExit !== undefined ? { earlyExit: outcome.earlyExit } : {}),
   };
   if (tieredOutcome) {

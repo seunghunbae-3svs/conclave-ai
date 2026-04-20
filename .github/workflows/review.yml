@@ -46,10 +46,15 @@ on:
   workflow_call:
     inputs:
       domain:
-        description: 'Review domain — "code" (default) or "design" (escalates to tier 2 always).'
+        description: 'Review domain — LEGACY, alias of force-domain. Leave empty for auto-detect (v0.5.3+).'
         required: false
         type: string
-        default: code
+        default: ""
+      force-domain:
+        description: 'Force a specific domain (code|design), bypassing v0.5.3 auto-detect. Leave empty (default) to let the CLI inspect the diff.'
+        required: false
+        type: string
+        default: ""
       cli-version:
         description: 'npm version tag for @conclave-ai/cli. Default "latest"; pin to a specific version for reproducible reviews.'
         required: false
@@ -103,11 +108,22 @@ jobs:
           CONCLAVE_TOKEN: ${{ secrets.CONCLAVE_TOKEN }}
           CONCLAVE_CENTRAL_URL: ${{ vars.CONCLAVE_CENTRAL_URL || '' }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # v0.5.3: auto-detect is the default. Pass --domain only when
+          # the caller explicitly opted out via force-domain (or the
+          # legacy `domain` input, kept for one release as a migration
+          # shim — empty-string default is the new hands-off path).
+          FORCE_DOMAIN: ${{ inputs.force-domain || inputs.domain }}
         run: |
-          conclave review \
-            --pr ${{ github.event.pull_request.number }} \
-            --domain ${{ inputs.domain }} \
-            2>&1 | tee /tmp/conclave-result.txt || true
+          if [ -n "$FORCE_DOMAIN" ]; then
+            conclave review \
+              --pr ${{ github.event.pull_request.number }} \
+              --domain "$FORCE_DOMAIN" \
+              2>&1 | tee /tmp/conclave-result.txt || true
+          else
+            conclave review \
+              --pr ${{ github.event.pull_request.number }} \
+              2>&1 | tee /tmp/conclave-result.txt || true
+          fi
 
       - name: Post review summary as PR comment
         if: env.SKIP_REVIEW != 'true'
