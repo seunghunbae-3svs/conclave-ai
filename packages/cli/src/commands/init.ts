@@ -115,6 +115,7 @@ export async function runInit(args: InitArgs, deps: RunInitDeps = {}): Promise<n
 
     // Step 3 — OAuth / CONCLAVE_TOKEN via central plane device flow.
     let oauthOutcome: "success" | "skipped" | "failed" = "skipped";
+    let oauthToken: string | undefined;
     if (!args.skipOauth) {
       const oauthDeps: OauthFlowDeps = {
         stdout,
@@ -134,6 +135,7 @@ export async function runInit(args: InitArgs, deps: RunInitDeps = {}): Promise<n
       const exit = await runOauthFlow(repoSlug!, oauthDeps);
       if (exit.kind === "success") {
         oauthOutcome = "success";
+        oauthToken = exit.token;
         if (exit.rotated) {
           stdout(`  (CONCLAVE_TOKEN rotated for an existing install)\n`);
         }
@@ -154,14 +156,15 @@ export async function runInit(args: InitArgs, deps: RunInitDeps = {}): Promise<n
     // Step 4 — API keys. Prompt + print guidance; we do NOT write them to
     // GitHub secrets ourselves in v0.4-alpha (that needs the OAuth token
     // from step 3). Users currently set secrets via \`gh secret set\`.
-    const anthropic = await prompter.ask(
+    // Input is masked so keys don't end up in terminal scrollback.
+    const anthropic = await prompter.askSecret(
       "ANTHROPIC_API_KEY (required, not stored — used only for a one-time gh secret set hint)",
       { required: false },
     );
-    const openai = await prompter.ask("OPENAI_API_KEY (optional, press Enter to skip)", {
+    const openai = await prompter.askSecret("OPENAI_API_KEY (optional, press Enter to skip)", {
       required: false,
     });
-    const gemini = await prompter.ask("GEMINI_API_KEY (optional, press Enter to skip)", {
+    const gemini = await prompter.askSecret("GEMINI_API_KEY (optional, press Enter to skip)", {
       required: false,
     });
     const selectedAgents: string[] = [];
@@ -178,11 +181,12 @@ export async function runInit(args: InitArgs, deps: RunInitDeps = {}): Promise<n
     // pair the chat for you (chat ownership lives on the user's phone),
     // so we print the exact /link command instead. If OAuth failed, the
     // user has no CONCLAVE_TOKEN to link with — skip the hint.
-    if (oauthOutcome === "success") {
+    if (oauthOutcome === "success" && oauthToken) {
       stdout(
         `\n• Telegram link step:\n` +
           `  1. Open Telegram and DM @${DEFAULT_BOT_USERNAME}\n` +
-          `  2. Send: /link <CONCLAVE_TOKEN>   (the token printed above in the OAuth step)\n` +
+          `  2. Send this command (copy + paste, token is shown only here):\n` +
+          `       /link ${oauthToken}\n` +
           `  Bot confirms with "✅ Linked this chat to ${repoSlug}"\n`,
       );
     }
