@@ -40,14 +40,16 @@ v0.4 needs exactly one conclave-owned secret on your repo: `CONCLAVE_TOKEN`. The
 
 **Drop if present:**
 - `ORCHESTRATOR_PAT` — v0.4's central bot fires dispatches server-side using the GitHub token captured during OAuth
-- `TELEGRAM_BOT_TOKEN` — v0.4 uses a single central bot (`@Conclave_ai_bot`); you no longer run your own
-- `TELEGRAM_CHAT_ID` — same reason
+- `TELEGRAM_BOT_TOKEN` — **fully unused from v0.4.4 onward.** v0.4.4 routes all Telegram notifications through the central `@Conclave_ai_bot` using your `CONCLAVE_TOKEN`. Earlier v0.4.0–v0.4.3 still consulted this secret for the notifier; from v0.4.4 the reusable workflow no longer sets it, and the CLI notifier prefers the central path when `CONCLAVE_TOKEN` is present. Safe to delete.
+- `TELEGRAM_CHAT_ID` — same reason.
 
 ```powershell
 gh secret delete ORCHESTRATOR_PAT   --repo owner/repo
 gh secret delete TELEGRAM_BOT_TOKEN --repo owner/repo
 gh secret delete TELEGRAM_CHAT_ID   --repo owner/repo
 ```
+
+> **Self-hosted Conclave?** If you run a private central plane, the CLI notifier still honours `TELEGRAM_BOT_TOKEN` + `TELEGRAM_CHAT_ID` when `CONCLAVE_TOKEN` is absent. See `packages/integration-telegram` for the dual-path implementation; the reusable workflow above assumes the public central plane.
 
 **Keep:**
 - `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY` — still user-owned in v0.4 (D6). `conclave init` will remind you to set these if they're missing.

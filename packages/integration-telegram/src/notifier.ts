@@ -2,6 +2,16 @@ import type { Notifier, NotifyReviewInput } from "@conclave-ai/core";
 import { TelegramClient, type HttpFetch, type TelegramInlineKeyboard } from "./client.js";
 import { formatReviewForTelegram } from "./format.js";
 
+/**
+ * Default Conclave central plane URL. Duplicated from
+ * `packages/cli/src/commands/init/central-client.ts` — importing it
+ * directly would create a circular workspace dep (cli → integration-
+ * telegram → cli). Kept in sync by policy; the two constants MUST
+ * match. When the central plane URL changes, update both files in the
+ * same PR.
+ */
+export const DEFAULT_CENTRAL_URL = "https://conclave-ai.seunghunbae.workers.dev";
+
 export interface TelegramNotifierOptions {
   /** Bot token from BotFather. If omitted, read from TELEGRAM_BOT_TOKEN env. */
   token?: string;
@@ -15,6 +25,26 @@ export interface TelegramNotifierOptions {
   baseUrl?: string;
   /** If true, attaches inline buttons (approve/reject/rework) to the message. Default true. */
   includeActionButtons?: boolean;
+  /**
+   * If true, route notifications through the Conclave central plane
+   * rather than hitting the Telegram Bot API directly. Ignored if
+   * CONCLAVE_TOKEN env is not set. Defaults to automatic: central path
+   * on, if and only if CONCLAVE_TOKEN is present in env.
+   */
+  useCentralPlane?: boolean;
+  /**
+   * Override central plane base URL (tests). Falls back to
+   * CONCLAVE_CENTRAL_URL env then DEFAULT_CENTRAL_URL.
+   */
+  centralUrl?: string;
+  /**
+   * Repo slug override. Falls back to GITHUB_REPOSITORY env (set by
+   * GitHub Actions automatically). If neither source yields a slug, the
+   * notifier still works — the central plane only uses it for logging.
+   */
+  repoSlug?: string;
+  /** Logger for `which path taken` diagnostics. Defaults to stderr. */
+  log?: (msg: string) => void;
 }
 
 /**
@@ -25,23 +55,74 @@ export interface TelegramNotifierOptions {
  * intentionally minimal — sendMessage + optional action buttons.
  * Inbound bot command handling (approve via button, /status, etc.) lives
  * in a separate command-surface package if/when added.
+ *
+ * v0.4.4 — dual-path delivery:
+ *
+ *   path A (CONCLAVE_TOKEN set, default in v0.4.4+):
+ *     POST {CONCLAVE_CENTRAL_URL}/review/notify with bearer auth
+ *     → central plane fans out to every linked Telegram chat
+ *     → no per-repo TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID needed
+ *
+ *   path B (self-hosted / v0.3 compat):
+ *     direct POST to https://api.telegram.org/bot{token}/sendMessage
+ *     → requires TELEGRAM_BOT_TOKEN + TELEGRAM_CHAT_ID
+ *     → preserved so users on private Conclave deployments keep working
  */
 export class TelegramNotifier implements Notifier {
   readonly id = "telegram";
   readonly displayName = "Telegram";
 
-  private readonly chatId: number | string;
-  private readonly client: TelegramClient;
+  // path A (central plane) — populated when useCentralPlane is on
+  private readonly centralUrl: string | null;
+  private readonly centralToken: string | null;
+  private readonly centralFetch: HttpFetch | null;
+  private readonly repoSlug: string;
+
+  // path B (direct bot) — populated when useCentralPlane is off
+  private readonly chatId: number | string | null;
+  private readonly client: TelegramClient | null;
+
   private readonly includeActionButtons: boolean;
+  private readonly log: (msg: string) => void;
 
   constructor(opts: TelegramNotifierOptions = {}) {
+    this.includeActionButtons = opts.includeActionButtons ?? true;
+    this.log = opts.log ?? ((m) => process.stderr.write(m + "\n"));
+
+    // Decide path. Explicit opts.useCentralPlane overrides env detection.
+    const conclaveToken = process.env["CONCLAVE_TOKEN"] ?? "";
+    const useCentral =
+      opts.useCentralPlane !== undefined ? opts.useCentralPlane : conclaveToken.length > 0;
+
+    if (useCentral) {
+      if (!conclaveToken && opts.useCentralPlane === true) {
+        throw new Error(
+          "TelegramNotifier: useCentralPlane=true but CONCLAVE_TOKEN is not set in env",
+        );
+      }
+      this.centralToken = conclaveToken;
+      this.centralUrl = (
+        opts.centralUrl ?? process.env["CONCLAVE_CENTRAL_URL"] ?? DEFAULT_CENTRAL_URL
+      ).replace(/\/$/, "");
+      this.centralFetch = opts.fetch ?? null;
+      this.repoSlug = opts.repoSlug ?? process.env["GITHUB_REPOSITORY"] ?? "unknown/unknown";
+      this.chatId = null;
+      this.client = null;
+      return;
+    }
+
+    // Path B — direct-to-Telegram, original v0.3 behaviour.
     const token = opts.token ?? process.env["TELEGRAM_BOT_TOKEN"] ?? "";
     const chatRaw = opts.chatId ?? process.env["TELEGRAM_CHAT_ID"] ?? "";
     if (!token && !opts.client) {
-      throw new Error("TelegramNotifier: TELEGRAM_BOT_TOKEN not set (pass opts.token, opts.client, or env)");
+      throw new Error(
+        "TelegramNotifier: TELEGRAM_BOT_TOKEN not set (pass opts.token, opts.client, or env), and CONCLAVE_TOKEN also absent",
+      );
     }
     if (!chatRaw) {
-      throw new Error("TelegramNotifier: TELEGRAM_CHAT_ID not set (pass opts.chatId or env)");
+      throw new Error(
+        "TelegramNotifier: TELEGRAM_CHAT_ID not set (pass opts.chatId or env), and CONCLAVE_TOKEN also absent",
+      );
     }
     this.chatId = typeof chatRaw === "string" && /^-?\d+$/.test(chatRaw) ? Number(chatRaw) : chatRaw;
     if (opts.client) {
@@ -52,10 +133,72 @@ export class TelegramNotifier implements Notifier {
       if (opts.baseUrl) clientOpts.baseUrl = opts.baseUrl;
       this.client = new TelegramClient(clientOpts);
     }
-    this.includeActionButtons = opts.includeActionButtons ?? true;
+    this.centralToken = null;
+    this.centralUrl = null;
+    this.centralFetch = null;
+    this.repoSlug = "";
   }
 
   async notifyReview(input: NotifyReviewInput): Promise<void> {
+    if (this.centralToken && this.centralUrl) {
+      this.log("conclave review: telegram via central plane");
+      await this.notifyViaCentral(input);
+      return;
+    }
+    this.log("conclave review: telegram via direct bot token");
+    await this.notifyViaDirect(input);
+  }
+
+  private async notifyViaCentral(input: NotifyReviewInput): Promise<void> {
+    const text = formatReviewForTelegram(input);
+    const repoSlug = input.ctx?.repo || this.repoSlug;
+    const body: {
+      repo_slug: string;
+      message: string;
+      pr_number?: number;
+      verdict?: "approve" | "rework" | "reject";
+      episodic_id?: string;
+    } = {
+      repo_slug: repoSlug,
+      message: text,
+    };
+    if (typeof input.ctx?.pullNumber === "number") body.pr_number = input.ctx.pullNumber;
+    if (input.outcome?.verdict) body.verdict = input.outcome.verdict;
+    // Only include episodic_id when the consumer wanted action buttons —
+    // keeps parity with the direct path where includeActionButtons
+    // controls button rendering, and with central /review/notify which
+    // attaches buttons iff episodic_id is present.
+    if (this.includeActionButtons && input.episodicId) body.episodic_id = input.episodicId;
+
+    const fetchFn: HttpFetch | typeof fetch =
+      this.centralFetch ??
+      ((...args: Parameters<typeof fetch>) =>
+        fetch(...args) as unknown as ReturnType<HttpFetch>);
+
+    const resp = await (fetchFn as HttpFetch)(`${this.centralUrl}/review/notify`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: `Bearer ${this.centralToken ?? ""}`,
+      },
+      body: JSON.stringify(body),
+    });
+    if (!resp.ok) {
+      const msg = await resp.text().catch(() => "");
+      throw new Error(
+        `TelegramNotifier (central): /review/notify returned HTTP ${resp.status} — ${msg.slice(0, 300)}`,
+      );
+    }
+    // Drain body so sockets close promptly. Do not parse strictly — the
+    // central plane contract is `{ ok: true, delivered: number }` but we
+    // don't gate on it from the CLI side.
+    await resp.json().catch(() => null);
+  }
+
+  private async notifyViaDirect(input: NotifyReviewInput): Promise<void> {
+    if (!this.client || this.chatId === null) {
+      throw new Error("TelegramNotifier: direct path selected but client/chatId not configured");
+    }
     const text = formatReviewForTelegram(input);
     const sendParams: Parameters<TelegramClient["sendMessage"]>[0] = {
       chat_id: this.chatId,

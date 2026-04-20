@@ -6,6 +6,6 @@ export type {
   TelegramResponse,
   HttpFetch,
 } from "./client.js";
-export { TelegramNotifier } from "./notifier.js";
+export { TelegramNotifier, DEFAULT_CENTRAL_URL } from "./notifier.js";
 export type { TelegramNotifierOptions } from "./notifier.js";
 export { formatReviewForTelegram } from "./format.js";
