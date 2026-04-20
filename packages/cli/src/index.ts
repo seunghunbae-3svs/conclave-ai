@@ -8,6 +8,7 @@ import { migrate } from "./commands/migrate.js";
 import { scores } from "./commands/scores.js";
 import { sync } from "./commands/sync.js";
 import { mcpServer } from "./commands/mcp-server.js";
+import { CLI_VERSION } from "./version.js";
 
 const HELP = `conclave — Conclave AI CLI
 
@@ -48,7 +49,7 @@ export async function run(argv: string[]): Promise<void> {
   }
 
   if (cmd === "--version" || cmd === "-v") {
-    process.stdout.write("0.0.0\n");
+    process.stdout.write(`${CLI_VERSION}\n`);
     return;
   }
 
