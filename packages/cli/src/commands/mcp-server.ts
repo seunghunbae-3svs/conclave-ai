@@ -50,9 +50,10 @@ export async function mcpServer(argv: string[]): Promise<void> {
   );
   const { z } = await import("zod");
 
+  const { CLI_VERSION } = await import("../version.js");
   const server = new McpServer({
     name: "conclave-ai",
-    version: "0.0.0",
+    version: CLI_VERSION,
   });
 
   server.registerTool(
