@@ -29,6 +29,7 @@ import { DiscordNotifier } from "@conclave-ai/integration-discord";
 import { SlackNotifier } from "@conclave-ai/integration-slack";
 import { EmailNotifier } from "@conclave-ai/integration-email";
 import type { Notifier } from "@conclave-ai/core";
+import { fetchDeployStatus } from "@conclave-ai/scm-github";
 import { loadConfig, resolveMemoryRoot } from "../lib/config.js";
 import { loadPrDiff, loadGitDiff, loadFileDiff, type LoadedDiff } from "../lib/diff-source.js";
 import { renderReview, verdictToExitCode } from "../lib/output.js";
@@ -268,7 +269,15 @@ export async function review(argv: string[]): Promise<void> {
     });
   }
 
-  // 5. Deliberate
+  // 5. Deliberate — first read deploy status from GH check-suites so
+  //    agents can factor it in. Failure here never blocks review; we
+  //    fall back to `unknown` per fetchDeployStatus's default.
+  const deployStatus = loaded.source === "gh-pr"
+    ? await fetchDeployStatus(loaded.repo, loaded.newSha).catch(() => "unknown" as const)
+    : ("unknown" as const);
+  if (deployStatus !== "unknown") {
+    process.stdout.write(`  deploy: ${deployStatus}\n`);
+  }
   const reviewCtx: ReviewContext = {
     diff: loaded.diff,
     repo: loaded.repo,
@@ -277,6 +286,7 @@ export async function review(argv: string[]): Promise<void> {
     answerKeys: retrieval.answerKeys.map(formatAnswerKeyForPrompt),
     failureCatalog: retrieval.failures.map(formatFailureForPrompt),
     domain,
+    deployStatus,
   };
   if (loaded.prevSha) reviewCtx.prevSha = loaded.prevSha;
 
