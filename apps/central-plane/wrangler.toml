@@ -8,7 +8,7 @@ compatibility_flags = ["nodejs_compat"]
 [[d1_databases]]
 binding = "DB"
 database_name = "conclave-ai"
-database_id = "REPLACE_WITH_wrangler_d1_create_OUTPUT"
+database_id = "28be7ec4-9c46-4b78-8d07-11f344021dd0"
 
 [vars]
 ENVIRONMENT = "production"
