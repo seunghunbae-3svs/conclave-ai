@@ -1,6 +1,6 @@
 {
   "name": "@conclave-ai/agent-deepseek",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Conclave AI Deepseek agent — OpenAI-wire-compatible, routes to api.deepseek.com with strict-JSON-schema structured output.",
   "license": "MIT",
   "type": "module",
