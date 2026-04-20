@@ -148,3 +148,40 @@ The v0.3 workflow templates are frozen at tag `v0.3.3` and will remain installab
 **Telegram bot doesn't reply to `/link`** — the bot is at `@Conclave_ai_bot`. Double-check the handle; if your DM gets no reply within 10 seconds, the central plane's webhook might be down — ping the conclave-ai repo issues.
 
 **Review doesn't fire on PR** — confirm `.github/workflows/conclave.yml` exists on the PR's base branch (not just the PR itself). Reusable workflows only dispatch when the call-side workflow is on the default branch.
+
+---
+
+## KEK setup (v0.5)
+
+v0.5 introduces field-level encryption for the GitHub access tokens the
+central plane stores in D1 (v0.5 item H). The Worker reads the KEK from
+the secret `CONCLAVE_TOKEN_KEK` — 32 random bytes, base64 encoded.
+
+One-time setup on the central plane:
+
+```powershell
+# 1. Generate a fresh 32-byte key and copy the base64 string
+node -e "console.log(crypto.randomBytes(32).toString('base64'))"
+
+# 2. Store it as a Worker secret (paste the value when prompted)
+cd apps/central-plane
+wrangler secret put CONCLAVE_TOKEN_KEK --env production
+
+# 3. Run the migration that adds the encrypted column
+wrangler d1 execute conclave-ai --remote --file=./migrations/0004_encrypt_github_tokens.sql
+
+# 4. Deploy the Worker so it starts writing the encrypted column
+pnpm --filter @conclave-ai/central-plane ship
+```
+
+After deploy:
+- New OAuth-driven token writes go straight to the encrypted column.
+- Legacy rows with plaintext tokens stay readable and get
+  lazy-upgraded on first Telegram-webhook dispatch.
+- A future migration 0005 will drop the plaintext column once all rows
+  are upgraded. Do not run it until we ship that migration in v0.6.
+
+Do NOT commit the generated key anywhere — it lives only inside the CF
+Worker secret store. If you lose it, every encrypted token becomes
+unreadable and users must re-run `conclave init` to re-authenticate
+their repos.
