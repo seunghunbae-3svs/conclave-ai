@@ -1,6 +1,11 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { randomBytes } from "node:crypto";
 import { createApp } from "../dist/router.js";
+
+// v0.5 H — valid KEK required for setGithubAccessToken in the oauth
+// success path. Test env gets a fresh KEK per process.
+const TEST_KEK = randomBytes(32).toString("base64");
 
 // ---- mock D1 + oauth_devices table ---------------------------------------
 
@@ -51,6 +56,23 @@ function makeMockDb(installsSeed = new Map(), devicesSeed = new Map()) {
                 const [flag, id] = bound;
                 const d = state.devices.get(id);
                 if (d) d.consumed = flag;
+              } else if (
+                /UPDATE installs SET github_access_token_enc = \?, github_access_token = NULL, github_token_scope = \?, github_token_set_at = \? WHERE id = \?/.test(
+                  sql,
+                )
+              ) {
+                // v0.5 H — OAuth success path now writes the encrypted
+                // token column. Capture ciphertext + scope so the tests
+                // can inspect the install row just as before.
+                const [enc, scope, setAt, id] = bound;
+                for (const v of state.installs.values()) {
+                  if (v.id === id) {
+                    v.githubAccessTokenEnc = enc;
+                    v.githubAccessToken = null;
+                    v.githubTokenScope = scope;
+                    v.githubTokenSetAt = setAt;
+                  }
+                }
               }
               return { success: true };
             },
@@ -81,6 +103,7 @@ function makeEnv(overrides = {}) {
     DB: makeMockDb(),
     ENVIRONMENT: "test",
     GITHUB_CLIENT_ID: "Iv1.testclient",
+    CONCLAVE_TOKEN_KEK: TEST_KEK,
     ...overrides,
   };
 }

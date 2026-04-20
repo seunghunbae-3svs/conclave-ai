@@ -23,4 +23,19 @@ export interface Env {
    * updates without a matching `X-Telegram-Bot-Api-Secret-Token` header.
    */
   TELEGRAM_WEBHOOK_SECRET?: string;
+  /**
+   * v0.5 H — base64-encoded 32-byte KEK used to AES-GCM encrypt the
+   * GitHub access token stored in D1 (`installs.github_access_token_enc`).
+   * Set via `wrangler secret put CONCLAVE_TOKEN_KEK --env production`.
+   *
+   * Runtime behaviour:
+   *   - If unset: OAuth callback refuses to persist tokens (the
+   *     `setGithubAccessToken` write throws) and Telegram button clicks
+   *     that hit an encrypted row error out with a clear operator
+   *     message. The /oauth/device/start path keeps working — only the
+   *     token-persistence step gates on this secret.
+   *   - If set but wrong length / not valid base64: startup preflight
+   *     fails fast with a clear message (see src/preflight.ts).
+   */
+  CONCLAVE_TOKEN_KEK?: string;
 }

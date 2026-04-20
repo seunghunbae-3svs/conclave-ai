@@ -1,8 +1,12 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { createHash } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { createApp } from "../dist/router.js";
 import { parseCallbackData, eventTypeFor } from "../dist/telegram.js";
+
+// v0.5 H — a valid KEK for the tests that exercise the dispatch path.
+// Lazy-upgrade writes on stale plaintext rows require this to be set.
+const TEST_KEK = randomBytes(32).toString("base64");
 
 // ---- mock D1 covering installs + telegram_links -------------------------
 
@@ -47,13 +51,14 @@ function makeMockDb({ installs = new Map(), links = new Map() } = {}) {
                 }
               : null;
           }
-          if (/SELECT id, repo_slug, github_access_token, github_token_scope FROM installs WHERE id = \?/.test(sql)) {
+          if (/SELECT id, repo_slug, github_access_token, github_access_token_enc, github_token_scope FROM installs WHERE id = \?/.test(sql)) {
             for (const v of state.installs.values()) {
               if (v.id === bound[0] && v.status === "active") {
                 return {
                   id: v.id,
                   repo_slug: v.repoSlug,
                   github_access_token: v.githubAccessToken ?? null,
+                  github_access_token_enc: v.githubAccessTokenEnc ?? null,
                   github_token_scope: v.githubTokenScope ?? null,
                 };
               }
@@ -70,6 +75,20 @@ function makeMockDb({ installs = new Map(), links = new Map() } = {}) {
             const [lastSeenAt, id] = bound;
             for (const v of state.installs.values()) {
               if (v.id === id) v.lastSeenAt = lastSeenAt;
+            }
+          } else if (
+            /UPDATE installs SET github_access_token_enc = \?, github_access_token = NULL WHERE id = \? AND github_access_token_enc IS NULL/.test(
+              sql,
+            )
+          ) {
+            // v0.5 H — lazy upgrade path. The telegram webhook tests
+            // exercise it implicitly when `needsLazyEncrypt` is true.
+            const [enc, id] = bound;
+            for (const v of state.installs.values()) {
+              if (v.id === id && (v.githubAccessTokenEnc ?? null) === null) {
+                v.githubAccessTokenEnc = enc;
+                v.githubAccessToken = null;
+              }
             }
           }
           return { success: true };
@@ -132,6 +151,7 @@ function makeEnvWithInstall({ token = "c_linktest_token_xyz", repo = "acme/servi
       DB: makeMockDb({ installs }),
       ENVIRONMENT: "test",
       TELEGRAM_BOT_TOKEN: "bot-test-token",
+      CONCLAVE_TOKEN_KEK: TEST_KEK,
     },
     token,
     installId: "c_install_tg1",

@@ -2,7 +2,12 @@ import { Hono } from "hono";
 import type { Env } from "../env.js";
 import type { FetchLike } from "../github.js";
 import { findInstallByTokenHash } from "../db/installs.js";
-import { findLinkByChatId, upsertLink, getInstallForDispatch } from "../db/telegram.js";
+import {
+  findLinkByChatId,
+  upsertLink,
+  getInstallForDispatch,
+  upgradeInstallTokenEncryption,
+} from "../db/telegram.js";
 import { sha256Hex } from "../util.js";
 import {
   TelegramClient,
@@ -165,6 +170,19 @@ export function createTelegramRoutes(fetchImpl: FetchLike = fetch): Hono<{ Bindi
           eventType,
           clientPayload,
         );
+        // v0.5 H — lazy-upgrade the token field to encrypted storage if
+        // we just used a plaintext legacy row. Runs after the dispatch
+        // succeeds so a KEK mis-set (which would throw here) doesn't
+        // block the action the user wanted. We log the error instead of
+        // failing the request — the dispatch already succeeded and the
+        // user got their ack.
+        if (install.needsLazyEncrypt) {
+          try {
+            await upgradeInstallTokenEncryption(c.env, install.id, install.githubAccessToken);
+          } catch (upgradeErr) {
+            console.error("token lazy-encrypt upgrade failed:", upgradeErr);
+          }
+        }
         await telegram.answerCallbackQuery({
           id: cq.id!,
           text: `✓ ${eventType} dispatched on ${install.repoSlug}`,

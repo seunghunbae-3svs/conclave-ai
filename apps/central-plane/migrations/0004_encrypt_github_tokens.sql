@@ -1,0 +1,39 @@
+-- v0.5 milestone H — field-level encryption for github_access_token.
+--
+-- Background:
+-- Migration 0003 added `installs.github_access_token` as PLAINTEXT with
+-- an explicit TODO to upgrade to encryption in v0.5. Any actor with D1
+-- read access (breached CF account, accidental dump, compromised wrangler
+-- token) gets plaintext GitHub access tokens for every install. This
+-- migration begins the upgrade.
+--
+-- Design — two-phase cutover:
+--   Phase 1 (THIS migration, v0.5 H):
+--     * Add `github_access_token_enc` TEXT column alongside the existing
+--       plaintext `github_access_token`.
+--     * No data backfill in SQL. Application code handles the lazy
+--       migration: on first read of a plaintext row, the Worker encrypts
+--       and writes `_enc`, then NULLs the plaintext column.
+--     * Both columns coexist during cutover so the Worker can tolerate
+--       either state (older rows plaintext, newer rows encrypted).
+--
+--   Phase 2 (future migration 0005, v0.6):
+--     * After Bae verifies round-trip works live (encrypt on write,
+--       decrypt on read, lazy-upgrade drains the plaintext column), drop
+--       `github_access_token` entirely.
+--
+-- Encryption scheme:
+--   AES-256-GCM. 32-byte KEK stored in Worker secret `CONCLAVE_TOKEN_KEK`
+--   (base64-encoded). Ciphertext format stored in `_enc`:
+--     base64( iv(12 bytes) || ciphertext || auth_tag(16 bytes) )
+--   SubtleCrypto appends the auth tag to the ciphertext automatically in
+--   AES-GCM, so callers only allocate for iv + (ct+tag).
+--
+-- Key rotation is OUT OF SCOPE for v0.5 (single key). v0.6 will introduce
+-- a key-ID prefix on the ciphertext so multiple KEKs can be tried during
+-- rotation windows.
+--
+-- Operator step: `wrangler secret put CONCLAVE_TOKEN_KEK --env production`.
+-- See docs/migrate-to-v0.4.md §"KEK setup (v0.5)" at the end of that file.
+
+ALTER TABLE installs ADD COLUMN github_access_token_enc TEXT;
