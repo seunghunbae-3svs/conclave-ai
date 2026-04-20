@@ -40,7 +40,7 @@ v0.4 needs exactly one conclave-owned secret on your repo: `CONCLAVE_TOKEN`. The
 
 **Drop if present:**
 - `ORCHESTRATOR_PAT` — v0.4's central bot fires dispatches server-side using the GitHub token captured during OAuth
-- `TELEGRAM_BOT_TOKEN` — v0.4 uses a single central bot (`@conclave_ai_bot`); you no longer run your own
+- `TELEGRAM_BOT_TOKEN` — v0.4 uses a single central bot (`@Conclave_ai_bot`); you no longer run your own
 - `TELEGRAM_CHAT_ID` — same reason
 
 ```powershell
@@ -83,7 +83,7 @@ The wizard will:
 
 ## Step 5 — Link your Telegram chat
 
-Open Telegram, DM `@conclave_ai_bot`, send:
+Open Telegram, DM `@Conclave_ai_bot`, send:
 
 ```
 /link <the token printed at the end of step 4>
@@ -111,7 +111,7 @@ Open any PR against the default branch. Within ~2 minutes:
 | Surface | v0.3 | v0.4 |
 |---------|------|------|
 | Install steps | ~28 (4 YAMLs + 5 secrets + bot registration + tokens) | 4 prompts via `conclave init` |
-| Telegram bot | Per-repo, user creates via BotFather | One central `@conclave_ai_bot` |
+| Telegram bot | Per-repo, user creates via BotFather | One central `@Conclave_ai_bot` |
 | Memory | Each repo's own `.conclave/` JSON | Federated pool on the central plane (hashes only by default; full content opt-in per D4) |
 | Workflow files | Copy 4 to each repo | One 3-line wrapper |
 | Repo secrets owned by conclave | ORCHESTRATOR_PAT + TELEGRAM_* | `CONCLAVE_TOKEN` |
@@ -143,6 +143,6 @@ The v0.3 workflow templates are frozen at tag `v0.3.3` and will remain installab
 
 **`gh secret set` fails** — either `gh` isn't installed or isn't authenticated for this repo. Install, run `gh auth login`, then re-run `conclave init --reconfigure`.
 
-**Telegram bot doesn't reply to `/link`** — the bot is at `@conclave_ai_bot`. Double-check the handle; if your DM gets no reply within 10 seconds, the central plane's webhook might be down — ping the conclave-ai repo issues.
+**Telegram bot doesn't reply to `/link`** — the bot is at `@Conclave_ai_bot`. Double-check the handle; if your DM gets no reply within 10 seconds, the central plane's webhook might be down — ping the conclave-ai repo issues.
 
 **Review doesn't fire on PR** — confirm `.github/workflows/conclave.yml` exists on the PR's base branch (not just the PR itself). Reusable workflows only dispatch when the call-side workflow is on the default branch.
