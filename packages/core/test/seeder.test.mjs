@@ -221,7 +221,7 @@ test("seedFromLegacyCatalog: createdAt inherits YYYY-MM-DD with midnight UTC", a
   }
 });
 
-test("seedFromLegacyCatalog: bundled solo-cto-agent catalog writes 15 entries", async () => {
+test("seedFromLegacyCatalog: bundled solo-cto-agent catalog writes 18 entries", async () => {
   const { store, root } = freshStore();
   try {
     const bundled = path.resolve(
@@ -240,7 +240,7 @@ test("seedFromLegacyCatalog: bundled solo-cto-agent catalog writes 15 entries", 
     }
     const raw = fs.readFileSync(bundled, "utf8");
     const result = await seedFromLegacyCatalog(raw, store);
-    assert.equal(result.entries.length, 15);
+    assert.equal(result.entries.length, 18);
     // every derived entry tagged "solo-cto-agent"
     for (const e of result.entries) {
       assert.ok(e.tags.includes("solo-cto-agent"));
