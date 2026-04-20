@@ -2,16 +2,27 @@ import { detectRepo, type DetectRepoDeps } from "./init/repo-detect.js";
 import { writeConfig, CONFIG_FILENAME } from "./init/config-writer.js";
 import { writeWorkflow, WORKFLOW_PATH, REUSABLE_REF } from "./init/workflow-writer.js";
 import { createPrompter, createNonInteractivePrompter, type Prompter } from "./init/prompts.js";
+import { runOauthFlow, type OauthFlowDeps } from "./init/oauth-flow.js";
+import { CentralClient, DEFAULT_CENTRAL_URL } from "./init/central-client.js";
+
+/**
+ * Default Telegram bot username for the central bot. Overridable via
+ * `CONCLAVE_BOT_USERNAME` env var if Bae ends up using a different
+ * handle after BotFather negotiations.
+ */
+const DEFAULT_BOT_USERNAME = process.env["CONCLAVE_BOT_USERNAME"] ?? "conclave_ai_bot";
 
 const HELP = `conclave init — set up conclave-ai on this repo (v0.4 wizard)
 
 Usage:
-  conclave init [--yes] [--reconfigure] [--repo <owner/name>]
+  conclave init [--yes] [--reconfigure] [--skip-oauth] [--repo <owner/name>] [--central-url <url>]
 
 Flags:
   --yes               non-interactive; use defaults, fail fast if required info is missing
   --reconfigure       overwrite existing .conclaverc.json and workflow file
+  --skip-oauth        do not run GitHub device-flow OAuth (local-only install; no federated memory)
   --repo <slug>       use this repo slug instead of detecting via \`git remote\`
+  --central-url <url> override the central plane URL (default: ${DEFAULT_CENTRAL_URL})
   --cwd <dir>         target directory (default: current)
   --help, -h          show this
 
@@ -20,12 +31,14 @@ What it does:
   2. Writes .conclaverc.json with the 2-tier council defaults
   3. Writes .github/workflows/conclave.yml — a 3-line wrapper pointing at
      ${REUSABLE_REF}
-  4. Prints next-step instructions (API key secrets + Telegram /link)
+  4. Runs GitHub OAuth device flow against the central plane and installs
+     CONCLAVE_TOKEN as a GitHub repo secret via \`gh secret set\`
+  5. Prints the /link command for the central @${DEFAULT_BOT_USERNAME} Telegram bot
+  6. Prints next-step instructions for API key secrets
 
-What it does NOT do yet (deferred to the central-plane PR):
-  - Mint a CONCLAVE_TOKEN via GitHub OAuth
-  - Link your Telegram chat to the central @conclave_ai bot
-  Both steps print "TODO" placeholders with guidance for now.
+Env vars:
+  CONCLAVE_CENTRAL_URL   override the central plane URL
+  CONCLAVE_BOT_USERNAME  override the Telegram bot handle
 `;
 
 export interface InitArgs {
@@ -33,18 +46,26 @@ export interface InitArgs {
   reconfigure: boolean;
   repo?: string;
   cwd: string;
+  /** Skip the OAuth step (central plane call). For testing + air-gapped users. */
+  skipOauth: boolean;
+  /** Override the central plane base URL. Default comes from env / constant. */
+  centralUrl?: string;
   help: boolean;
 }
 
 export function parseArgv(argv: string[]): InitArgs {
-  const out: InitArgs = { yes: false, reconfigure: false, cwd: ".", help: false };
+  const out: InitArgs = { yes: false, reconfigure: false, cwd: ".", skipOauth: false, help: false };
   for (let i = 0; i < argv.length; i += 1) {
     const a = argv[i];
     if (a === "--help" || a === "-h") out.help = true;
     else if (a === "--yes" || a === "-y") out.yes = true;
     else if (a === "--reconfigure") out.reconfigure = true;
+    else if (a === "--skip-oauth") out.skipOauth = true;
     else if (a === "--repo" && argv[i + 1]) {
       out.repo = argv[i + 1];
+      i += 1;
+    } else if (a === "--central-url" && argv[i + 1]) {
+      out.centralUrl = argv[i + 1];
       i += 1;
     } else if (a === "--cwd" && argv[i + 1]) {
       out.cwd = argv[i + 1]!;
@@ -59,6 +80,8 @@ export interface RunInitDeps {
   detectRepoDeps?: DetectRepoDeps;
   stdout?: (s: string) => void;
   stderr?: (s: string) => void;
+  /** Injected OAuth flow deps — tests replace the client + secret setter. */
+  oauthDeps?: OauthFlowDeps;
 }
 
 export async function runInit(args: InitArgs, deps: RunInitDeps = {}): Promise<number> {
@@ -90,11 +113,43 @@ export async function runInit(args: InitArgs, deps: RunInitDeps = {}): Promise<n
       stdout(`• mode:  reconfigure — will overwrite .conclaverc.json + workflow file\n`);
     }
 
-    // Step 3 — OAuth / CONCLAVE_TOKEN. STUB (central service lands in follow-up PR).
-    stdout(
-      `\n• GitHub OAuth + CONCLAVE_TOKEN: [TODO — ships with central plane Worker in v0.4.0-beta]\n` +
-        `  For now: no central registration. Council runs locally using your own API keys.\n`,
-    );
+    // Step 3 — OAuth / CONCLAVE_TOKEN via central plane device flow.
+    let oauthOutcome: "success" | "skipped" | "failed" = "skipped";
+    if (!args.skipOauth) {
+      const oauthDeps: OauthFlowDeps = {
+        stdout,
+        stderr,
+        ...(deps.oauthDeps ?? {}),
+      };
+      // If the caller didn't inject a client, build one honoring --central-url.
+      if (!oauthDeps.client) {
+        const opts: ConstructorParameters<typeof CentralClient>[0] = {};
+        if (args.centralUrl) opts.baseUrl = args.centralUrl;
+        oauthDeps.client = new CentralClient(opts);
+      }
+      stdout(
+        `\n• GitHub OAuth against central plane: ${oauthDeps.client.baseUrl}\n` +
+          `  (override with --central-url <url> or CONCLAVE_CENTRAL_URL env)\n`,
+      );
+      const exit = await runOauthFlow(repoSlug!, oauthDeps);
+      if (exit.kind === "success") {
+        oauthOutcome = "success";
+        if (exit.rotated) {
+          stdout(`  (CONCLAVE_TOKEN rotated for an existing install)\n`);
+        }
+      } else if (exit.kind === "denied") {
+        stderr(`  ✗ OAuth denied${exit.reason ? ": " + exit.reason : ""}. Continuing without central registration.\n`);
+        oauthOutcome = "failed";
+      } else if (exit.kind === "expired") {
+        stderr(`  ✗ OAuth code expired before you authorized. Re-run \`conclave init\` to try again.\n`);
+        oauthOutcome = "failed";
+      } else {
+        stderr(`  ✗ OAuth failed: ${exit.message}\n`);
+        oauthOutcome = "failed";
+      }
+    } else {
+      stdout(`\n• GitHub OAuth: skipped (--skip-oauth). Council runs locally; federated memory disabled.\n`);
+    }
 
     // Step 4 — API keys. Prompt + print guidance; we do NOT write them to
     // GitHub secrets ourselves in v0.4-alpha (that needs the OAuth token
@@ -119,11 +174,18 @@ export async function runInit(args: InitArgs, deps: RunInitDeps = {}): Promise<n
       );
     }
 
-    // Step 5 — Telegram central bot link. STUB.
-    stdout(
-      `\n• Telegram @conclave_ai link: [TODO — ships with central plane Worker]\n` +
-        `  For now: skipping Telegram. The reusable workflow handles its absence gracefully.\n`,
-    );
+    // Step 5 — Telegram central bot link hint. The CLI can't silently
+    // pair the chat for you (chat ownership lives on the user's phone),
+    // so we print the exact /link command instead. If OAuth failed, the
+    // user has no CONCLAVE_TOKEN to link with — skip the hint.
+    if (oauthOutcome === "success") {
+      stdout(
+        `\n• Telegram link step:\n` +
+          `  1. Open Telegram and DM @${DEFAULT_BOT_USERNAME}\n` +
+          `  2. Send: /link <CONCLAVE_TOKEN>   (the token printed above in the OAuth step)\n` +
+          `  Bot confirms with "✅ Linked this chat to ${repoSlug}"\n`,
+      );
+    }
 
     // Step 6 — write config.
     const cfgResult = await writeConfig({
@@ -147,18 +209,26 @@ export async function runInit(args: InitArgs, deps: RunInitDeps = {}): Promise<n
     }
 
     // Step 8 — next steps.
+    const needsApiKeySetup = Boolean(anthropic || openai || gemini);
     stdout(
       `\n✔ conclave init complete.\n\n` +
-        `Next steps:\n` +
-        `  1. Set repo secrets:\n` +
-        `       gh secret set ANTHROPIC_API_KEY --repo ${repoSlug} --body "$ANTHROPIC_API_KEY"\n` +
-        (openai ? `       gh secret set OPENAI_API_KEY   --repo ${repoSlug} --body "$OPENAI_API_KEY"\n` : "") +
-        (gemini ? `       gh secret set GEMINI_API_KEY   --repo ${repoSlug} --body "$GEMINI_API_KEY"\n` : "") +
-        `  2. Commit:\n` +
+        (needsApiKeySetup
+          ? `Next steps:\n` +
+            (anthropic
+              ? `  • Install Anthropic key:\n       gh secret set ANTHROPIC_API_KEY --repo ${repoSlug} --body "$ANTHROPIC_API_KEY"\n`
+              : "") +
+            (openai
+              ? `  • Install OpenAI key:\n       gh secret set OPENAI_API_KEY --repo ${repoSlug} --body "$OPENAI_API_KEY"\n`
+              : "") +
+            (gemini
+              ? `  • Install Gemini key:\n       gh secret set GEMINI_API_KEY --repo ${repoSlug} --body "$GEMINI_API_KEY"\n`
+              : "")
+          : `Next steps:\n  • Set at least one LLM API key secret on ${repoSlug} before opening a PR (ANTHROPIC_API_KEY required).\n`) +
+        `  • Commit:\n` +
         `       git add ${CONFIG_FILENAME} ${WORKFLOW_PATH}\n` +
         `       git commit -m "chore: install conclave-ai review"\n` +
-        `  3. Open a PR to test — council will comment with a verdict.\n` +
-        `\nv0.4.0-beta (central registration + Telegram linking) ships soon — no action needed then, this install auto-upgrades via the reusable workflow.\n`,
+        `  • Open a PR — the council will comment with a verdict, and Telegram notifications arrive` +
+        (oauthOutcome === "success" ? ` in the chat you /link'd.\n` : `. (OAuth skipped — Telegram notifications disabled.)\n`),
     );
     return 0;
   } finally {

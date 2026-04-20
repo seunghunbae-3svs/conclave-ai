@@ -219,7 +219,7 @@ test("runInit: happy path with explicit --repo, no keys → all stubs, files wri
   const stderr = [];
   try {
     const code = await runInit(
-      { yes: true, reconfigure: false, repo: "acme/service", cwd: dir, help: false },
+      { yes: true, reconfigure: false, repo: "acme/service", cwd: dir, skipOauth: true, help: false },
       {
         prompter: makePrompter(),
         stdout: (s) => stdout.push(s),
@@ -249,7 +249,7 @@ test("runInit: existing config + no --reconfigure → skip both writes", async (
     await fs.writeFile(path.join(dir, ".github", "workflows", "conclave.yml"), "# user edit\n");
 
     const code = await runInit(
-      { yes: true, reconfigure: false, repo: "acme/service", cwd: dir, help: false },
+      { yes: true, reconfigure: false, repo: "acme/service", cwd: dir, skipOauth: true, help: false },
       { prompter: makePrompter(), stdout: (s) => stdout.push(s), stderr: () => {} },
     );
     assert.equal(code, 0);
@@ -268,7 +268,7 @@ test("runInit: --reconfigure overwrites both files", async () => {
   try {
     await fs.writeFile(path.join(dir, CONFIG_FILENAME), '{"repo":"old/repo"}\n');
     const code = await runInit(
-      { yes: true, reconfigure: true, repo: "new/repo", cwd: dir, help: false },
+      { yes: true, reconfigure: true, repo: "new/repo", cwd: dir, skipOauth: true, help: false },
       { prompter: makePrompter(), stdout: () => {}, stderr: () => {} },
     );
     assert.equal(code, 0);
@@ -282,7 +282,7 @@ test("runInit: --reconfigure overwrites both files", async () => {
 test("runInit: no --repo + git remote fails → exit 1 with helpful message", async () => {
   const stderr = [];
   const code = await runInit(
-    { yes: true, reconfigure: false, cwd: ".", help: false },
+    { yes: true, reconfigure: false, cwd: ".", skipOauth: true, help: false },
     {
       prompter: makePrompter(),
       detectRepoDeps: {
@@ -302,7 +302,7 @@ test("runInit: collected API keys narrow the written agent set", async () => {
   const dir = await mkTmpDir("conclave-init-");
   try {
     const code = await runInit(
-      { yes: false, reconfigure: false, repo: "acme/service", cwd: dir, help: false },
+      { yes: false, reconfigure: false, repo: "acme/service", cwd: dir, skipOauth: true, help: false },
       {
         // prompt answers in order: ANTHROPIC / OPENAI / GEMINI
         prompter: makePrompter({ 0: "sk-ant-xxx", 1: "", 2: "" }),
