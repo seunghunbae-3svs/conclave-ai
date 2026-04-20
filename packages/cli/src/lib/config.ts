@@ -140,6 +140,23 @@ export const ConclaveConfigSchema = z.object({
       diffThreshold: z.number().min(0).max(1).default(0.1),
     })
     .optional(),
+  /**
+   * v0.5.3 — auto-detect the review domain from the diff's changed
+   * files. When `enabled` (default), `conclave review` without an
+   * explicit `--domain` flag inspects the changed-file list; any
+   * UI-signal match flips the run to "mixed" (code agents + design
+   * agent). Explicit `--domain` always wins over auto-detection.
+   *
+   * Leave `uiSignals` / `excludes` empty / undefined to use the built-in
+   * defaults (DEFAULT_UI_SIGNALS / DEFAULT_EXCLUDES in domain-detect.ts).
+   */
+  autoDetect: z
+    .object({
+      enabled: z.boolean().default(true),
+      uiSignals: z.array(z.string()).optional(),
+      excludes: z.array(z.string()).optional(),
+    })
+    .optional(),
 });
 
 export type ConclaveConfig = z.infer<typeof ConclaveConfigSchema>;
