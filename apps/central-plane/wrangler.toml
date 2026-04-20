@@ -12,6 +12,10 @@ database_id = "28be7ec4-9c46-4b78-8d07-11f344021dd0"
 
 [vars]
 ENVIRONMENT = "production"
+# Public GitHub OAuth App client_id. Register at https://github.com/settings/developers
+# (type: OAuth App, enable device flow). Leave the placeholder if OAuth is not
+# yet configured — /oauth/device/* endpoints will return 503 until this is real.
+GITHUB_CLIENT_ID = "REPLACE_WITH_GITHUB_OAUTH_APP_CLIENT_ID"
 
 # Observability. Logs retained 3 days on free tier, sufficient for v0.4-alpha.
 [observability]

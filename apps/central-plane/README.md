@@ -4,14 +4,29 @@ Cloudflare Worker that backs conclave-ai's v0.4 centralized install model.
 
 See `docs/architecture-v0.4.md` for the full design; this package is the concrete home for everything labelled "central control plane" in that doc.
 
-## v0.4-alpha endpoints (this PR)
+## Endpoints
 
-| Method | Path              | Status |
-|--------|-------------------|--------|
-| GET    | `/health`         | ✅ real |
-| POST   | `/register`       | ✅ real (placeholder token — OAuth in next PR) |
-| POST   | `/episodic/push`  | 🟡 stub (aggregation pending) |
-| GET    | `/memory/pull`    | 🟡 stub (aggregation pending) |
+| Method | Path                          | Status |
+|--------|-------------------------------|--------|
+| GET    | `/health`                     | ✅ real |
+| POST   | `/register`                   | ✅ real (placeholder token — use OAuth device flow for real installs) |
+| POST   | `/oauth/device/start`         | ✅ real — GitHub device-flow bootstrap |
+| POST   | `/oauth/device/poll`          | ✅ real — returns CONCLAVE_TOKEN on success |
+| POST   | `/episodic/push`              | 🟡 stub (aggregation pending) |
+| GET    | `/memory/pull`                | 🟡 stub (aggregation pending) |
+
+## GitHub OAuth setup (one-time per deployment)
+
+1. Register an OAuth App at https://github.com/settings/developers
+   - Name: `Conclave AI` (or whatever is appropriate for your deployment)
+   - Homepage URL: your worker URL (e.g. `https://conclave-ai.<sub>.workers.dev`)
+   - Authorization callback URL: same as homepage (device flow does not use it, but the GitHub form requires a value)
+   - **Enable device flow**: tick the checkbox
+2. Copy the `Client ID` shown on the OAuth App page
+3. Replace `REPLACE_WITH_GITHUB_OAUTH_APP_CLIENT_ID` in `wrangler.toml` with it (client_id is public; safe to commit)
+4. Re-deploy: `pnpm run ship`
+
+Until step 3 is done, `POST /oauth/device/start` returns `503`. `preflight.mjs` also catches the placeholder and refuses to run migrate/ship.
 
 ## First-time setup
 
