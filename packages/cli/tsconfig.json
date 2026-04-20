@@ -9,6 +9,7 @@
   "references": [
     { "path": "../core" },
     { "path": "../agent-claude" },
+    { "path": "../agent-design" },
     { "path": "../agent-worker" },
     { "path": "../agent-gemini" },
     { "path": "../agent-grok" },

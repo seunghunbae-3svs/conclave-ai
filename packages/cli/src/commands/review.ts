@@ -18,6 +18,7 @@ import {
   type TieredCouncilOutcome,
 } from "@conclave-ai/core";
 import { ClaudeAgent } from "@conclave-ai/agent-claude";
+import { DesignAgent } from "@conclave-ai/agent-design";
 import { OpenAIAgent } from "@conclave-ai/agent-openai";
 import { GeminiAgent } from "@conclave-ai/agent-gemini";
 import { OllamaAgent } from "@conclave-ai/agent-ollama";
@@ -179,6 +180,13 @@ export async function review(argv: string[]): Promise<void> {
     if (id === "claude") {
       if (!process.env["ANTHROPIC_API_KEY"]) return null;
       return new ClaudeAgent({ gate, ...modelOpt });
+    }
+    if (id === "design") {
+      if (!process.env["ANTHROPIC_API_KEY"]) {
+        process.stderr.write("conclave review: ANTHROPIC_API_KEY not set — skipping Design agent\n");
+        return null;
+      }
+      return new DesignAgent({ gate, ...modelOpt });
     }
     if (id === "openai") {
       if (!process.env["OPENAI_API_KEY"]) {

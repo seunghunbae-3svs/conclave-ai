@@ -62,6 +62,25 @@ export interface ReviewContext {
    *  unknown   — no deploy platform attached to this PR, status not meaningful
    */
   deployStatus?: "success" | "failure" | "pending" | "unknown";
+  /**
+   * Optional before/after screenshot pairs captured for design-domain
+   * reviews. Consumed by vision-based design agents (e.g. `DesignAgent`
+   * from `@conclave-ai/agent-design`) to reason about layout regressions,
+   * contrast, and unintentional style changes.
+   *
+   * `before` / `after` are raw PNG bytes (Buffer) or base64-encoded PNG
+   * strings — the agent handles either form. `route` is the path or URL
+   * label the screenshot represents (e.g. "/dashboard", "signup-modal").
+   *
+   * Absent on code-domain reviews and on design reviews where the CLI
+   * could not produce screenshots (no preview URL, platform tokens
+   * missing, etc.); agents MUST degrade gracefully rather than throw.
+   */
+  visualArtifacts?: Array<{
+    before: Buffer | string;
+    after: Buffer | string;
+    route: string;
+  }>;
 }
 
 export interface ReviewResult {
