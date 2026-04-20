@@ -13,33 +13,42 @@ See `docs/architecture-v0.4.md` for the full design; this package is the concret
 | POST   | `/episodic/push`  | 🟡 stub (aggregation pending) |
 | GET    | `/memory/pull`    | 🟡 stub (aggregation pending) |
 
-## Local development
+## First-time setup
 
-Requires `wrangler` + a Cloudflare account. The Worker runs against a local D1 emulator:
-
-```bash
+```powershell
+# from repo root
 pnpm install
+
 cd apps/central-plane
-pnpm wrangler d1 create conclave-ai    # one-time — copy the database_id into wrangler.toml
-pnpm migrate:local                       # apply schema to the local D1
-pnpm dev                                 # http://localhost:8787
+pnpm wrangler login                    # browser auth, once per CF account
+pnpm wrangler d1 create conclave-ai    # prints a UUID on success — COPY IT
+```
+
+Then edit `wrangler.toml` and replace `REPLACE_WITH_wrangler_d1_create_OUTPUT` with the UUID from the previous step. Preflight (see below) will refuse to run until you do this.
+
+## Apply schema + local dev
+
+```powershell
+pnpm run migrate:local   # schema → local D1 emulator
+pnpm run dev             # http://localhost:8787
 ```
 
 Then:
-
-```bash
+```powershell
 curl http://localhost:8787/health
-curl -X POST http://localhost:8787/register -H 'content-type: application/json' -d '{"repo":"acme/service"}'
+curl -X POST http://localhost:8787/register -H 'content-type: application/json' -d '{\"repo\":\"acme/service\"}'
 ```
 
 ## Deploy
 
-```bash
-pnpm migrate:prod   # one-time per schema change
-pnpm deploy
+```powershell
+pnpm run migrate:prod    # one-time per schema change; runs preflight first
+pnpm run ship            # deploys — name chosen to avoid pnpm's builtin `deploy` command
 ```
 
-Deploys to `https://conclave-ai.<your-cf-subdomain>.workers.dev` by default. Custom domain (`conclave.ai` once we own it) is a `wrangler.toml` `[[routes]]` block away — deferred until the repo is public and user signal justifies it.
+Use `pnpm run <name>` (not bare `pnpm <name>`) for these — pnpm reserves `pnpm deploy` / `pnpm publish` / etc. as builtins, hence the script is named `ship` instead of `deploy`.
+
+Deploys to `https://conclave-ai.<your-cf-subdomain>.workers.dev` by default. Custom domain deferred per v0.4 architecture doc (§D2) — ship and iterate on user signal first.
 
 ## Testing
 
