@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### Security
+- **Reusable review workflow hardening (v0.5.2).** Three fixes to `.github/workflows/review.yml`, all flagged by Conclave's own council on `seunghunbae-3svs/eventbadge#19`:
+  - **Workflow-security:** secret-bearing steps (LLM keys, `CONCLAVE_TOKEN`, `GH_TOKEN`, `ORCHESTRATOR_PAT`) now gated to non-fork, owner-authored PRs. Fork PRs + external-contributor PRs get a friendly "install locally" fallback comment that uses only the ambient `GITHUB_TOKEN`. Closes the same-repo-branch-PR vector where attacker-controlled PR code would execute inside the secret-bearing step.
+  - **Supply-chain:** `inputs.cli-version.default` changed from `latest` to a pinned `0.4.3` (current latest stable). Header comment documents the "intentional bumps only" policy. Consumers can still override per-call.
+  - **Secrets-exposure:** review stdout now passes through a `sed -E` redaction step (Anthropic/OpenAI/Google/GitHub/Telegram token shapes) before being posted as a public PR comment. The unredacted copy is kept runner-side for debug logs; only the public comment is filtered.
+  - **Breaking for external-contributor workflow only:** fork PRs no longer auto-review — they get the install-locally notice. All same-repo, owner-authored PRs (99% of installs) behave identically. After merge, re-tag `v0.4` to pick up the fix. See `docs/releases/v0.5.2.md`.
+
 ### Added
 - **`@conclave-ai/core/guards` — `LoopGuard` + `CircuitBreaker` (architecture spec layer 3, now shipped).** Two in-memory primitives with clock-injection for tests:
   - **`LoopGuard`** — bounded-frequency counter on `(repo, pr, sha)` or any user-chosen key. Throws `LoopDetectedError` when the same key is reviewed more than `threshold` times inside a rolling `windowMs`. Defaults: threshold 5, window 60 min. Prevents the "rework → re-review → rework → …" loop that'll happen once the Worker/Rework agent lands (planned).

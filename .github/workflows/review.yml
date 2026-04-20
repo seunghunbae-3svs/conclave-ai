@@ -13,6 +13,20 @@
 #       uses: conclave-ai/conclave-ai/.github/workflows/review.yml@v0.4
 #       secrets: inherit
 #
+# Trust model (v0.5.2):
+#   This workflow runs on `pull_request`, which checks out the PR branch code.
+#   To avoid leaking LLM / Telegram / GitHub secrets into attacker-controlled
+#   PR code, the secret-bearing `conclave review` step is gated by an author
+#   guard: it only runs for non-fork PRs authored by the repo owner (or the
+#   repo owner's bot accounts). Fork PRs and external-contributor PRs get a
+#   friendly fallback comment pointing to local install instructions — no
+#   secrets are exposed.
+#
+#   If you want external contributors' PRs auto-reviewed, run `conclave review`
+#   from a trusted context (e.g. a `workflow_run` or manual dispatch after a
+#   maintainer inspects the diff). That's out of scope for this reusable
+#   workflow; keep it fail-safe.
+#
 # Secrets the caller MUST provide (or inherit):
 #   ANTHROPIC_API_KEY       required
 #   OPENAI_API_KEY          optional (enables 3-agent tier-1; otherwise 1-agent)
@@ -39,6 +53,11 @@
 #     gh secret delete TELEGRAM_CHAT_ID   --repo <slug>
 # Self-hosted users who still want the direct-bot path can invoke the CLI
 # outside this reusable workflow.
+#
+# v0.5.2 — security hardening:
+#   1. Secret-bearing step guarded to non-fork, owner-authored PRs.
+#   2. CLI install pinned to an explicit semver default (not "latest").
+#   3. Review output redacted before being posted as a public PR comment.
 
 name: Conclave AI Review (reusable)
 
@@ -51,10 +70,14 @@ on:
         type: string
         default: code
       cli-version:
-        description: 'npm version tag for @conclave-ai/cli. Default "latest"; pin to a specific version for reproducible reviews.'
+        # Pinned default — update this default when you bump the CLI;
+        # intentional bumps only. Using "latest" is a supply-chain risk
+        # because a compromised or mis-tagged publish would be picked up
+        # by every consumer on the next run.
+        description: 'npm version tag for @conclave-ai/cli. Pinned default; override to a specific semver for reproducible reviews.'
         required: false
         type: string
-        default: latest
+        default: 0.4.3
 
 jobs:
   review:
@@ -94,8 +117,11 @@ jobs:
             echo "SKIP_REVIEW=true" >> $GITHUB_ENV
           fi
 
+      # Secret-bearing step. Only runs for non-fork PRs authored by the
+      # repo owner — anyone else's PR code should NOT see these secrets.
+      # Fork PRs and external-contributor PRs hit the fallback step below.
       - name: Run 2-tier council review
-        if: env.SKIP_REVIEW != 'true'
+        if: env.SKIP_REVIEW != 'true' && github.event.pull_request.head.repo.fork == false && github.event.pull_request.user.login == github.repository_owner
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
@@ -109,17 +135,37 @@ jobs:
             --domain ${{ inputs.domain }} \
             2>&1 | tee /tmp/conclave-result.txt || true
 
+      # Redact any accidental secret leaks from the review stdout before it
+      # becomes a public PR comment. Patterns cover the keys this workflow
+      # handles plus common GitHub/Telegram tokens that might show up in
+      # diffs or error traces.
+      - name: Redact secrets from review output
+        if: env.SKIP_REVIEW != 'true' && github.event.pull_request.head.repo.fork == false && github.event.pull_request.user.login == github.repository_owner
+        run: |
+          if [ -f /tmp/conclave-result.txt ]; then
+            sed -E \
+              -e 's/sk-ant-api03-[a-zA-Z0-9_-]{64,}/<redacted-anthropic>/g' \
+              -e 's/sk-proj-[a-zA-Z0-9_-]{64,}/<redacted-openai>/g' \
+              -e 's/sk-[a-zA-Z0-9_-]{40,}/<redacted-generic>/g' \
+              -e 's/AIza[0-9A-Za-z_-]{35}/<redacted-google>/g' \
+              -e 's|ghp_[a-zA-Z0-9]{36}|<redacted-github-pat>|g' \
+              -e 's|gho_[a-zA-Z0-9]{36}|<redacted-github-oauth>|g' \
+              -e 's|ghs_[a-zA-Z0-9]{36}|<redacted-github-server>|g' \
+              -e 's/[0-9]{8,12}:[a-zA-Z0-9_-]{35}/<redacted-telegram>/g' \
+              /tmp/conclave-result.txt > /tmp/conclave-redacted.txt
+          fi
+
       - name: Post review summary as PR comment
-        if: env.SKIP_REVIEW != 'true'
+        if: env.SKIP_REVIEW != 'true' && github.event.pull_request.head.repo.fork == false && github.event.pull_request.user.login == github.repository_owner
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          if [ -f /tmp/conclave-result.txt ]; then
+          if [ -f /tmp/conclave-redacted.txt ]; then
             {
               echo "## 🏛️ Conclave AI Review"
               echo ""
               echo '```'
-              head -200 /tmp/conclave-result.txt
+              head -200 /tmp/conclave-redacted.txt
               echo '```'
               echo ""
               echo "_Generated by [@conclave-ai/cli](https://www.npmjs.com/package/@conclave-ai/cli) — 2-tier council._"
@@ -127,12 +173,40 @@ jobs:
             gh pr comment ${{ github.event.pull_request.number }} --body-file /tmp/pr-body.md || true
           fi
 
+      # Fallback for fork PRs / external contributors: no secrets, no LLM
+      # call, just a friendly comment explaining why auto-review was skipped
+      # and how to run it locally. Uses the ambient GITHUB_TOKEN (scoped to
+      # this workflow), which is safe because this step runs no PR-authored
+      # code.
+      - name: Post external-PR notice
+        if: env.SKIP_REVIEW != 'true' && (github.event.pull_request.head.repo.fork == true || github.event.pull_request.user.login != github.repository_owner)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          {
+            echo "## 🏛️ Conclave AI Review — skipped"
+            echo ""
+            echo "Conclave review is skipped for external PRs (fork or non-owner author) to protect repository secrets."
+            echo ""
+            echo "To run the review locally:"
+            echo ""
+            echo '```bash'
+            echo "npm install -g @conclave-ai/cli"
+            echo "conclave review --pr ${{ github.event.pull_request.number }}"
+            echo '```'
+            echo ""
+            echo "A maintainer can also re-run the review after inspecting the diff."
+          } > /tmp/pr-body.md
+          gh pr comment ${{ github.event.pull_request.number }} --body-file /tmp/pr-body.md || true
+
       # Persist-episodic: only runs if ORCHESTRATOR_PAT is provided. Required
       # for the rework-button loop (later rework/merge/reject workflows grep
       # .conclave/episodic on main to resolve episodic ids). Review alone
-      # works without it.
+      # works without it. Guarded the same way as the review step — writing
+      # to main from an attacker-controlled PR branch would be worse than
+      # leaking secrets.
       - name: Persist episodic entries to default branch
-        if: env.SKIP_REVIEW != 'true'
+        if: env.SKIP_REVIEW != 'true' && github.event.pull_request.head.repo.fork == false && github.event.pull_request.user.login == github.repository_owner
         env:
           HAS_PAT: ${{ secrets.ORCHESTRATOR_PAT != '' && 'yes' || 'no' }}
           GH_TOKEN: ${{ secrets.ORCHESTRATOR_PAT }}
