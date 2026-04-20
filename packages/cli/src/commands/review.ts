@@ -20,7 +20,6 @@ import {
 import { ClaudeAgent } from "@conclave-ai/agent-claude";
 import { OpenAIAgent } from "@conclave-ai/agent-openai";
 import { GeminiAgent } from "@conclave-ai/agent-gemini";
-import { DeepseekAgent } from "@conclave-ai/agent-deepseek";
 import { OllamaAgent } from "@conclave-ai/agent-ollama";
 import { GrokAgent } from "@conclave-ai/agent-grok";
 import { LangfuseMetricsSink } from "@conclave-ai/observability-langfuse";
@@ -195,13 +194,6 @@ export async function review(argv: string[]): Promise<void> {
         return null;
       }
       return new GeminiAgent({ gate, ...modelOpt });
-    }
-    if (id === "deepseek") {
-      if (!process.env["DEEPSEEK_API_KEY"]) {
-        process.stderr.write("conclave review: DEEPSEEK_API_KEY not set — skipping Deepseek agent\n");
-        return null;
-      }
-      return new DeepseekAgent({ gate, ...modelOpt });
     }
     if (id === "ollama") {
       // Ollama has no API key; we assume the daemon is running at

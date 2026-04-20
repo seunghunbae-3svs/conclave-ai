@@ -7,7 +7,7 @@ export const CONFIG_FILENAME = ".conclaverc.json";
 
 export const ConclaveConfigSchema = z.object({
   version: z.literal(1),
-  agents: z.array(z.enum(["claude", "openai", "gemini", "deepseek", "ollama", "grok"])).default(["claude"]),
+  agents: z.array(z.enum(["claude", "openai", "gemini", "ollama", "grok"])).default(["claude"]),
   budget: z
     .object({
       perPrUsd: z.number().positive(),
@@ -100,10 +100,10 @@ export const ConclaveConfigSchema = z.object({
           z.enum(["code", "design"]),
           z.object({
             tier1: z
-              .array(z.enum(["claude", "openai", "gemini", "deepseek", "ollama", "grok"]))
+              .array(z.enum(["claude", "openai", "gemini", "ollama", "grok"]))
               .default([]),
             tier2: z
-              .array(z.enum(["claude", "openai", "gemini", "deepseek", "ollama", "grok"]))
+              .array(z.enum(["claude", "openai", "gemini", "ollama", "grok"]))
               .default([]),
             tier1MaxRounds: z.number().int().min(1).max(3).default(1),
             tier2MaxRounds: z.number().int().min(1).max(3).default(2),
