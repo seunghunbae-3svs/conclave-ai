@@ -208,12 +208,59 @@ function makePrompter(answers = {}) {
       calls.push(q);
       return answers[calls.length - 1] ?? "";
     },
+    async askSecret(q) {
+      calls.push(q);
+      return answers[calls.length - 1] ?? "";
+    },
     async confirm() {
       return true;
     },
     close() {},
   };
 }
+
+test("runInit: OAuth success prints CONCLAVE_TOKEN in Telegram /link hint", async () => {
+  const dir = await mkTmpDir("conclave-init-");
+  const stdout = [];
+  const stderr = [];
+  const TOKEN = "ct_live_abc123xyz";
+  const fakeClient = {
+    baseUrl: "https://example.invalid",
+    async startDeviceFlow() {
+      return {
+        device_code_id: "c_dev_1",
+        user_code: "ABCD-EFGH",
+        verification_uri: "https://github.com/login/device",
+        interval_sec: 5,
+        expires_at: new Date(Date.now() + 900_000).toISOString(),
+      };
+    },
+    async pollDeviceFlow() {
+      return { status: "success", token: TOKEN };
+    },
+  };
+  try {
+    const code = await runInit(
+      { yes: true, reconfigure: false, repo: "acme/service", cwd: dir, skipOauth: false, help: false },
+      {
+        prompter: makePrompter(),
+        stdout: (s) => stdout.push(s),
+        stderr: (s) => stderr.push(s),
+        oauthDeps: {
+          client: fakeClient,
+          setGhSecret: async () => {},
+          sleep: () => Promise.resolve(),
+        },
+      },
+    );
+    assert.equal(code, 0, stderr.join(""));
+    const out = stdout.join("");
+    assert.ok(out.includes("Telegram link step"), "should print Telegram link step block");
+    assert.ok(out.includes(`/link ${TOKEN}`), `should include literal '/link ${TOKEN}' — got: ${out}`);
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});
 
 test("runInit: happy path with explicit --repo, no keys → all stubs, files written", async () => {
   const dir = await mkTmpDir("conclave-init-");
