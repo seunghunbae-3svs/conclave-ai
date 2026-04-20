@@ -43,12 +43,18 @@ export const DEFAULT_CONFIG = {
         models: { tier1: {}, tier2: { claude: "claude-opus-4-7", openai: "gpt-5.4" } },
       },
       design: {
-        tier1: ["claude", "openai", "gemini"],
-        tier2: ["claude", "openai"],
+        // v0.5 C: design-specialist agent leads on design reviews;
+        // Claude stays on as the text-backup so code changes paired
+        // with visuals still get a code-reading reviewer.
+        tier1: ["design", "claude"],
+        tier2: ["design", "claude"],
         tier1MaxRounds: 1,
         tier2MaxRounds: 2,
         alwaysEscalate: true,
-        models: { tier1: {}, tier2: { claude: "claude-opus-4-7", openai: "gpt-5.4" } },
+        models: {
+          tier1: { design: "claude-haiku-4-5" },
+          tier2: { design: "claude-opus-4-7", claude: "claude-opus-4-7" },
+        },
       },
     },
   },
@@ -96,8 +102,14 @@ export function buildConfigFor(repoSlug: string, selectedAgents?: readonly strin
   // Filter the tiered council to only agents the user actually has keys for.
   // If OpenAI/Gemini got deselected, drop them from tier1 + tier2 while
   // preserving order.
+  //
+  // `design` is not a distinct credential — it reuses ANTHROPIC_API_KEY,
+  // so it travels with `claude`. If Claude survived the filter, Design
+  // stays; if Claude got dropped, Design goes too.
   const allow = new Set(selectedAgents);
-  const filter = (arr: readonly string[]) => arr.filter((a) => allow.has(a));
+  const claudeSurvived = allow.has("claude");
+  const filter = (arr: readonly string[]) =>
+    arr.filter((a) => (a === "design" ? claudeSurvived : allow.has(a)));
   return {
     ...base,
     agents: filter(base.agents),

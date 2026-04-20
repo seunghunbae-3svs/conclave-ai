@@ -47,6 +47,22 @@ importers:
         specifier: ^5.7.0
         version: 5.9.3
 
+  packages/agent-design:
+    dependencies:
+      '@anthropic-ai/sdk':
+        specifier: ^0.65.0
+        version: 0.65.0(zod@3.25.76)
+      '@conclave-ai/core':
+        specifier: workspace:*
+        version: link:../core
+      '@conclave-ai/visual-review':
+        specifier: workspace:*
+        version: link:../visual-review
+    devDependencies:
+      typescript:
+        specifier: ^5.7.0
+        version: 5.9.3
+
   packages/agent-gemini:
     dependencies:
       '@conclave-ai/core':
@@ -117,6 +133,9 @@ importers:
       '@conclave-ai/agent-claude':
         specifier: workspace:*
         version: link:../agent-claude
+      '@conclave-ai/agent-design':
+        specifier: workspace:*
+        version: link:../agent-design
       '@conclave-ai/agent-gemini':
         specifier: workspace:*
         version: link:../agent-gemini
