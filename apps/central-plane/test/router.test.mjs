@@ -195,53 +195,9 @@ test("POST /register: token hash is stored, raw token is not", async () => {
   assert.equal(stored.tokenHash.length, 64, "SHA-256 hex is 64 chars");
 });
 
-// ---- /episodic/push ------------------------------------------------------
-
-test("POST /episodic/push: acknowledges a list of hashes", async () => {
-  const app = createApp();
-  const res = await fetchApp(app, "/episodic/push", {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ hashes: ["a", "b", "c"] }),
-  });
-  assert.equal(res.status, 200);
-  const body = await res.json();
-  assert.equal(body.accepted, 3);
-  assert.equal(body.stored, 0);
-});
-
-test("POST /episodic/push: 400 when hashes is missing", async () => {
-  const app = createApp();
-  const res = await fetchApp(app, "/episodic/push", {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({}),
-  });
-  assert.equal(res.status, 400);
-});
-
-// ---- /memory/pull --------------------------------------------------------
-
-test("GET /memory/pull: returns empty frequency stub for valid repo", async () => {
-  const app = createApp();
-  const res = await fetchApp(app, "/memory/pull?repo=acme/service");
-  assert.equal(res.status, 200);
-  const body = await res.json();
-  assert.equal(body.repo, "acme/service");
-  assert.deepEqual(body.frequencies, []);
-});
-
-test("GET /memory/pull: 400 when repo query is missing", async () => {
-  const app = createApp();
-  const res = await fetchApp(app, "/memory/pull");
-  assert.equal(res.status, 400);
-});
-
-test("GET /memory/pull: 400 when repo query is malformed", async () => {
-  const app = createApp();
-  const res = await fetchApp(app, "/memory/pull?repo=no-slash");
-  assert.equal(res.status, 400);
-});
+// ---- /episodic/push + /memory/pull moved to test/memory.test.mjs --------
+// These endpoints now require CONCLAVE_TOKEN auth + real D1 aggregation
+// logic; their tests live alongside the aggregate store fixtures.
 
 // ---- 404 + error handler -------------------------------------------------
 

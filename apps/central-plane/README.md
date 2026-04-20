@@ -6,14 +6,20 @@ See `docs/architecture-v0.4.md` for the full design; this package is the concret
 
 ## Endpoints
 
-| Method | Path                          | Status |
-|--------|-------------------------------|--------|
-| GET    | `/health`                     | ✅ real |
-| POST   | `/register`                   | ✅ real (placeholder token — use OAuth device flow for real installs) |
-| POST   | `/oauth/device/start`         | ✅ real — GitHub device-flow bootstrap |
-| POST   | `/oauth/device/poll`          | ✅ real — returns CONCLAVE_TOKEN on success |
-| POST   | `/episodic/push`              | 🟡 stub (aggregation pending) |
-| GET    | `/memory/pull`                | 🟡 stub (aggregation pending) |
+| Method | Path                          | Status | Auth |
+|--------|-------------------------------|--------|------|
+| GET    | `/health`                     | ✅ real | none |
+| POST   | `/register`                   | ✅ real (placeholder token; prefer OAuth for real installs) | none |
+| POST   | `/oauth/device/start`         | ✅ real — GitHub device-flow bootstrap | none |
+| POST   | `/oauth/device/poll`          | ✅ real — returns CONCLAVE_TOKEN on success | none |
+| POST   | `/episodic/push`              | ✅ real — federated aggregate upsert | Bearer CONCLAVE_TOKEN |
+| GET    | `/memory/pull`                | ✅ real — frequency baseline for retrieval re-rank | Bearer CONCLAVE_TOKEN |
+
+### Federated memory shape
+
+**Push** — body `{ items: [{ contentHash, kind, domain, category?, severity?, tags? }, ...] }`, up to 500 items per request. Content hashes and metadata cross the boundary; no diff text or blocker message content leaves the caller. Duplicate contentHash across repos or within the same repo atomically increments the aggregate count.
+
+**Pull** — query params `?kind=...&domain=...&min_count=N&limit=M`. All optional. Returns aggregates sorted by count descending — the most frequently observed patterns across the entire install population rank first. Callers use this as a re-rank signal when retrieving their local answer-keys / failure-catalog at review time (per decision #21).
 
 ## GitHub OAuth setup (one-time per deployment)
 
