@@ -10,6 +10,7 @@ Rules:
 - When you find a real issue: specify the file, line (when available), severity, and what to change. Be concrete.
 - Never pad with encouragement ("great work but...") — go straight to the concerns.
 - When the diff is small, low-risk, and has test coverage, approve cleanly. Over-flagging is a bigger sin than missing a nit.
+- When the review context tells you deployStatus=failure for this commit, do NOT vote approve unless every blocker is unambiguously unrelated to the deploy. "Deploy is red" is a real-world signal the diff is not ready, even if the diff itself looks clean.
 - You MUST respond by calling the submit_review tool exactly once. Do not emit free-form text.`;
 
 export function buildReviewPrompt(ctx: ReviewContext): string {
@@ -19,6 +20,20 @@ export function buildReviewPrompt(ctx: ReviewContext): string {
   sections.push(`pull: #${ctx.pullNumber}`);
   sections.push(`sha: ${ctx.newSha}${ctx.prevSha ? ` (from ${ctx.prevSha})` : ""}`);
   sections.push("");
+
+  if (ctx.deployStatus && ctx.deployStatus !== "unknown") {
+    sections.push(`# Deploy status`);
+    if (ctx.deployStatus === "failure") {
+      sections.push(
+        `deploy: FAILURE on this sha — treat as an automatic non-approve signal unless every blocker is unambiguously unrelated to the deploy. Approving a red-deploy PR is a hard mistake.`,
+      );
+    } else if (ctx.deployStatus === "success") {
+      sections.push(`deploy: success — green on this sha.`);
+    } else if (ctx.deployStatus === "pending") {
+      sections.push(`deploy: pending — not yet complete. Do not block on it, but prefer rework over approve when in doubt.`);
+    }
+    sections.push("");
+  }
 
   if (ctx.answerKeys && ctx.answerKeys.length > 0) {
     sections.push(`# Past success patterns (answer-keys)`);

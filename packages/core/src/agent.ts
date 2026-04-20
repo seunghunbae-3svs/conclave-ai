@@ -48,6 +48,20 @@ export interface ReviewContext {
    * Legacy flat-Council callers leave this undefined.
    */
   tier?: 1 | 2;
+  /**
+   * Deploy status of the PR's head commit, pulled from GitHub check-suites
+   * (or an equivalent platform signal). Agents MUST treat `failure` as an
+   * automatic non-approve signal unless every blocker is unambiguously
+   * unrelated to the deploy. Addresses D10 a+b from `docs/architecture-
+   * v0.4.md` — a real-world dogfood gap where council approved a PR whose
+   * Vercel build was red.
+   *
+   *  success   — all deploy checks green
+   *  failure   — at least one deploy check red (auto-non-approve)
+   *  pending   — deploy still running (advisory only)
+   *  unknown   — no deploy platform attached to this PR, status not meaningful
+   */
+  deployStatus?: "success" | "failure" | "pending" | "unknown";
 }
 
 export interface ReviewResult {
