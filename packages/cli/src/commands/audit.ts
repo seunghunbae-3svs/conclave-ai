@@ -36,6 +36,7 @@ import { DesignAgent } from "@conclave-ai/agent-design";
 import { OpenAIAgent } from "@conclave-ai/agent-openai";
 import { GeminiAgent } from "@conclave-ai/agent-gemini";
 import { loadConfig } from "../lib/config.js";
+import { loadProjectContext, loadDesignContext } from "../lib/project-context.js";
 import {
   discoverAuditFiles,
   buildAuditBatches,
@@ -342,6 +343,25 @@ export async function audit(argv: string[]): Promise<void> {
   for (const s of skipped) {
     process.stderr.write(`conclave audit: ${s}\n`);
   }
+
+  // v0.6.4 — auto-inject project + design context so audit findings can
+  // be judged against the repo's stated purpose, not just against
+  // generic "what does this file do" heuristics.
+  const ctxCfg = config.context;
+  const projectCtxLoaded = await loadProjectContext(cwd, {
+    ...(ctxCfg?.readmeMaxChars ? { readmeMaxChars: ctxCfg.readmeMaxChars } : {}),
+  });
+  const designCtxLoaded =
+    resolvedDomain === "design" || resolvedDomain === "mixed"
+      ? await loadDesignContext(cwd, {
+          ...(ctxCfg?.maxDesignReferences !== undefined
+            ? { maxReferences: ctxCfg.maxDesignReferences }
+            : {}),
+          ...(ctxCfg?.maxDesignImageBytes !== undefined
+            ? { maxImageBytes: ctxCfg.maxDesignImageBytes }
+            : {}),
+        })
+      : {};
   if (agents.length === 0) {
     process.stderr.write(
       `conclave audit: no agents available. Set at least ANTHROPIC_API_KEY and re-run.\n`,
@@ -382,6 +402,19 @@ export async function audit(argv: string[]): Promise<void> {
       auditFiles: b.files.map((f) => f.path),
       domain: resolvedDomain === "design" ? "design" : "code",
     };
+    if (projectCtxLoaded.projectContext) {
+      ctx.projectContext = projectCtxLoaded.projectContext;
+    }
+    if (designCtxLoaded.designContext) {
+      ctx.designContext = designCtxLoaded.designContext;
+    }
+    if (
+      designCtxLoaded.designReferences &&
+      designCtxLoaded.designReferences.length > 0 &&
+      (ctxCfg?.includeDesignReferences ?? true)
+    ) {
+      ctx.designReferences = designCtxLoaded.designReferences;
+    }
     let outcome;
     try {
       outcome = await council.deliberate(ctx);

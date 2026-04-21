@@ -107,6 +107,35 @@ export interface ReviewContext {
     after: Buffer | string;
     route: string;
   }>;
+  /**
+   * v0.6.4 — project-wide context. Injected into every agent (code + design)
+   * so reviews can judge against product intent, not just the diff.
+   * Combines the head of the repo README with the full contents of
+   * `.conclave/project-context.md`. Loaded by the CLI before council
+   * deliberation; agents should prepend it as a `# Project context`
+   * section above the diff / audit payload.
+   *
+   * Absent when neither source file exists. Agents MUST degrade
+   * gracefully (omit the section) rather than treat absence as an error.
+   */
+  projectContext?: string;
+  /**
+   * v0.6.4 — design-only intent (brand, tone, persona, a11y target).
+   * Passed to DesignAgent only; read from `.conclave/design-context.md`.
+   * Absent on code-only reviews and when the file is missing.
+   */
+  designContext?: string;
+  /**
+   * v0.6.4 — design-only reference images representing brand "good".
+   * Read from `.conclave/design-reference/*.png` (up to 4, ≤ 500KB each
+   * by default). Passed to DesignAgent as additional vision content
+   * blocks labeled "Brand reference" — distinct from `visualArtifacts`
+   * (which is the PR-specific before/after pair).
+   *
+   * `bytes` is raw PNG bytes. Absent when the directory is empty or
+   * missing.
+   */
+  designReferences?: Array<{ filename: string; bytes: Buffer | Uint8Array }>;
 }
 
 export interface ReviewResult {

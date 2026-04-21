@@ -41,6 +41,15 @@ export function buildReviewPrompt(ctx: ReviewContext): string {
   sections.push(`sha: ${ctx.newSha}${ctx.prevSha ? ` (from ${ctx.prevSha})` : ""}`);
   sections.push("");
 
+  // v0.6.4 — project context goes BEFORE the diff so the model reads
+  // the repo's intent first and judges the diff against it, not in a
+  // vacuum. Absent on repos without a README or .conclave/project-context.md.
+  if (ctx.projectContext) {
+    sections.push(`# Project context`);
+    sections.push(ctx.projectContext);
+    sections.push("");
+  }
+
   if (ctx.deployStatus && ctx.deployStatus !== "unknown") {
     sections.push(`# Deploy status`);
     if (ctx.deployStatus === "failure") {
@@ -140,6 +149,14 @@ export function buildAuditPrompt(ctx: ReviewContext): string {
     sections.push(`files in this batch (${ctx.auditFiles.length}): ${ctx.auditFiles.join(", ")}`);
   }
   sections.push("");
+
+  // v0.6.4 — project context ahead of everything else so "what is this
+  // repo FOR" sets the frame before the model reads the files.
+  if (ctx.projectContext) {
+    sections.push(`# Project context`);
+    sections.push(ctx.projectContext);
+    sections.push("");
+  }
 
   if (ctx.failureCatalog && ctx.failureCatalog.length > 0) {
     sections.push(`# Known failure patterns (failure-catalog)`);

@@ -79,6 +79,20 @@ export function buildUserPrompt(ctx: ReviewContext, routes: readonly string[]): 
   }
   sections.push("");
 
+  // v0.6.4 — project + design context ahead of the deploy status so the
+  // model anchors on "what this product is" before it reasons about
+  // visual regressions. Absent when neither source file exists.
+  if (ctx.projectContext) {
+    sections.push(`# Project context`);
+    sections.push(ctx.projectContext);
+    sections.push("");
+  }
+  if (ctx.designContext) {
+    sections.push(`# Design intent`);
+    sections.push(ctx.designContext);
+    sections.push("");
+  }
+
   if (ctx.deployStatus && ctx.deployStatus !== "unknown") {
     sections.push(`# Deploy status`);
     if (ctx.deployStatus === "failure") {
@@ -193,6 +207,19 @@ export function buildAuditPrompt(
     sections.push(`ui files in this batch (${uiFiles.length}): ${uiFiles.join(", ")}`);
   }
   sections.push("");
+
+  // v0.6.4 — project + design context up front so audit findings are
+  // graded against product intent, not a generic UI rubric.
+  if (ctx.projectContext) {
+    sections.push(`# Project context`);
+    sections.push(ctx.projectContext);
+    sections.push("");
+  }
+  if (ctx.designContext) {
+    sections.push(`# Design intent`);
+    sections.push(ctx.designContext);
+    sections.push("");
+  }
 
   sections.push(`# UI files (current state — already shipped)`);
   sections.push("```");
