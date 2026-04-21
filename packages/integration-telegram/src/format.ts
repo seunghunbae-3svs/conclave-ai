@@ -1,4 +1,4 @@
-import type { Blocker, NotifyReviewInput, ReviewResult } from "@conclave-ai/core";
+import type { Blocker, NotifyReviewInput, PlainSummary, ReviewResult } from "@conclave-ai/core";
 
 const VERDICT_EMOJI: Record<"approve" | "rework" | "reject", string> = {
   approve: "✅",
@@ -178,6 +178,50 @@ export function formatReviewForTelegram(input: NotifyReviewInput): string {
   lines.push(
     `<i>💰 $${totalCostUsd.toFixed(2)} · agents: ${outcome.results.length}</i>`,
   );
+  lines.push(`<i>ref: <code>${esc(episodicId)}</code></i>`);
+
+  const message = lines.join("\n");
+  return message.length <= 4090 ? message : message.slice(0, 4085) + "\n…";
+}
+
+/**
+ * v0.6.1 — plain-language body for non-dev Telegram users. Uses the
+ * three prose paragraphs produced by `generatePlainSummary`, adds a
+ * compact header (repo + PR link), and appends the full-report link.
+ * Intentionally no emoji, no severity tags, no category chips — this
+ * is the message a non-developer actually wants.
+ */
+export function formatPlainSummaryForTelegram(input: NotifyReviewInput): string {
+  const plain: PlainSummary | undefined = input.plainSummary;
+  if (!plain) return formatReviewForTelegram(input);
+
+  const { ctx, prUrl, episodicId } = input;
+  const lines: string[] = [];
+
+  const repoLabel = `${ctx.repo}${ctx.pullNumber ? ` #${ctx.pullNumber}` : ""}`;
+  const header = prUrl
+    ? `<a href="${esc(prUrl)}">${esc(repoLabel)}</a>`
+    : `<b>${esc(repoLabel)}</b>`;
+  lines.push(`🏛️ Conclave — ${header}`);
+  lines.push("");
+
+  if (plain.whatChanged) {
+    lines.push(esc(plain.whatChanged));
+    lines.push("");
+  }
+  if (plain.verdictInPlain) {
+    lines.push(esc(plain.verdictInPlain));
+    lines.push("");
+  }
+  if (plain.nextAction) {
+    lines.push(esc(plain.nextAction));
+    lines.push("");
+  }
+
+  if (prUrl) {
+    const fullLabel = plain.locale === "ko" ? "전체 리포트" : "Full report";
+    lines.push(`<a href="${esc(prUrl)}">${fullLabel}</a>`);
+  }
   lines.push(`<i>ref: <code>${esc(episodicId)}</code></i>`);
 
   const message = lines.join("\n");

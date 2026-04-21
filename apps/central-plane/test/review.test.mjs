@@ -331,3 +331,72 @@ test("POST /review/notify: valid token → last_seen_at is bumped", async () => 
   const after = [...env.DB.state.installs.values()].find((v) => v.id === installId).lastSeenAt;
   assert.notEqual(after, before, "last_seen_at should advance");
 });
+
+// ---- plain summary (v0.6.1) --------------------------------------------
+
+test("POST /review/notify: accepts plain_summary in body and dispatches normally", async () => {
+  const fetchMock = makeFetch([
+    { match: (u) => u.includes("/sendMessage"), respond: () => json(200, { ok: true, result: {} }) },
+  ]);
+  const app = createApp({ fetch: fetchMock });
+  const { env, token } = makeEnv({ chatIds: [9999] });
+  const { res, body } = await fetchApp(
+    app,
+    "/review/notify",
+    {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({
+        repo_slug: "acme/app",
+        message: "Plain text goes here.",
+        plain_summary: {
+          whatChanged: "Small UI tweak across the badge page.",
+          verdictInPlain: "One visual issue to fix before release.",
+          nextAction: "Tighten contrast and re-check on mobile.",
+          locale: "en",
+        },
+      }),
+    },
+    env,
+  );
+  assert.equal(res.status, 200);
+  assert.equal(body.delivered, 1);
+  const sends = fetchMock.calls.filter((c) => c.url.includes("/sendMessage"));
+  assert.equal(sends.length, 1);
+  // Body already contains the plain prose — central plane does not re-render.
+  const payload = JSON.parse(sends[0].body);
+  assert.equal(payload.text, "Plain text goes here.");
+});
+
+test("POST /review/notify: malformed plain_summary.locale → 400", async () => {
+  const fetchMock = makeFetch([]);
+  const app = createApp({ fetch: fetchMock });
+  const { env, token } = makeEnv({ chatIds: [42] });
+  const { res, body } = await fetchApp(
+    app,
+    "/review/notify",
+    {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({
+        repo_slug: "acme/app",
+        message: "hi",
+        plain_summary: {
+          whatChanged: "a",
+          verdictInPlain: "b",
+          nextAction: "c",
+          locale: "jp", // invalid
+        },
+      }),
+    },
+    env,
+  );
+  assert.equal(res.status, 400);
+  assert.match(body.error, /plain_summary\.locale/);
+});

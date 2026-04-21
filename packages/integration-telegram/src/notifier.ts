@@ -1,6 +1,6 @@
 import type { Notifier, NotifyReviewInput } from "@conclave-ai/core";
 import { TelegramClient, type HttpFetch, type TelegramInlineKeyboard } from "./client.js";
-import { formatReviewForTelegram } from "./format.js";
+import { formatReviewForTelegram, formatPlainSummaryForTelegram } from "./format.js";
 
 /**
  * Default Conclave central plane URL. Duplicated from
@@ -150,7 +150,13 @@ export class TelegramNotifier implements Notifier {
   }
 
   private async notifyViaCentral(input: NotifyReviewInput): Promise<void> {
-    const text = formatReviewForTelegram(input);
+    // v0.6.1 — when a plain-language summary is attached, it becomes the
+    // primary Telegram body (non-dev friendly). The full technical
+    // verdict stays on GitHub and is linked via prUrl. Falls back to the
+    // original dev-facing formatter when plainSummary is absent.
+    const text = input.plainSummary
+      ? formatPlainSummaryForTelegram(input)
+      : formatReviewForTelegram(input);
     const repoSlug = input.ctx?.repo || this.repoSlug;
     const body: {
       repo_slug: string;
@@ -158,6 +164,12 @@ export class TelegramNotifier implements Notifier {
       pr_number?: number;
       verdict?: "approve" | "rework" | "reject";
       episodic_id?: string;
+      plain_summary?: {
+        whatChanged: string;
+        verdictInPlain: string;
+        nextAction: string;
+        locale: "en" | "ko";
+      };
     } = {
       repo_slug: repoSlug,
       message: text,
@@ -169,6 +181,16 @@ export class TelegramNotifier implements Notifier {
     // controls button rendering, and with central /review/notify which
     // attaches buttons iff episodic_id is present.
     if (this.includeActionButtons && input.episodicId) body.episodic_id = input.episodicId;
+    // Forward the structured plain summary so the central plane can
+    // re-render if needed (localization overrides, future surfaces).
+    if (input.plainSummary) {
+      body.plain_summary = {
+        whatChanged: input.plainSummary.whatChanged,
+        verdictInPlain: input.plainSummary.verdictInPlain,
+        nextAction: input.plainSummary.nextAction,
+        locale: input.plainSummary.locale,
+      };
+    }
 
     const fetchFn: HttpFetch | typeof fetch =
       this.centralFetch ??
@@ -199,7 +221,9 @@ export class TelegramNotifier implements Notifier {
     if (!this.client || this.chatId === null) {
       throw new Error("TelegramNotifier: direct path selected but client/chatId not configured");
     }
-    const text = formatReviewForTelegram(input);
+    const text = input.plainSummary
+      ? formatPlainSummaryForTelegram(input)
+      : formatReviewForTelegram(input);
     const sendParams: Parameters<TelegramClient["sendMessage"]>[0] = {
       chat_id: this.chatId,
       text,

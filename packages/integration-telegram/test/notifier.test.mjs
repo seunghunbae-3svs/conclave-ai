@@ -367,3 +367,40 @@ test("TelegramNotifier central: repo_slug falls back from GITHUB_REPOSITORY when
     },
   );
 });
+
+// ---- plain summary (v0.6.1) --------------------------------------------
+
+test("TelegramNotifier central: forwards plain_summary in request body when present", async () => {
+  await withEnvAsync({ CONCLAVE_TOKEN: "c_tok_ps" }, async () => {
+    const f = mockCentralFetch();
+    const n = new TelegramNotifier({ fetch: f });
+    const plainSummary = {
+      whatChanged: "Plain what.",
+      verdictInPlain: "Plain verdict.",
+      nextAction: "Plain next.",
+      raw: "...",
+      locale: "en",
+    };
+    await n.notifyReview({ ...baseInput, plainSummary });
+    const body = f.calls[0].body;
+    assert.deepEqual(body.plain_summary, {
+      whatChanged: "Plain what.",
+      verdictInPlain: "Plain verdict.",
+      nextAction: "Plain next.",
+      locale: "en",
+    });
+    // message body should be the plain-summary rendering, not the tech one.
+    assert.ok(body.message.includes("Plain what."));
+    assert.ok(!/\[BLOCKER\]|\[MAJOR\]/i.test(body.message));
+  });
+});
+
+test("TelegramNotifier central: omits plain_summary when not provided", async () => {
+  await withEnvAsync({ CONCLAVE_TOKEN: "c_tok_ps2" }, async () => {
+    const f = mockCentralFetch();
+    const n = new TelegramNotifier({ fetch: f });
+    await n.notifyReview(baseInput);
+    const body = f.calls[0].body;
+    assert.equal(body.plain_summary, undefined);
+  });
+});

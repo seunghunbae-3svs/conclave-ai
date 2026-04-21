@@ -12,6 +12,30 @@ export type { Platform, PreviewResolution, ResolvePreviewInput } from "./platfor
 export { computeAgentScore, computeAllAgentScores, AGENT_SCORE_WEIGHTS } from "./scoring.js";
 export type { AgentScore, AgentScoreComponents } from "./scoring.js";
 
+// Plain-language summary (v0.6.1) — routes every council/audit output through
+// one cheap LLM call to produce jargon-free prose for non-dev stakeholders
+// on Telegram/Discord/Slack. See plain-summary.ts for the contract.
+export {
+  generatePlainSummary,
+  computePlainSummaryKey,
+  parsePlainSummaryText,
+  InMemoryPlainSummaryCache,
+} from "./plain-summary.js";
+export type {
+  PlainSummary,
+  PlainSummaryInput,
+  PlainSummaryMode,
+  PlainSummaryVerdict,
+  PlainSummaryLocale,
+  PlainSummarySubject,
+  PlainSummaryChanges,
+  PlainSummaryScope,
+  PlainSummaryBlocker,
+  PlainSummaryLlm,
+  PlainSummaryCache,
+  GeneratePlainSummaryDeps,
+} from "./plain-summary.js";
+
 // Memory substrate (decision #17: answer-keys + failure-catalog duality as core primitive).
 // Re-exported here for convenience; dedicated subpath at @conclave-ai/core/memory.
 export {

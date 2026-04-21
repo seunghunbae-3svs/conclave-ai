@@ -169,6 +169,34 @@ export const ConclaveConfigSchema = z.object({
       defaultScope: z.enum(["all", "ui", "code", "infra", "docs"]).default("all"),
     })
     .optional(),
+  /**
+   * v0.6.1 — plain-language summary for non-dev stakeholders. A single
+   * cheap LLM call (claude-haiku-4-5) rewrites every council/audit
+   * output into 3 jargon-free paragraphs. The summary is routed to
+   * non-dev surfaces (Telegram first) while the technical verdict stays
+   * on GitHub for devs.
+   *
+   *   enabled     — master switch (default true)
+   *   locale      — "en" or "ko" (default "en"); KO uses 평어 (반말),
+   *                 not 존댓말, to match Bae's preferred voice
+   *   deliveries  — where to surface the summary. "telegram" swaps the
+   *                 bot message body to plain prose. "pr-comment"
+   *                 appends a "### Plain summary" section to the PR
+   *                 comment / audit issue body. Default both.
+   */
+  output: z
+    .object({
+      plainSummary: z
+        .object({
+          enabled: z.boolean().default(true),
+          locale: z.enum(["en", "ko"]).default("en"),
+          deliveries: z
+            .array(z.enum(["telegram", "pr-comment"]))
+            .default(["telegram", "pr-comment"]),
+        })
+        .optional(),
+    })
+    .optional(),
 });
 
 export type ConclaveConfig = z.infer<typeof ConclaveConfigSchema>;

@@ -23,6 +23,18 @@ import { TelegramClient } from "../telegram.js";
  *     pr_number?: number,
  *     verdict?:  "approve" | "rework" | "reject",
  *     episodic_id?: string,
+ *     // v0.6.1 — structured plain-language summary. When present, the
+ *     // central plane relays it untouched to the Telegram chat(s). The
+ *     // `message` field is already rendered by the CLI notifier from
+ *     // this summary, so we don't re-render server-side — we just pass
+ *     // it through so future Telegram surfaces (slash-commands, pinned
+ *     // messages) can use the structured form.
+ *     plain_summary?: {
+ *       whatChanged: string,
+ *       verdictInPlain: string,
+ *       nextAction: string,
+ *       locale: "en" | "ko",
+ *     },
  *   }
  *
  * Inline action keyboard (🔧 rework / ✅ merge / ❌ reject) is attached
@@ -49,6 +61,7 @@ export function createReviewRoutes(fetchImpl: FetchLike = fetch): Hono<{ Binding
           pr_number?: unknown;
           verdict?: unknown;
           episodic_id?: unknown;
+          plain_summary?: unknown;
         }
       | null;
     if (!body || typeof body !== "object") {
@@ -78,6 +91,29 @@ export function createReviewRoutes(fetchImpl: FetchLike = fetch): Hono<{ Binding
     }
     if (body.episodic_id !== undefined && typeof body.episodic_id !== "string") {
       return c.json({ error: "episodic_id: expected string" }, 400);
+    }
+    // v0.6.1 — plain_summary is optional, shape-validated so garbage
+    // payloads don't reach the Telegram relay. We don't re-render the
+    // message from it; the CLI notifier already did that. Accepting the
+    // field keeps the contract explicit for future consumers (structured
+    // summaries pinned to a chat, or surfaced via bot commands).
+    if (body.plain_summary !== undefined) {
+      if (body.plain_summary === null || typeof body.plain_summary !== "object") {
+        return c.json({ error: "plain_summary: expected object" }, 400);
+      }
+      const ps = body.plain_summary as Record<string, unknown>;
+      if (typeof ps["whatChanged"] !== "string") {
+        return c.json({ error: "plain_summary.whatChanged: expected string" }, 400);
+      }
+      if (typeof ps["verdictInPlain"] !== "string") {
+        return c.json({ error: "plain_summary.verdictInPlain: expected string" }, 400);
+      }
+      if (typeof ps["nextAction"] !== "string") {
+        return c.json({ error: "plain_summary.nextAction: expected string" }, 400);
+      }
+      if (ps["locale"] !== "en" && ps["locale"] !== "ko") {
+        return c.json({ error: "plain_summary.locale: expected 'en' | 'ko'" }, 400);
+      }
     }
 
     // ---- auth: SHA-256(token) → installs.token_hash ----

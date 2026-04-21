@@ -1,5 +1,6 @@
 import type { ReviewContext } from "./agent.js";
 import type { CouncilOutcome } from "./council.js";
+import type { PlainSummary } from "./plain-summary.js";
 
 export interface NotifyReviewInput {
   outcome: CouncilOutcome;
@@ -8,6 +9,14 @@ export interface NotifyReviewInput {
   totalCostUsd: number;
   /** Optional PR URL if the SCM adapter resolved one — lets notifiers link directly. */
   prUrl?: string;
+  /**
+   * Optional plain-language summary (v0.6.1). When present, notifiers that
+   * target non-dev surfaces (Telegram / Discord / Slack) SHOULD use it as
+   * the primary body and relegate the technical verdict to a "full report"
+   * link. When absent, notifiers preserve their original formatting for
+   * backward compatibility.
+   */
+  plainSummary?: PlainSummary;
 }
 
 /**
