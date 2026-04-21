@@ -1,5 +1,6 @@
 import { init } from "./commands/init.js";
 import { review } from "./commands/review.js";
+import { audit } from "./commands/audit.js";
 import { recordOutcome } from "./commands/record-outcome.js";
 import { rework } from "./commands/rework.js";
 import { pollOutcomesCommand } from "./commands/poll-outcomes.js";
@@ -17,6 +18,7 @@ Usage:
 
 Commands:
   init                  Set up conclave in the current repo (config + skeleton)
+  audit                 Full-project health check across the current codebase (v0.6+)
   review                Run a council review on the current branch
   rework                Apply a worker-generated patch for a pending council "rework" verdict
   record-outcome        Record a PR's merge/reject/rework outcome manually
@@ -31,6 +33,8 @@ Commands:
 
 Examples:
   conclave init
+  conclave audit                          # run right after init — full-project health check
+  conclave audit --dry-run --scope ui     # preview which files would be audited
   conclave review --pr 42 --visual
   conclave rework --pr 42                 # apply worker patch for the latest pending review on PR 42
   conclave record-outcome --id ep-... --result merged
@@ -56,6 +60,9 @@ export async function run(argv: string[]): Promise<void> {
   switch (cmd) {
     case "init":
       await init(rest);
+      return;
+    case "audit":
+      await audit(rest);
       return;
     case "review":
       await review(rest);

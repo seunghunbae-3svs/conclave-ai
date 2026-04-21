@@ -28,6 +28,18 @@ export interface PriorReview {
  */
 export type ReviewDomain = "code" | "design";
 
+/**
+ * Mode of the review. v0.6.0 adds "audit" — a whole-file, whole-project
+ * health check rather than a PR-diff review. Agents should switch their
+ * prompts to treat the file contents as already-shipped code and call
+ * out real issues (a11y, security, regression risk, token drift, etc.)
+ * rather than reasoning about "what changed".
+ *
+ * Absent ≡ "review" for backward compatibility with every pre-v0.6
+ * caller of Council / TieredCouncil / the individual agents.
+ */
+export type ReviewMode = "review" | "audit";
+
 export interface ReviewContext {
   diff: string;
   repo: string;
@@ -42,6 +54,20 @@ export interface ReviewContext {
   priors?: PriorReview[];
   /** "code" (default) or "design" — see `ReviewDomain`. */
   domain?: ReviewDomain;
+  /**
+   * "review" (default) or "audit". When "audit", the `diff` field carries
+   * the full current contents of the batched files (not a unified diff),
+   * and agents are expected to identify issues in the code as-shipped.
+   * See `ReviewMode` for the rationale.
+   */
+  mode?: ReviewMode;
+  /**
+   * v0.6 audit-mode hint — the list of file paths whose contents are
+   * packed into `diff`. Lets agents attribute blockers precisely without
+   * having to parse the (non-standard, non-unified) payload themselves.
+   * Omitted on review-mode calls.
+   */
+  auditFiles?: readonly string[];
   /**
    * Tier number, 1-indexed. Set by `TieredCouncil` when it calls agents
    * so prompts + agent scoring can attribute results to the correct tier.

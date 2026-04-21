@@ -27,6 +27,18 @@ reviewer. Concretely:
 This is **not** a tool for seasoned engineers polishing code they wrote
 themselves. It is a council for code that came out of an AI.
 
+## Start here (after install)
+
+```bash
+conclave init       # one-time setup
+conclave audit      # run right away — full-project health check
+```
+
+`conclave audit` (v0.6.0) walks your repo, samples high-signal files,
+and opens a GitHub issue with a prioritized list of real blockers /
+majors / minors — no PR required. Budget-capped at $2 by default
+(hard ceiling $10). See [docs/guides/audit.md](docs/guides/audit.md).
+
 ## How it works
 
 ```
@@ -83,6 +95,7 @@ negative); here `answer-keys ∥ failure-catalog` is the primitive — decision 
 
 ```
 conclave init                              # scaffold config + .conclave/ in repo
+conclave audit [options]                   # v0.6+ — full-project health check
 conclave review [--pr N] [--visual]        # run the 3-round council review
 conclave record-outcome --id <ep-id> --result merged|rejected|reworked
 conclave poll-outcomes [--quiet]           # auto outcome capture via gh

@@ -1,0 +1,476 @@
+/**
+ * `conclave audit` — full-project health check (v0.6.0).
+ *
+ * Unlike `review`, which operates on a PR diff, `audit` walks the
+ * current state of the repo, samples high-signal files, batches them
+ * into council-sized chunks, and runs each batch through the configured
+ * agents in audit mode. Findings are deduped, sorted, and emitted as a
+ * GitHub issue (default), stdout, JSON, or both.
+ *
+ * Core principles:
+ *   - Budget is MANDATORY and HARD-CAPPED at $10. Real users will forget.
+ *   - Smart about what to audit — categories, recency, --max-files.
+ *   - Degrades gracefully — budget exhaustion returns a PARTIAL result,
+ *     never a crash.
+ */
+import { execFile as execFileCb } from "node:child_process";
+import { promisify } from "node:util";
+import fs from "node:fs";
+import path from "node:path";
+import {
+  BudgetTracker,
+  Council,
+  EfficiencyGate,
+  MetricsRecorder,
+  type Agent,
+  type ReviewContext,
+  type ReviewResult,
+} from "@conclave-ai/core";
+import { ClaudeAgent } from "@conclave-ai/agent-claude";
+import { DesignAgent } from "@conclave-ai/agent-design";
+import { OpenAIAgent } from "@conclave-ai/agent-openai";
+import { GeminiAgent } from "@conclave-ai/agent-gemini";
+import { loadConfig } from "../lib/config.js";
+import {
+  discoverAuditFiles,
+  buildAuditBatches,
+  DEFAULT_UI_SIGNALS,
+  type AuditScope,
+  type AuditCategory,
+  type DiscoveredFile,
+} from "../lib/audit-discovery.js";
+import {
+  aggregateFindings,
+  renderAuditStdout,
+  renderAuditJson,
+  renderAuditIssueBody,
+  type AuditReport,
+  type PerBatchResult,
+} from "../lib/audit-output.js";
+
+const execFile = promisify(execFileCb);
+
+// Hard ceiling — even if a user passes --budget 50, we clamp to $10.
+// Rationale: new users are the audience; guardrail > flexibility.
+export const HARD_BUDGET_CEILING_USD = 10;
+
+// Conservative per-call cost estimate used for reservations. Real cost
+// usually lands lower (prompt caching). Better to reserve generously and
+// release nothing than to under-reserve and over-spend.
+const ESTIMATED_COST_PER_BATCH_USD = 0.15;
+
+export type AuditOutputTarget = "issue" | "stdout" | "json" | "both";
+export type AuditDomain = "auto" | "code" | "design" | "mixed";
+
+interface ParsedArgs {
+  help: boolean;
+  scope: AuditScope;
+  budgetUsd: number;
+  output: AuditOutputTarget;
+  maxFiles: number;
+  include: string[];
+  exclude: string[];
+  domain: AuditDomain;
+  dryRun: boolean;
+  sha?: string;
+  tier1Only: boolean;
+  cwd?: string;
+  jsonPath?: string;
+}
+
+const HELP = `conclave audit — full-project health check across the current codebase
+
+Usage:
+  conclave audit [options]
+
+Options:
+  --scope <set>       "all" (default), "ui", "code", "infra", "docs"
+  --budget <usd>      hard cap on LLM spend. default $2, MAX $10
+  --output <target>   "issue" (default) | "stdout" | "json" | "both"
+  --max-files <N>     cap files reviewed. default 40 (sampling if repo bigger)
+  --include <glob>    extra files to include (comma-separated)
+  --exclude <glob>    extra files to skip (comma-separated)
+  --domain <mode>     "auto" (default) | "code" | "design" | "mixed"
+  --dry-run           list files that would be audited without calling LLMs
+  --sha <sha>         audit state at a specific commit (default HEAD)
+  --tier-1-only       skip tier-2 debate; cheaper, faster, less precise
+  --cwd <path>        repo to audit (default: process.cwd())
+  --json-out <path>   write JSON to a file (implies --output json if not set)
+
+Environment:
+  ANTHROPIC_API_KEY   required — primary Claude agent.
+  OPENAI_API_KEY      optional — adds OpenAI agent.
+  GOOGLE_API_KEY      optional — adds Gemini agent (long-context batches).
+
+Examples:
+  conclave audit                                 # default: scope=all, $2 budget, GH issue
+  conclave audit --dry-run --scope ui            # preview which files would be audited
+  conclave audit --budget 5 --output stdout      # larger budget, print to terminal
+  conclave audit --scope code --max-files 20     # quick, cheap scan
+  conclave audit --domain design --scope ui      # DesignAgent only
+`;
+
+function parseArgv(argv: string[]): ParsedArgs {
+  const out: ParsedArgs = {
+    help: false,
+    scope: "all",
+    budgetUsd: 2,
+    output: "issue",
+    maxFiles: 40,
+    include: [],
+    exclude: [],
+    domain: "auto",
+    dryRun: false,
+    tier1Only: false,
+  };
+  for (let i = 0; i < argv.length; i += 1) {
+    const a = argv[i];
+    if (a === "--help" || a === "-h") out.help = true;
+    else if (a === "--dry-run") out.dryRun = true;
+    else if (a === "--tier-1-only") out.tier1Only = true;
+    else if (a === "--scope" && argv[i + 1]) {
+      const v = argv[++i]!;
+      if (v === "all" || v === "ui" || v === "code" || v === "infra" || v === "docs") out.scope = v;
+    } else if (a === "--budget" && argv[i + 1]) {
+      const n = Number.parseFloat(argv[++i]!);
+      if (!Number.isNaN(n) && n > 0) out.budgetUsd = n;
+    } else if (a === "--output" && argv[i + 1]) {
+      const v = argv[++i]!;
+      if (v === "issue" || v === "stdout" || v === "json" || v === "both") out.output = v;
+    } else if (a === "--max-files" && argv[i + 1]) {
+      const n = Number.parseInt(argv[++i]!, 10);
+      if (!Number.isNaN(n) && n > 0) out.maxFiles = n;
+    } else if (a === "--include" && argv[i + 1]) {
+      out.include = argv[++i]!.split(",").map((s) => s.trim()).filter(Boolean);
+    } else if (a === "--exclude" && argv[i + 1]) {
+      out.exclude = argv[++i]!.split(",").map((s) => s.trim()).filter(Boolean);
+    } else if (a === "--domain" && argv[i + 1]) {
+      const v = argv[++i]!;
+      if (v === "auto" || v === "code" || v === "design" || v === "mixed") out.domain = v;
+    } else if (a === "--sha" && argv[i + 1]) {
+      out.sha = argv[++i]!;
+    } else if (a === "--cwd" && argv[i + 1]) {
+      out.cwd = argv[++i]!;
+    } else if (a === "--json-out" && argv[i + 1]) {
+      out.jsonPath = argv[++i]!;
+    }
+  }
+  return out;
+}
+
+async function resolveRepoSlug(cwd: string): Promise<string> {
+  try {
+    const { stdout } = await execFile("git", ["-C", cwd, "config", "--get", "remote.origin.url"], {
+      maxBuffer: 1024 * 1024,
+    });
+    const url = stdout.trim();
+    // match git@github.com:owner/repo(.git)? or https://github.com/owner/repo(.git)?
+    const m = url.match(/[:/]([^/:]+)\/([^/]+?)(?:\.git)?$/);
+    if (m) return `${m[1]}/${m[2]}`;
+  } catch {
+    // not a git repo or no origin — fall through
+  }
+  return path.basename(cwd);
+}
+
+async function resolveHeadSha(cwd: string, override?: string): Promise<string> {
+  if (override) return override;
+  try {
+    const { stdout } = await execFile("git", ["-C", cwd, "rev-parse", "HEAD"], {
+      maxBuffer: 1024 * 1024,
+    });
+    return stdout.trim();
+  } catch {
+    return "HEAD";
+  }
+}
+
+function buildAgentsForDomain(
+  domain: AuditDomain,
+  gate: EfficiencyGate,
+): { agents: Agent[]; skipped: string[]; resolvedDomain: "code" | "design" | "mixed" } {
+  const skipped: string[] = [];
+  const agents: Agent[] = [];
+  // auto → mixed for audit (we don't have a diff to sniff from; broadest
+  // coverage wins).
+  const resolved: "code" | "design" | "mixed" = domain === "auto" ? "mixed" : domain;
+
+  const addClaude = () => {
+    if (process.env["ANTHROPIC_API_KEY"]) agents.push(new ClaudeAgent({ gate }));
+    else skipped.push("claude (ANTHROPIC_API_KEY not set)");
+  };
+  const addOpenAI = () => {
+    if (process.env["OPENAI_API_KEY"]) agents.push(new OpenAIAgent({ gate }));
+    else skipped.push("openai (OPENAI_API_KEY not set)");
+  };
+  const addGemini = () => {
+    if (process.env["GOOGLE_API_KEY"] || process.env["GEMINI_API_KEY"]) {
+      agents.push(new GeminiAgent({ gate }));
+    } else {
+      skipped.push("gemini (GOOGLE_API_KEY not set)");
+    }
+  };
+  const addDesign = () => {
+    if (process.env["ANTHROPIC_API_KEY"]) agents.push(new DesignAgent({ gate }));
+    else skipped.push("design (ANTHROPIC_API_KEY not set)");
+  };
+
+  if (resolved === "code") {
+    addClaude();
+    addOpenAI();
+    addGemini();
+  } else if (resolved === "design") {
+    addDesign();
+  } else {
+    // mixed — code agents + design
+    addClaude();
+    addOpenAI();
+    addGemini();
+    addDesign();
+  }
+  return { agents, skipped, resolvedDomain: resolved };
+}
+
+export async function audit(argv: string[]): Promise<void> {
+  const args = parseArgv(argv);
+  if (args.help) {
+    process.stdout.write(HELP);
+    return;
+  }
+
+  const cwd = path.resolve(args.cwd ?? process.cwd());
+  const { config } = await loadConfig(cwd);
+
+  // Apply config defaults when CLI flag omitted (CLI wins over config).
+  const auditCfg = config.audit;
+  let budgetUsd = args.budgetUsd;
+  if (!argv.includes("--budget") && auditCfg?.defaultBudgetUsd) {
+    budgetUsd = auditCfg.defaultBudgetUsd;
+  }
+  let maxFiles = args.maxFiles;
+  if (!argv.includes("--max-files") && auditCfg?.defaultMaxFiles) {
+    maxFiles = auditCfg.defaultMaxFiles;
+  }
+  let scope: AuditScope = args.scope;
+  if (!argv.includes("--scope") && auditCfg?.defaultScope) {
+    scope = auditCfg.defaultScope;
+  }
+
+  // Hard ceiling enforcement. Clamp + warn.
+  if (budgetUsd > HARD_BUDGET_CEILING_USD) {
+    process.stderr.write(
+      `conclave audit: --budget $${budgetUsd} exceeds hard ceiling — clamping to $${HARD_BUDGET_CEILING_USD}\n`,
+    );
+    budgetUsd = HARD_BUDGET_CEILING_USD;
+  }
+
+  // 1. Resolve repo / sha.
+  const repo = await resolveRepoSlug(cwd);
+  const sha = await resolveHeadSha(cwd, args.sha);
+
+  // 2. Discover files.
+  const uiSignals =
+    config.autoDetect?.uiSignals && config.autoDetect.uiSignals.length > 0
+      ? config.autoDetect.uiSignals
+      : DEFAULT_UI_SIGNALS;
+  const discovery = await discoverAuditFiles({
+    cwd,
+    scope,
+    maxFiles,
+    include: args.include,
+    exclude: args.exclude,
+    uiSignals,
+  });
+
+  process.stdout.write(
+    `conclave audit: repo=${repo} sha=${sha.slice(0, 12)} scope=${scope} domain=${args.domain}\n`,
+  );
+  process.stdout.write(`  ${discovery.reason}\n`);
+
+  // 3. --dry-run: list + exit.
+  if (args.dryRun) {
+    process.stdout.write(`\nfiles that would be audited (${discovery.files.length}):\n`);
+    for (const f of discovery.files) {
+      process.stdout.write(`  [${f.category}] ${f.path}  (${f.sizeBytes}b)\n`);
+    }
+    process.stdout.write(`\n--dry-run — no LLM calls made. Budget remains $${budgetUsd.toFixed(2)}.\n`);
+    return;
+  }
+
+  if (discovery.files.length === 0) {
+    process.stdout.write(`conclave audit: nothing to audit. Exiting clean.\n`);
+    return;
+  }
+
+  // 4. Build batches.
+  const batches = await buildAuditBatches(discovery.files, cwd);
+  process.stdout.write(
+    `  packed into ${batches.length} batch(es), ${batches.reduce((s, b) => s + b.charCount, 0)} chars total\n`,
+  );
+
+  // 5. Wire budget + agents.
+  const budget = new BudgetTracker({ perPrUsd: budgetUsd });
+  budget.onWarning((spent, cap) => {
+    process.stderr.write(
+      `conclave audit: budget warning — spent $${spent.toFixed(4)} of $${cap.toFixed(2)} cap\n`,
+    );
+  });
+  const metrics = new MetricsRecorder();
+  const gate = new EfficiencyGate({ budget, metrics });
+
+  const { agents, skipped, resolvedDomain } = buildAgentsForDomain(args.domain, gate);
+  for (const s of skipped) {
+    process.stderr.write(`conclave audit: ${s}\n`);
+  }
+  if (agents.length === 0) {
+    process.stderr.write(
+      `conclave audit: no agents available. Set at least ANTHROPIC_API_KEY and re-run.\n`,
+    );
+    process.exit(1);
+    return;
+  }
+
+  // 6. Council per batch. We don't escalate to tier-2 for audit by
+  //    default; a single round across all agents is cheaper and usually
+  //    enough. `--tier-1-only` further enforces single-round.
+  const council = new Council({
+    agents,
+    maxRounds: args.tier1Only ? 1 : 2,
+    enableDebate: !args.tier1Only,
+  });
+
+  const perBatch: PerBatchResult[] = [];
+  let budgetExhausted = false;
+  let batchesRun = 0;
+  for (let i = 0; i < batches.length; i++) {
+    const b = batches[i]!;
+    // Budget pre-check: bail if we can't afford another batch.
+    if (budget.remainingUsd < ESTIMATED_COST_PER_BATCH_USD) {
+      process.stderr.write(
+        `conclave audit: budget exhausted after ${batchesRun}/${batches.length} batches — returning partial result\n`,
+      );
+      budgetExhausted = true;
+      break;
+    }
+    const startedBatch = Date.now();
+    const ctx: ReviewContext = {
+      diff: b.payload,
+      repo,
+      pullNumber: 0,
+      newSha: sha,
+      mode: "audit",
+      auditFiles: b.files.map((f) => f.path),
+      domain: resolvedDomain === "design" ? "design" : "code",
+    };
+    let outcome;
+    try {
+      outcome = await council.deliberate(ctx);
+    } catch (err) {
+      const msg = (err as Error).message;
+      if (/budget/i.test(msg)) {
+        process.stderr.write(
+          `conclave audit: budget exceeded mid-batch (${msg}) — returning partial result\n`,
+        );
+        budgetExhausted = true;
+        break;
+      }
+      process.stderr.write(`conclave audit: batch ${i + 1} failed — ${msg}\n`);
+      continue;
+    }
+    const batchCost = outcome.results.reduce((s, r) => s + (r.costUsd ?? 0), 0);
+    perBatch.push({
+      batchIndex: i,
+      files: b.files,
+      results: outcome.results,
+      costUsd: batchCost,
+      latencyMs: Date.now() - startedBatch,
+    });
+    batchesRun += 1;
+  }
+
+  // 7. Aggregate + attribute.
+  const fileToCategory = new Map<string, AuditCategory>();
+  for (const f of discovery.files) fileToCategory.set(f.path, f.category);
+  const findings = aggregateFindings(perBatch, fileToCategory);
+
+  const perAgentAcc = new Map<
+    string,
+    { approvedBatches: number; reworkBatches: number; rejectBatches: number }
+  >();
+  for (const b of perBatch) {
+    for (const r of b.results) {
+      const acc =
+        perAgentAcc.get(r.agent) ?? { approvedBatches: 0, reworkBatches: 0, rejectBatches: 0 };
+      if (r.verdict === "approve") acc.approvedBatches += 1;
+      else if (r.verdict === "rework") acc.reworkBatches += 1;
+      else acc.rejectBatches += 1;
+      perAgentAcc.set(r.agent, acc);
+    }
+  }
+  const perAgentVerdict = Array.from(perAgentAcc.entries()).map(([agent, v]) => ({
+    agent,
+    ...v,
+  }));
+
+  const report: AuditReport = {
+    repo,
+    sha,
+    scope,
+    domain: resolvedDomain,
+    filesAudited: discovery.files.length,
+    filesInScope: discovery.totalMatched,
+    sampled: discovery.sampled,
+    discoveryReason: discovery.reason,
+    findings,
+    perAgentVerdict,
+    budgetUsd,
+    spentUsd: metrics.summary().totalCostUsd,
+    budgetExhausted,
+    batchesRun,
+    batchesTotal: batches.length,
+    metrics: metrics.summary(),
+  };
+
+  // 8. Emit per --output.
+  const output = args.output;
+  if (output === "stdout" || output === "both") {
+    process.stdout.write("\n");
+    process.stdout.write(renderAuditStdout(report));
+  }
+  if (output === "json" || args.jsonPath) {
+    const json = renderAuditJson(report);
+    if (args.jsonPath) {
+      await fs.promises.mkdir(path.dirname(path.resolve(args.jsonPath)), { recursive: true });
+      await fs.promises.writeFile(args.jsonPath, json, "utf8");
+      process.stdout.write(`\nconclave audit: wrote JSON to ${args.jsonPath}\n`);
+    } else if (output === "json") {
+      process.stdout.write(json);
+    }
+  }
+  if (output === "issue" || output === "both") {
+    const body = renderAuditIssueBody(report);
+    const date = new Date().toISOString().slice(0, 10);
+    const title = `Conclave Project Audit — ${date}`;
+    try {
+      const { stdout } = await execFile(
+        "gh",
+        ["issue", "create", "--title", title, "--body", body],
+        { maxBuffer: 4 * 1024 * 1024 },
+      );
+      process.stdout.write(`\nconclave audit: opened issue — ${stdout.trim()}\n`);
+    } catch (err) {
+      process.stderr.write(
+        `conclave audit: could not open GitHub issue (${(err as Error).message}). Falling back to stdout.\n`,
+      );
+      process.stdout.write("\n");
+      process.stdout.write(renderAuditStdout(report));
+    }
+  }
+
+  // Exit code: 0 if no blockers / majors, 1 if rework-worthy, 2 if any
+  // blocker. Matches review's contract.
+  const hasBlocker = findings.some((f) => f.severity === "blocker");
+  const hasMajor = findings.some((f) => f.severity === "major");
+  if (hasBlocker) process.exit(2);
+  if (hasMajor) process.exit(1);
+}

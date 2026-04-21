@@ -122,6 +122,31 @@ export function buildUserPrompt(ctx: ReviewContext, routes: readonly string[]): 
 }
 
 /**
+ * Audit-mode system prompt (v0.6.0). Used by `conclave audit` when the
+ * batch contains UI files. DesignAgent reasons about UI issues in
+ * already-shipped code — no diff, no screenshots. Accessibility and
+ * token-adherence are the highest-value findings here.
+ */
+export const AUDIT_SYSTEM_PROMPT = `You are a design-specialist auditor on a multi-agent council for Conclave AI. The council is auditing an already-shipped codebase — NOT a pull-request diff. You're the UI lane: code + markup + styles, as they exist on main right now.
+
+Your goal: find UI issues the general-purpose code agents will not notice. They cover logic + security; you cover how the UI will look and behave once rendered.
+
+Focus areas (in order of priority):
+1. Accessibility — images without alt text, buttons-as-divs with no keyboard handler, form inputs without labels, missing visible focus states, color-only meaning, missing aria labels on icon-only buttons, heading hierarchy skips, missing landmarks.
+2. Semantic HTML — role / element mismatches (div with onClick used as a button, a non-interactive element with no keyboard handler).
+3. Design-token drift — hardcoded \`#RRGGBB\` / \`rgb(...)\` / raw \`px\` values in a repo that clearly uses Tailwind / CSS variables / a theme file. Favor tokens; call out the drift.
+4. Layout / responsive — missing responsive breakpoints on dense surfaces, missing \`overflow-hidden\` on clipping containers, missing \`min-w-0\` on flex children that will truncate, obvious layout bugs (absolute positioning without a relative parent, z-index wars).
+5. Interaction states — missing hover / focus / active / disabled / loading coverage on interactive elements.
+
+Rules:
+- Cite the file + specific snippet in each blocker (e.g. "src/ui/Hero.tsx: <img src={logo} /> missing alt").
+- Severity — blocker = a11y violation that blocks users (missing alt on content image, button-as-div with no keyboard); major = obvious design bug on a primary surface; minor = secondary surface; nit = polish.
+- Category — one of: a11y, semantic-html, token-drift, layout, responsive, interaction-state, contrast, overflow.
+- Do NOT re-check logic correctness / security / package choices — the code agents handle those.
+- When the UI files are short and clean, verdict=approve with a one-line summary is fine.
+- You MUST respond by calling the submit_review tool exactly once. No free-form text.`;
+
+/**
  * Mode B — text-UI system prompt. Used when no visual artifacts are
  * attached but the diff touches UI code. The design agent reasons about
  * the rendered intent from the source alone: semantic HTML, a11y,
@@ -149,6 +174,57 @@ Rules:
 - When the UI diff is small and clean, verdict=approve with a one-line summary is fine. Don't invent issues.
 - If the diff appears truncated (a "[truncated]" marker is present), note the caveat in your summary.
 - You MUST respond by calling the submit_review tool exactly once. No free-form text.`;
+
+/**
+ * Build the audit-mode user prompt for DesignAgent (v0.6.0). Takes the
+ * current contents of the UI files in the batch (already size-bounded by
+ * the CLI) and the list of UI file paths.
+ */
+export function buildAuditPrompt(
+  ctx: ReviewContext,
+  uiFilesContent: string,
+  uiFiles: readonly string[],
+): string {
+  const sections: string[] = [];
+  sections.push(`# UI audit target`);
+  sections.push(`repo: ${ctx.repo}`);
+  sections.push(`sha:  ${ctx.newSha}`);
+  if (uiFiles.length > 0) {
+    sections.push(`ui files in this batch (${uiFiles.length}): ${uiFiles.join(", ")}`);
+  }
+  sections.push("");
+
+  sections.push(`# UI files (current state — already shipped)`);
+  sections.push("```");
+  sections.push(uiFilesContent || "(empty batch)");
+  sections.push("```");
+  sections.push("");
+
+  if (ctx.priors && ctx.priors.length > 0) {
+    sections.push(`# Round ${ctx.round ?? 2} — other agents' audit findings from the previous round`);
+    sections.push(
+      `Read each agent's blockers. Update your verdict ONLY if you see a real UI issue you missed, or a false-positive you can now retract.`,
+    );
+    sections.push("");
+    for (const p of ctx.priors) {
+      sections.push(`## ${p.agent}: ${p.verdict}`);
+      if (p.blockers.length > 0) {
+        for (const b of p.blockers.slice(0, 5)) {
+          sections.push(`- [${b.severity}/${b.category}] ${b.message}`);
+        }
+      } else {
+        sections.push(`- (no blockers)`);
+      }
+      sections.push("");
+    }
+  }
+
+  sections.push(`# Instruction`);
+  sections.push(
+    `Audit the UI files above through the design lens in the system prompt. Call submit_review exactly once. The code agents are covering logic + security — do not duplicate them. Empty blockers + approve is fine when the batch is clean.`,
+  );
+  return sections.join("\n");
+}
 
 /**
  * Build the user prompt for Mode B. Takes the UI-only diff (already
