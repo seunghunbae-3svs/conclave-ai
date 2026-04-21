@@ -534,7 +534,11 @@ export async function review(argv: string[]): Promise<void> {
     // v0.4.4 — dual-path: CONCLAVE_TOKEN routes through the central plane
     // (no per-repo bot token needed). Direct-bot path still works when
     // CONCLAVE_TOKEN is absent (self-hosted / v0.3-style installs).
-    const hasConclaveToken = !!process.env["CONCLAVE_TOKEN"];
+    //
+    // v0.6.3: trim before deciding so a whitespace-only secret expansion
+    // from a consumer-repo workflow is treated as absent (matches the
+    // trim in TelegramNotifier's constructor).
+    const hasConclaveToken = (process.env["CONCLAVE_TOKEN"] ?? "").trim().length > 0;
     const hasToken = !!process.env["TELEGRAM_BOT_TOKEN"];
     const hasChat = tg?.chatId !== undefined || !!process.env["TELEGRAM_CHAT_ID"];
     if (hasConclaveToken) {

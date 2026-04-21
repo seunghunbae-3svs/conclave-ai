@@ -404,3 +404,76 @@ test("TelegramNotifier central: omits plain_summary when not provided", async ()
     assert.equal(body.plain_summary, undefined);
   });
 });
+// ---- v0.6.3 hardening: whitespace + blank CONCLAVE_TOKEN handling -------
+
+test("TelegramNotifier path-selection: empty-string CONCLAVE_TOKEN falls back to direct path", async () => {
+  await withEnvAsync(
+    { CONCLAVE_TOKEN: "", TELEGRAM_BOT_TOKEN: "env-token", TELEGRAM_CHAT_ID: "123" },
+    async () => {
+      const f = mockFetch();
+      const n = new TelegramNotifier({ fetch: f });
+      await n.notifyReview(baseInput);
+      // Empty CONCLAVE_TOKEN must not pick the central path; we should
+      // see a Bot API call, not /review/notify.
+      assert.ok(f.calls[0].url.includes("api.telegram.org"));
+      assert.equal(f.calls[0].body.chat_id, 123);
+    },
+  );
+});
+
+test("TelegramNotifier path-selection: whitespace-only CONCLAVE_TOKEN falls back to direct path", async () => {
+  await withEnvAsync(
+    { CONCLAVE_TOKEN: "   \n\t ", TELEGRAM_BOT_TOKEN: "env-token", TELEGRAM_CHAT_ID: "456" },
+    async () => {
+      const f = mockFetch();
+      const n = new TelegramNotifier({ fetch: f });
+      await n.notifyReview(baseInput);
+      // Whitespace-only should also miss the central path — otherwise we
+      // would ship blank bearer tokens and fail auth at the central plane.
+      assert.ok(f.calls[0].url.includes("api.telegram.org"));
+    },
+  );
+});
+
+test("TelegramNotifier path-selection: trims CONCLAVE_TOKEN before sending on central path", async () => {
+  await withEnvAsync({ CONCLAVE_TOKEN: "  c_tok_central  \n" }, async () => {
+    const f = mockCentralFetch();
+    const n = new TelegramNotifier({ fetch: f });
+    await n.notifyReview(baseInput);
+    // Sent bearer must be the trimmed value, not the raw env reading.
+    assert.equal(
+      f.calls[0].init.headers.authorization,
+      "Bearer c_tok_central",
+    );
+  });
+});
+
+test("TelegramNotifier central: diagnostic log reports CONCLAVE_TOKEN length without leaking value", async () => {
+  await withEnvAsync({ CONCLAVE_TOKEN: "c_tok_1234567890" }, async () => {
+    const f = mockCentralFetch();
+    const logs = [];
+    const n = new TelegramNotifier({ fetch: f, log: (m) => logs.push(m) });
+    await n.notifyReview(baseInput);
+    const diagnostic = logs.find((l) => l.includes("CONCLAVE_TOKEN is set"));
+    assert.ok(diagnostic, `expected diagnostic log, got: ${logs.join(" | ")}`);
+    // Must report length and must NOT include the token value itself.
+    assert.match(diagnostic, /length: 16/);
+    assert.ok(!diagnostic.includes("c_tok_1234567890"));
+    assert.ok(diagnostic.includes("attempting central plane path"));
+  });
+});
+
+test("TelegramNotifier central: no diagnostic log emitted when falling back to direct path", async () => {
+  await withEnvAsync(
+    { CONCLAVE_TOKEN: "", TELEGRAM_BOT_TOKEN: "t", TELEGRAM_CHAT_ID: "9" },
+    async () => {
+      const f = mockFetch();
+      const logs = [];
+      const n = new TelegramNotifier({ fetch: f, log: (m) => logs.push(m) });
+      await n.notifyReview(baseInput);
+      // The central-path diagnostic should only fire when we actually
+      // take the central path.
+      assert.ok(!logs.some((l) => l.includes("CONCLAVE_TOKEN is set")));
+    },
+  );
+});
