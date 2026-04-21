@@ -79,10 +79,16 @@ on:
         # intentional bumps only. Using "latest" is a supply-chain risk
         # because a compromised or mis-tagged publish would be picked up
         # by every consumer on the next run.
+        #
+        # v0.6.3 bump: the prior `0.4.3` default predated the v0.4.4
+        # central-plane routing, so consumer repos were getting a CLI
+        # without CONCLAVE_TOKEN handling and silently falling back to
+        # the direct-bot path. 0.6.2 is the first published CLI that
+        # carries the central-plane dual-path notifier end to end.
         description: 'npm version tag for @conclave-ai/cli. Pinned default; override to a specific semver for reproducible reviews.'
         required: false
         type: string
-        default: 0.4.3
+        default: 0.6.2
 
 jobs:
   review:

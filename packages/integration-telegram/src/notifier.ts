@@ -90,7 +90,15 @@ export class TelegramNotifier implements Notifier {
     this.log = opts.log ?? ((m) => process.stderr.write(m + "\n"));
 
     // Decide path. Explicit opts.useCentralPlane overrides env detection.
-    const conclaveToken = process.env["CONCLAVE_TOKEN"] ?? "";
+    //
+    // v0.6.3 hardening: trim whitespace before deciding. GitHub Actions
+    // sometimes renders secret expansions with a trailing newline when
+    // sourced from shell heredocs, and a blank-string CONCLAVE_TOKEN
+    // would otherwise trip `length > 0` and then fail auth downstream.
+    // Normalising here keeps the decision aligned with what we actually
+    // send on the wire.
+    const rawConclaveToken = process.env["CONCLAVE_TOKEN"] ?? "";
+    const conclaveToken = rawConclaveToken.trim();
     const useCentral =
       opts.useCentralPlane !== undefined ? opts.useCentralPlane : conclaveToken.length > 0;
 
@@ -108,6 +116,12 @@ export class TelegramNotifier implements Notifier {
       this.repoSlug = opts.repoSlug ?? process.env["GITHUB_REPOSITORY"] ?? "unknown/unknown";
       this.chatId = null;
       this.client = null;
+      // Diagnostic log — never logs the actual token value. Length only.
+      // Helps consumer-repo operators see at a glance whether their
+      // `CONCLAVE_TOKEN` secret actually reached the review step.
+      this.log(
+        `conclave review: CONCLAVE_TOKEN is set (length: ${conclaveToken.length}) — attempting central plane path`,
+      );
       return;
     }
 
