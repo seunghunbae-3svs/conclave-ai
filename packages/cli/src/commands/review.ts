@@ -45,6 +45,7 @@ import {
   type DomainDetectionResult,
 } from "../lib/domain-detect.js";
 import { ClaudeHaikuPlainSummaryLlm } from "../lib/plain-summary-llm.js";
+import { resolveTierIds } from "../lib/tier-resolver.js";
 
 type ReviewDomainInput = "code" | "design";
 interface ReviewArgs {
@@ -292,45 +293,18 @@ export async function review(argv: string[]): Promise<void> {
   if (useTiered && domainConfig) {
     // For "mixed" runs, union tier-1 / tier-2 across code + design
     // domain configs (deduped, preserving order: code first, then any
-    // design-only additions). Tier depth settings inherit from the
-    // design config when present (design always-escalate wins so the
-    // Design agent always gets a chance at tier-2), else code's.
-    function mergedTierIds(pick: (c: typeof codeDomainCfg) => readonly string[]): string[] {
-      const seen = new Set<string>();
-      const out: string[] = [];
-      const push = (ids: readonly string[] | undefined) => {
-        if (!ids) return;
-        for (const id of ids) {
-          if (!seen.has(id)) {
-            seen.add(id);
-            out.push(id);
-          }
-        }
-      };
-      if (resolvedDomain === "mixed") {
-        push(codeDomainCfg ? pick(codeDomainCfg) : undefined);
-        push(designDomainCfg ? pick(designDomainCfg) : undefined);
-      } else {
-        push(pick(domainConfig));
-      }
-      return out;
-    }
-    function mergedModels(tier: "tier1" | "tier2"): Record<string, string> {
-      if (resolvedDomain !== "mixed") {
-        return domainConfig!.models?.[tier] ?? {};
-      }
-      // design overrides code — design's model picks are tuned for
-      // design work; code agents keep whichever override code supplied
-      // unless design explicitly pinned the same agent.
-      return {
-        ...(codeDomainCfg?.models?.[tier] ?? {}),
-        ...(designDomainCfg?.models?.[tier] ?? {}),
-      };
-    }
-    const tier1Ids = mergedTierIds((c) => c?.tier1 ?? []);
-    const tier2Ids = mergedTierIds((c) => c?.tier2 ?? []);
-    const tier1Models = mergedModels("tier1");
-    const tier2Models = mergedModels("tier2");
+    // design-only additions) and auto-inject "design" if a stale config
+    // left it out. See `lib/tier-resolver.ts` for the full rule — it's
+    // kept pure + exported so the merge logic is unit-testable.
+    const resolved = resolveTierIds({
+      resolvedDomain,
+      codeDomainCfg,
+      designDomainCfg,
+    });
+    const tier1Ids = [...resolved.tier1Ids];
+    const tier2Ids = [...resolved.tier2Ids];
+    const tier1Models = resolved.tier1Models;
+    const tier2Models = resolved.tier2Models;
     const tier1: Agent[] = [];
     for (const id of tier1Ids) {
       const a = buildAgent(id, tier1Models[id]);
@@ -340,6 +314,18 @@ export async function review(argv: string[]): Promise<void> {
     for (const id of tier2Ids) {
       const a = buildAgent(id, tier2Models[id]);
       if (a) tier2.push(a);
+    }
+    // v0.6.2 diagnostic — surface the resolved tier-1 (and, when
+    // relevant, tier-2) agent list BEFORE council runs so users can
+    // immediately see whether e.g. the Design agent made it in after
+    // a mixed-domain auto-detect. Prints the actually-built agent ids
+    // (credential-skipped agents don't show up), matching what the
+    // council will deliberate with.
+    const tier1IdLog = tier1.map((a) => a.id).join(", ");
+    process.stdout.write(`conclave review: tier-1 agents: [${tier1IdLog}]\n`);
+    if (tier2.length > 0) {
+      const tier2IdLog = tier2.map((a) => a.id).join(", ");
+      process.stdout.write(`conclave review: tier-2 agents: [${tier2IdLog}]\n`);
     }
     if (tier1.length === 0) {
       process.stderr.write(

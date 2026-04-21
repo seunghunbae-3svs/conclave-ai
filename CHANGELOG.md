@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### Fixed
+- **P1: DesignAgent verdict silently dropped from mixed-domain output (v0.6.2).** On any `conclave review` that auto-detected to `mixed` (code + UI signals in the diff), users only saw `claude` / `openai` / `gemini` sections even though the diff included `.jsx` / `.css` / other UI files. Dogfooded on `seunghunbae-3svs/eventbadge#20`. Root cause: the tier-1 merge in `review.ts` unioned `domains.code.tier1 ∪ domains.design.tier1`, but for any `.conclaverc.json` written by `conclave init` pre-v0.5.0-alpha.1 (PR #84) the design list was `["claude","openai","gemini"]` — no `"design"` entry — so `buildAgent("design", …)` was never called, the Council never got a DesignAgent, and the renderer (which was correctly iterating `results`) had no design section to emit.
+  - **Fix 1 — stale-config safety net.** When `resolvedDomain === "mixed"` and the merged tier-1 list doesn't include `"design"`, inject it at the head. Same for tier-2 when non-empty (design's `alwaysEscalate: true` makes tier-2 the binding verdict on mixed runs). Legitimate tier-1-only configs (empty tier-2 on both domains) are left alone. Handles legacy configs without requiring a migration.
+  - **Fix 2 — tier-resolver extraction.** Moved the tier-1/tier-2 merge + safety-net logic out of `review.ts` into `packages/cli/src/lib/tier-resolver.ts` as a pure `resolveTierIds(...)` function so the merge is unit-testable. 10 new tests cover pure-code, pure-design, mixed-current-config, mixed-stale-config (the exact eventbadge#20 shape), model-override precedence (design over code), empty-tier-2 edge, and missing-config edges.
+  - **Diagnostic logging.** `conclave review` now prints `tier-1 agents: [...]` (and `tier-2 agents: [...]` when relevant) before the council runs so users can immediately tell whether DesignAgent made the cut. Prints actually-built agent ids, so credential-skipped agents drop out of the list.
+  - **Regression coverage.** 2 new renderer tests assert the `design → ...` section renders alongside `claude → ...` / `openai → ...` in mixed-domain output, and that it still renders when another agent errored mid-round (verifies the synthetic `agent-failure` rework result doesn't crowd out the design section).
+  - `@conclave-ai/cli` bumped to 0.6.2. No other packages touched. No schema changes. See `docs/releases/v0.6.2.md`.
+
 ### Security
 - **Reusable review workflow hardening (v0.5.2).** Three fixes to `.github/workflows/review.yml`, all flagged by Conclave's own council on `seunghunbae-3svs/eventbadge#19`:
   - **Workflow-security:** secret-bearing steps (LLM keys, `CONCLAVE_TOKEN`, `GH_TOKEN`, `ORCHESTRATOR_PAT`) now gated to non-fork, owner-authored PRs. Fork PRs + external-contributor PRs get a friendly "install locally" fallback comment that uses only the ambient `GITHUB_TOKEN`. Closes the same-repo-branch-PR vector where attacker-controlled PR code would execute inside the secret-bearing step.

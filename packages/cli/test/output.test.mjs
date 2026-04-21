@@ -82,6 +82,101 @@ test("renderReview: reject output tagged", () => {
   assert.match(out, /Verdict: REJECT/);
 });
 
+test("renderReview: v0.6.2 — DesignAgent verdict renders alongside claude + openai in mixed-domain output", () => {
+  // Regression for eventbadge#20: when domain auto-detects to "mixed",
+  // the DesignAgent result must appear in the rendered output as its
+  // own `design → ...` section, same shape as claude + openai. The
+  // renderer must not filter by agent id.
+  const out = renderReview({
+    repo: "acme/my-app",
+    pullNumber: 20,
+    sha: "abcdef1234567890",
+    source: "gh-pr",
+    councilVerdict: "rework",
+    consensus: false,
+    domain: "mixed",
+    tier: { escalated: true, reason: "alwaysEscalate=true", tier1Rounds: 1, tier2Rounds: 2 },
+    results: [
+      {
+        agent: "claude",
+        verdict: "rework",
+        blockers: [{ severity: "major", category: "ci-config", message: "missing env var", file: ".github/workflows/conclave.yml", line: 15 }],
+        summary: "workflow needs env",
+      },
+      {
+        agent: "openai",
+        verdict: "rework",
+        blockers: [{ severity: "blocker", category: "CI/workflow", message: "token not propagated", file: ".github/workflows/conclave.yml", line: 15 }],
+        summary: "token issue",
+      },
+      {
+        agent: "design",
+        verdict: "approve",
+        blockers: [],
+        summary: "jsx changes pass visual-accessibility heuristics",
+      },
+    ],
+    metrics: baseMetrics,
+  });
+  assert.match(out, /── claude → REWORK/);
+  assert.match(out, /── openai → REWORK/);
+  assert.match(out, /── design → APPROVE/, "design section must render");
+  assert.match(out, /Domain:  mixed/);
+  assert.match(out, /Tiers:   1 \(1r\) → 2 \(2r\) — alwaysEscalate=true/);
+});
+
+test("renderReview: v0.6.2 — design section renders even when Claude errored (regression: agent-failure shouldn't eat design)", () => {
+  // If one agent fails mid-run, Council synthesizes an "agent-failure"
+  // rework result. The renderer must still emit every agent's section
+  // — design included — not silently drop sections for error paths.
+  const out = renderReview({
+    repo: "acme/my-app",
+    pullNumber: 21,
+    sha: "deadbeef1234",
+    source: "gh-pr",
+    councilVerdict: "rework",
+    consensus: false,
+    domain: "mixed",
+    results: [
+      {
+        agent: "claude",
+        verdict: "rework",
+        blockers: [
+          {
+            severity: "major",
+            category: "agent-failure",
+            message: "Claude Sonnet 4.6 failed: 429 rate limit",
+          },
+        ],
+        summary: "Claude errored during round 1 and was excluded from the tally.",
+      },
+      {
+        agent: "openai",
+        verdict: "approve",
+        blockers: [],
+        summary: "code looks fine",
+      },
+      {
+        agent: "design",
+        verdict: "rework",
+        blockers: [
+          {
+            severity: "minor",
+            category: "typography",
+            message: "inconsistent heading scale across the new page",
+          },
+        ],
+        summary: "design needs minor polish",
+      },
+    ],
+    metrics: baseMetrics,
+  });
+  assert.match(out, /── claude → REWORK/);
+  assert.match(out, /── openai → APPROVE/);
+  assert.match(out, /── design → REWORK/, "design section must still render when another agent errors");
+  assert.match(out, /typography/);
+});
+
 test("renderReview: metrics section rendered", () => {
   const out = renderReview({
     repo: "acme/my-app",
