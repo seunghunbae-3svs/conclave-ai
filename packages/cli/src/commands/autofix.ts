@@ -47,13 +47,17 @@ const execFile = promisify(execFileCallback);
 const HELP = `conclave autofix — autonomous fix loop for council blockers (v0.7)
 
 Usage:
-  conclave autofix [--pr N] [--verdict <file>] [--budget <usd>] [--max-iterations N]
+  conclave autofix [--pr N] [--verdict <file|->] [--budget <usd>] [--max-iterations N]
                    [--build-cmd <cmd>] [--test-cmd <cmd>] [--autonomy l2|l3]
                    [--cwd <dir>] [--dry-run]
 
 Options:
   --pr N                Pull-request number (default: current branch's open PR).
-  --verdict <file>      Pre-existing Council verdict JSON (skip re-running review).
+  --verdict <file|->    Pre-existing Council verdict JSON. Pass a file path OR
+                        '-' to read the verdict JSON from stdin (v0.7.1).
+                        When omitted, autofix automatically spawns
+                        'conclave review --pr N --json' as a subprocess and
+                        parses its stdout — no hand-crafted verdict file needed.
   --budget <usd>        Hard cap on LLM spend. Default 3, MAX 10.
   --max-iterations N    Max fix→build→review cycles. Default 2, hard max 3.
   --build-cmd <cmd>     Explicit build command (default: auto-detect).
@@ -186,6 +190,21 @@ export interface AutofixDeps {
     prNumber: number;
     cwd: string;
   }) => Promise<{ verdict: "approve" | "rework" | "reject"; reviews: ReviewResult[] }>;
+  /**
+   * v0.7.1 — spawn `conclave review --pr N --json` as a real subprocess and
+   * return its stdout (parsed upstream). Defaults to `defaultSpawnReview`.
+   * Tests inject a mock to avoid actually forking.
+   */
+  spawnReview?: (input: {
+    prNumber: number;
+    cwd: string;
+    timeoutMs?: number;
+  }) => Promise<{ stdout: string; stderr: string; code: number }>;
+  /**
+   * v0.7.1 — read stdin when --verdict - is passed. Defaults to
+   * `defaultReadStdin`. Tests inject a mock that returns the verdict body.
+   */
+  readStdin?: () => Promise<string>;
   /** Run `gh pr merge`. Tests inject a stub. */
   mergePr?: (prNumber: number, cwd: string) => Promise<void>;
   /** Stdout / stderr sinks. */
@@ -223,13 +242,92 @@ const defaultGh: GhRunner = async (bin, args, opts) => {
   return { stdout, stderr };
 };
 
+/** v0.7.1 — default spawn-review runner. Shells out to the same CLI binary
+ * the current process is running from. Uses `process.execPath` + the
+ * resolved `conclave` script path (from process.argv[1]) so the spawned
+ * process inherits exactly this CLI's version + deps. Falls back to the
+ * plain `conclave` binary on PATH if argv[1] isn't a conclave entry. */
+const SPAWN_REVIEW_DEFAULT_TIMEOUT_MS = 60 * 60_000; // 60 min — review can be slow
+
+async function defaultSpawnReview(input: {
+  prNumber: number;
+  cwd: string;
+  timeoutMs?: number;
+}): Promise<{ stdout: string; stderr: string; code: number }> {
+  const timeout = input.timeoutMs ?? SPAWN_REVIEW_DEFAULT_TIMEOUT_MS;
+  // argv[1] is typically the .js entry point; if it exists and looks like
+  // conclave's bin, re-exec it via the same node. Otherwise trust PATH.
+  const entry = process.argv[1];
+  const isConclaveEntry = typeof entry === "string" && /conclave(\.js)?$/.test(entry);
+  const args = ["review", "--pr", String(input.prNumber), "--json"];
+  try {
+    const { stdout, stderr } = isConclaveEntry
+      ? await execFile(process.execPath, [entry!, ...args], {
+          cwd: input.cwd,
+          maxBuffer: 20 * 1024 * 1024,
+          timeout,
+          env: process.env,
+        })
+      : await execFile("conclave", args, {
+          cwd: input.cwd,
+          maxBuffer: 20 * 1024 * 1024,
+          timeout,
+          env: process.env,
+        });
+    return { stdout, stderr, code: 0 };
+  } catch (err) {
+    const e = err as NodeJS.ErrnoException & {
+      stdout?: string;
+      stderr?: string;
+      code?: number | string;
+      signal?: string;
+      killed?: boolean;
+    };
+    // execFile on timeout: killed=true + signal set. Surface as a distinct
+    // error body so the caller can render it cleanly.
+    if (e.killed || e.signal) {
+      throw Object.assign(new Error(`conclave review subprocess timed out after ${timeout}ms`), {
+        stdout: e.stdout ?? "",
+        stderr: e.stderr ?? "",
+        code: typeof e.code === "number" ? e.code : 124,
+        timedOut: true,
+      });
+    }
+    throw Object.assign(new Error(e.stderr ?? e.message), {
+      stdout: e.stdout ?? "",
+      stderr: e.stderr ?? e.message,
+      code: typeof e.code === "number" ? e.code : 1,
+    });
+  }
+}
+
+/** v0.7.1 — default stdin reader. Reads process.stdin until EOF. */
+async function defaultReadStdin(): Promise<string> {
+  return new Promise<string>((resolve, reject) => {
+    const chunks: Buffer[] = [];
+    process.stdin.on("data", (c: Buffer) => chunks.push(c));
+    process.stdin.on("end", () => resolve(Buffer.concat(chunks).toString("utf8")));
+    process.stdin.on("error", reject);
+    // Ensure stream is flowing.
+    if (process.stdin.isPaused()) process.stdin.resume();
+  });
+}
+
 /**
- * Parse a verdict JSON file. Accepts either an episodic-entry shape
- * (what `conclave review` persists) or a standalone `{ verdict, reviews }`
- * payload. Throws on malformed input.
+ * Parse a verdict JSON file. Accepts any of:
+ *  - episodic-entry shape persisted by `conclave review` (councilVerdict + reviews)
+ *  - standalone `{ verdict, reviews }` payload (pre-v0.7.1 hand-written files)
+ *  - v0.7.1 `conclave review --json` shape (verdict + agents[])
+ *
+ * Throws on malformed input.
  */
 export function parseVerdictFile(raw: string): { verdict: "approve" | "rework" | "reject"; reviews: ReviewResult[] } {
-  const parsed = JSON.parse(raw) as unknown;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch (err) {
+    throw new Error(`verdict JSON parse failed: ${(err as Error).message}`);
+  }
   if (!parsed || typeof parsed !== "object") {
     throw new Error("verdict file is not a JSON object");
   }
@@ -237,13 +335,24 @@ export function parseVerdictFile(raw: string): { verdict: "approve" | "rework" |
     verdict?: string;
     councilVerdict?: string;
     reviews?: ReviewResult[];
+    agents?: Array<{ id?: string; agent?: string; verdict?: string; blockers?: unknown; summary?: string }>;
   };
   const verdict = (p.councilVerdict ?? p.verdict) as "approve" | "rework" | "reject" | undefined;
   if (!verdict || !["approve", "rework", "reject"].includes(verdict)) {
     throw new Error("verdict file missing 'verdict' / 'councilVerdict' field");
   }
+  // v0.7.1 --json shape uses `agents` instead of `reviews`. Normalize.
+  if (!Array.isArray(p.reviews) && Array.isArray(p.agents)) {
+    const reviews: ReviewResult[] = p.agents.map((a) => ({
+      agent: (a.id ?? a.agent ?? "unknown") as string,
+      verdict: (a.verdict ?? "rework") as "approve" | "rework" | "reject",
+      blockers: Array.isArray(a.blockers) ? (a.blockers as ReviewResult["blockers"]) : [],
+      summary: typeof a.summary === "string" ? a.summary : "",
+    }));
+    return { verdict, reviews };
+  }
   if (!Array.isArray(p.reviews)) {
-    throw new Error("verdict file missing 'reviews' array");
+    throw new Error("verdict file missing 'reviews' / 'agents' array");
   }
   return { verdict, reviews: p.reviews };
 }
@@ -261,6 +370,8 @@ export async function runAutofix(args: AutofixArgs, deps: AutofixDeps = {}): Pro
   const git = deps.git ?? defaultGit;
   const gh = deps.gh ?? defaultGh;
   const readVerdict = deps.readVerdictFile ?? ((p: string) => fs.readFile(p, "utf8"));
+  const readStdin = deps.readStdin ?? defaultReadStdin;
+  const spawnReview = deps.spawnReview ?? defaultSpawnReview;
 
   // --- 1. Resolve PR + initial verdict ------------------------------------
   let prNumber = args.pr;
@@ -270,14 +381,24 @@ export async function runAutofix(args: AutofixArgs, deps: AutofixDeps = {}): Pro
   let initialVerdict: "approve" | "rework" | "reject" | undefined;
 
   if (args.verdictFile) {
-    const raw = await readVerdict(args.verdictFile);
+    // v0.7.1 — "-" means read from stdin (lets users pipe `gh api ... |
+    // conclave autofix --pr N --verdict -`, sidestepping PowerShell's
+    // UTF-16 BOM tempfile bugs).
+    const raw = args.verdictFile === "-"
+      ? await readStdin()
+      : await readVerdict(args.verdictFile);
+    if (!raw.trim()) {
+      stderr(`autofix: --verdict ${args.verdictFile === "-" ? "stdin" : args.verdictFile} was empty\n`);
+      return { code: 2, result: bailResult("bailed-no-patches", "empty verdict input", []) };
+    }
     const parsed = parseVerdictFile(raw);
     initialReviews = parsed.reviews;
     initialVerdict = parsed.verdict;
-    // Episodic shape also carries repo / pullNumber / sha.
+    // Episodic / --json shape also carries repo / pullNumber / sha.
     try {
-      const ep = JSON.parse(raw) as Partial<EpisodicEntry>;
+      const ep = JSON.parse(raw) as Partial<EpisodicEntry> & { prNumber?: number };
       if (!prNumber && typeof ep.pullNumber === "number") prNumber = ep.pullNumber;
+      if (!prNumber && typeof ep.prNumber === "number") prNumber = ep.prNumber;
       if (typeof ep.repo === "string") repo = ep.repo;
       if (typeof ep.sha === "string") headSha = ep.sha;
     } catch { /* best-effort */ }
@@ -338,20 +459,72 @@ export async function runAutofix(args: AutofixArgs, deps: AutofixDeps = {}): Pro
   }
 
   // --- 3. If no verdict given, run review first --------------------------
+  //     v0.7.1 — when no DI runReview is injected, we auto-spawn
+  //     `conclave review --pr N --json` as a subprocess and parse its
+  //     stdout. This closes the UX gap from v0.7.0 (which required a
+  //     hand-crafted verdict JSON file). --verdict <file> and
+  //     --verdict - (stdin) remain fully supported for CI / air-gapped.
   if (initialVerdict === undefined) {
-    if (!deps.runReview) {
-      stderr(`autofix: --verdict required when no runReview runner is injected (would need to spawn 'conclave review' subprocess in production)\n`);
-      // In production we'd shell out to `conclave review --pr N --json`
-      // here. For v0.7 we document --verdict as the supported path and
-      // keep the subprocess spawn out of the test matrix.
-      return {
-        code: 2,
-        result: bailResult("bailed-no-patches", "no verdict; pass --verdict <file>", []),
-      };
+    if (deps.runReview) {
+      const reviewed = await deps.runReview({ prNumber, cwd: args.cwd });
+      initialReviews = reviewed.reviews;
+      initialVerdict = reviewed.verdict;
+    } else {
+      stdout(`autofix: no --verdict provided, spawning 'conclave review --pr ${prNumber} --json' to fetch live verdict\n`);
+      let spawnResult: { stdout: string; stderr: string; code: number };
+      try {
+        spawnResult = await spawnReview({ prNumber, cwd: args.cwd });
+      } catch (err) {
+        const e = err as Error & { stderr?: string; code?: number; timedOut?: boolean };
+        // Prefer the subprocess's stderr, but fall back to the Error
+        // message (timeout / EPERM / ENOENT leave stderr empty).
+        const rawTail = (e.stderr && e.stderr.trim().length > 0 ? e.stderr : e.message ?? "").toString();
+        const tail = rawTail.slice(-800);
+        stderr(
+          `autofix: failed to auto-fetch verdict via 'conclave review --pr ${prNumber} --json' — ${tail}. Pass --verdict <file> manually or fix the review subprocess.\n`,
+        );
+        return {
+          code: 2,
+          result: bailResult("bailed-no-patches", `spawn review failed: ${tail.slice(0, 200)}`, []),
+        };
+      }
+      // review exit-code: 0=approve 1=rework 2=reject. We still want to
+      // parse stdout in all three cases — the JSON payload is the source
+      // of truth for downstream decisions.
+      if (spawnResult.code !== 0 && spawnResult.code !== 1 && spawnResult.code !== 2) {
+        const tail = (spawnResult.stderr ?? "").toString().slice(-800);
+        stderr(
+          `autofix: 'conclave review --pr ${prNumber} --json' exited ${spawnResult.code} — ${tail}. Pass --verdict <file> manually or fix the review subprocess.\n`,
+        );
+        return {
+          code: 2,
+          result: bailResult("bailed-no-patches", `review subprocess exit ${spawnResult.code}`, []),
+        };
+      }
+      let parsed: { verdict: "approve" | "rework" | "reject"; reviews: ReviewResult[] };
+      try {
+        parsed = parseVerdictFile(spawnResult.stdout);
+      } catch (err) {
+        const msg = (err as Error).message;
+        const tail = spawnResult.stdout.slice(0, 400);
+        stderr(
+          `autofix: 'conclave review --pr ${prNumber} --json' returned unparseable stdout — ${msg}. First 400 chars: ${tail}\n`,
+        );
+        return {
+          code: 2,
+          result: bailResult("bailed-no-patches", `review subprocess stdout parse failed: ${msg}`, []),
+        };
+      }
+      initialReviews = parsed.reviews;
+      initialVerdict = parsed.verdict;
+      // v0.7.1 --json also carries `sha` / `prNumber` — pick them up to
+      // fill in missing loopKey pieces if the gh pr view fallback didn't.
+      try {
+        const extra = JSON.parse(spawnResult.stdout) as { sha?: string; repo?: string; prNumber?: number };
+        if (!headSha && typeof extra.sha === "string") headSha = extra.sha;
+        if (!repo && typeof extra.repo === "string") repo = extra.repo;
+      } catch { /* best-effort */ }
     }
-    const reviewed = await deps.runReview({ prNumber, cwd: args.cwd });
-    initialReviews = reviewed.reviews;
-    initialVerdict = reviewed.verdict;
   }
 
   if (initialVerdict === "approve") {
