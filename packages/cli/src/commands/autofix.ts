@@ -249,7 +249,10 @@ const defaultGh: GhRunner = async (bin, args, opts) => {
  * plain `conclave` binary on PATH if argv[1] isn't a conclave entry. */
 const SPAWN_REVIEW_DEFAULT_TIMEOUT_MS = 60 * 60_000; // 60 min — review can be slow
 
-async function defaultSpawnReview(input: {
+/** v0.7.2 — exported for regression-test coverage of the exit-code
+ * interpretation layer. Not part of the public API; subject to change
+ * across patch versions. */
+export async function defaultSpawnReview(input: {
   prNumber: number;
   cwd: string;
   timeoutMs?: number;
@@ -292,6 +295,21 @@ async function defaultSpawnReview(input: {
         code: typeof e.code === "number" ? e.code : 124,
         timedOut: true,
       });
+    }
+    // v0.7.2 fix: `conclave review` deliberately uses non-zero exit codes
+    // to signal verdict outcome (0=approve, 1=rework, 2=reject). These
+    // are NOT crashes — the subprocess emitted a valid verdict JSON on
+    // stdout, and the caller MUST be allowed to parse it. Previously we
+    // re-threw for every non-zero code, so autofix's catch block bailed
+    // before the exit-code-aware check at the call site could run. Now
+    // we only re-throw when the exit code is absent (process aborted /
+    // couldn't start) or ≥3 (genuine subprocess crash).
+    if (typeof e.code === "number" && e.code >= 0 && e.code < 3) {
+      return {
+        stdout: e.stdout ?? "",
+        stderr: e.stderr ?? "",
+        code: e.code,
+      };
     }
     throw Object.assign(new Error(e.stderr ?? e.message), {
       stdout: e.stdout ?? "",
@@ -538,6 +556,31 @@ export async function runAutofix(args: AutofixArgs, deps: AutofixDeps = {}): Pro
         finalVerdict: "approve",
         remainingBlockers: [],
         mergeStatus: "not-merged",
+      },
+    };
+  }
+
+  // v0.7.2 — reject is too destructive to autofix. A reject means the
+  // council wants the PR closed (not reworked) — blindly feeding that
+  // into the fix loop would try to "fix" things like "this whole
+  // approach is wrong". Print a clear message and exit non-zero so CI
+  // doesn't silently treat reject like a pass, but DON'T error-crash.
+  if (initialVerdict === "reject") {
+    stdout(
+      `autofix: council verdict is REJECT — refusing to autofix (too destructive). ` +
+        `Remaining blockers: ${remainingBlockersFrom(initialReviews).length}. ` +
+        `Close the PR or re-open a scoped-down one.\n`,
+    );
+    return {
+      code: 1,
+      result: {
+        status: "bailed-no-patches",
+        iterations: [],
+        totalCostUsd: 0,
+        finalVerdict: "reject",
+        remainingBlockers: remainingBlockersFrom(initialReviews),
+        mergeStatus: "not-merged",
+        reason: "council verdict: reject — autofix refused",
       },
     };
   }

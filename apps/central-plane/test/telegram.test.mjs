@@ -433,3 +433,148 @@ test("POST /telegram/webhook: TELEGRAM_WEBHOOK_SECRET matches → processes upda
   assert.equal(res.status, 200);
   assert.ok(fetchMock.calls.find((c) => c.url.includes("/sendMessage")));
 });
+
+// ---- v0.7.2 regression: "Illegal invocation" on Cloudflare Workers -------
+//
+// Background:
+//   Cloudflare Workers enforces that native platform methods (fetch, D1
+//   prepare, KV put/get, crypto.subtle.*) receive `this === the original
+//   platform object`. The v0.5..0.7.1 code stored the global fetch on
+//   `TelegramClient.fetchImpl` and later invoked `this.fetchImpl(...)` —
+//   at call-time, `this` was the TelegramClient instance, which tripped
+//   Workers' Illegal-invocation guard and bubbled a 500 from the `/telegram/webhook`
+//   route (observed via `wrangler tail` on 2026-04-21).
+//
+// These tests reproduce the bug in plain Node by wrapping globalThis.fetch
+// with a guard that throws when invoked with `this !== globalThis`. If the
+// regression reappears (someone refactors back to `this.fetchImpl(...)`),
+// these tests go red at CI time, not prod time.
+
+/**
+ * Replace `globalThis.fetch` with a wrapper that:
+ *   1. Throws the same "Illegal invocation" error that Workers throws when
+ *      invoked with `this !== globalThis` and `this !== undefined`.
+ *   2. Otherwise delegates to `inner(url, init)` for the mock response.
+ * Returns a `restore()` fn.
+ */
+function installIllegalInvocationGuard(inner) {
+  const originalFetch = globalThis.fetch;
+  const calls = [];
+  const wrapped = function (url, init) {
+    // `this` in a bare call is undefined (strict mode) or globalThis.
+    // Both are ACCEPTABLE. ANY OTHER receiver means the call site did
+    // `someObj.fetch(...)` — the bug.
+    if (this !== undefined && this !== globalThis) {
+      throw new TypeError(
+        "Illegal invocation: function called with incorrect `this` reference.",
+      );
+    }
+    calls.push({ url: typeof url === "string" ? url : url.url, init });
+    return inner(url, init);
+  };
+  wrapped.calls = calls;
+  globalThis.fetch = wrapped;
+  return {
+    calls,
+    restore: () => {
+      globalThis.fetch = originalFetch;
+    },
+  };
+}
+
+test("v0.7.2 regression: webhook /link uses global fetch without Illegal invocation", async () => {
+  // Install the guard FIRST so createApp's default-parameter `fetch` is
+  // captured from the guarded globalThis.fetch (not the real one).
+  const guard = installIllegalInvocationGuard(async () =>
+    new Response(JSON.stringify({ ok: true, result: {} }), {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    }),
+  );
+  try {
+    // DO NOT inject fetch into createApp — exercise the default-fetch path.
+    const app = createApp();
+    const { env, token, installId } = makeEnvWithInstall();
+    const { res, body } = await fetchApp(app, "/telegram/webhook", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        update_id: 2001,
+        message: { chat: { id: 7001 }, text: `/link ${token}`, from: { username: "bae" } },
+      }),
+    }, env);
+    // If the bug is back, Hono's onError catches the TypeError and returns
+    // 500 with { error: "Illegal invocation: ..." }. Assert we got 200.
+    assert.equal(res.status, 200, `expected 200, got ${res.status}: ${JSON.stringify(body)}`);
+    assert.equal(body.ok, true);
+    // Confirm the global fetch wrapper was actually reached.
+    assert.ok(guard.calls.find((c) => c.url.includes("/sendMessage")), "sendMessage not called");
+    // Confirm link was actually persisted — we got past the fetch.
+    assert.equal(env.DB.state.links.get(7001)?.installId, installId);
+  } finally {
+    guard.restore();
+  }
+});
+
+test("v0.7.2 regression: webhook callback_query dispatch uses global fetch without Illegal invocation", async () => {
+  const guard = installIllegalInvocationGuard(async (url) => {
+    const u = typeof url === "string" ? url : url.url;
+    if (u.endsWith("/dispatches")) return new Response("{}", { status: 200 });
+    if (u.includes("/answerCallbackQuery"))
+      return new Response(JSON.stringify({ ok: true }), { status: 200 });
+    return new Response("{}", { status: 200 });
+  });
+  try {
+    // Encrypted-token dispatch path with default (un-injected) global fetch.
+    const app = createApp();
+    const { env, installId } = makeEnvWithInstall();
+    env.DB.state.links.set(7002, {
+      chatId: 7002,
+      installId,
+      linkedAt: "2026-04-20T00:00:00Z",
+      userLabel: "bae",
+    });
+    const { res } = await fetchApp(app, "/telegram/webhook", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        update_id: 2002,
+        callback_query: {
+          id: "cq-regression",
+          data: "ep:ep-regression:reworked",
+          from: { username: "bae" },
+          message: { chat: { id: 7002 } },
+        },
+      }),
+    }, env);
+    assert.equal(res.status, 200);
+    // Both the dispatch and the ack must have gone through the guarded fetch.
+    assert.ok(guard.calls.find((c) => c.url.endsWith("/dispatches")), "dispatch not called");
+    assert.ok(
+      guard.calls.find((c) => c.url.includes("/answerCallbackQuery")),
+      "answerCallbackQuery not called",
+    );
+  } finally {
+    guard.restore();
+  }
+});
+
+test("v0.7.2 regression: guard itself detects the pre-fix pattern (meta-test)", async () => {
+  // Sanity-check the guard: if someone does `obj.fetch(url)` with a non-global
+  // receiver, it throws. This test would FAIL if the guard were too lax and
+  // quietly masked the regression it is meant to catch.
+  const guard = installIllegalInvocationGuard(async () => new Response("{}", { status: 200 }));
+  try {
+    const obj = { fetch: globalThis.fetch };
+    let caught = null;
+    try {
+      await obj.fetch("https://example.com");
+    } catch (e) {
+      caught = e;
+    }
+    assert.ok(caught, "guard failed to detect bad-this invocation");
+    assert.match(caught.message, /Illegal invocation/);
+  } finally {
+    guard.restore();
+  }
+});

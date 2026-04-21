@@ -2,6 +2,27 @@
 
 ## Unreleased
 
+### Fixed
+- **Telegram webhook Illegal-invocation + autofix exit-code handling (v0.7.2).**
+  Two P0 bugs caught via live dogfood on `seunghunbae-3svs/eventbadge#21`.
+  (1) `apps/central-plane` `/telegram/webhook` crashed on every inbound
+  update with `TypeError: Illegal invocation: function called with
+  incorrect 'this' reference`. Root cause: `TelegramClient` stored
+  global `fetch` on `this.fetchImpl` and called it via `this.fetchImpl(...)`
+  — Cloudflare Workers rejects native-method invocations where
+  `this !== globalThis`. Fix: bind the default to `globalThis` at store
+  time and pull the impl into a local before call. (2) `conclave autofix`
+  treated `conclave review`'s non-zero exit as a crash. `conclave review`
+  uses 0=approve/1=rework/2=reject — all three carry a valid verdict JSON
+  on stdout. `defaultSpawnReview` now returns `{code:0|1|2, stdout}`
+  instead of throwing; only exit ≥ 3 (or no exit at all) re-throws.
+  Autofix also now refuses to fix a reject verdict (prints a clear
+  message + exits 1). 11 new regression tests (3 central-plane, 8 cli);
+  total 76 + 255 = 331 tests, 0 failing. Bumps
+  `@conclave-ai/central-plane` 0.6.1 → 0.7.1 (first bump since v0.6.1
+  — Bae needs to `corepack pnpm ship` post-merge to deploy) and
+  `@conclave-ai/cli` 0.7.1 → 0.7.2. See `docs/releases/v0.7.2.md`.
+
 ### Added
 - **`conclave review --json` + `conclave autofix` auto-spawn (v0.7.1).**
   `conclave autofix --pr N` now works with ONLY `ANTHROPIC_API_KEY` set

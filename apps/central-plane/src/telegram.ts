@@ -11,7 +11,15 @@ export class TelegramClient {
   constructor(opts: { token: string; fetch?: FetchLike }) {
     if (!opts.token) throw new Error("TelegramClient: token required");
     this.token = opts.token;
-    this.fetchImpl = opts.fetch ?? fetch;
+    // v0.7.2 fix: native `fetch` on Cloudflare Workers throws
+    // "Illegal invocation: function called with incorrect `this` reference"
+    // when called as `this.fetchImpl(...)` — the Workers runtime requires
+    // `this` === globalThis for platform-native methods. Storing the
+    // global directly (without binding) on an instance field and then
+    // invoking `this.fetchImpl(url, init)` sets `this` to the instance.
+    // Bind the default fall-through to globalThis; leave injected
+    // fetchImpls (tests) as-is since those are plain functions.
+    this.fetchImpl = opts.fetch ?? fetch.bind(globalThis);
   }
 
   private url(method: string): string {
@@ -35,7 +43,11 @@ export class TelegramClient {
     if (opts.parseMode) body.parse_mode = opts.parseMode;
     if (opts.replyToMessageId) body.reply_to_message_id = opts.replyToMessageId;
     if (opts.replyMarkup) body.reply_markup = opts.replyMarkup;
-    const resp = await this.fetchImpl(this.url("sendMessage"), {
+    // Use a local binding (not `this.fetchImpl(...)`) so `this` is
+    // undefined at call time — avoids the Workers "Illegal invocation"
+    // error even if the caller passes an unbound native fetch.
+    const fetchImpl = this.fetchImpl;
+    const resp = await fetchImpl(this.url("sendMessage"), {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify(body),
@@ -49,7 +61,8 @@ export class TelegramClient {
     const body: Record<string, unknown> = { callback_query_id: opts.id };
     if (opts.text !== undefined) body.text = opts.text;
     if (opts.showAlert !== undefined) body.show_alert = opts.showAlert;
-    const resp = await this.fetchImpl(this.url("answerCallbackQuery"), {
+    const fetchImpl = this.fetchImpl;
+    const resp = await fetchImpl(this.url("answerCallbackQuery"), {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify(body),
