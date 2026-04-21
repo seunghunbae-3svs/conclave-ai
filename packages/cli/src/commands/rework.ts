@@ -19,6 +19,7 @@ import { ClaudeWorker, type ClaudeWorkerOptions, type FileSnapshot, type WorkerO
 import { fetchPrState, type GhRunner, type PullRequestState } from "@conclave-ai/scm-github";
 import { formatFinding, scanPatch, type ScanResult } from "@conclave-ai/secret-guard";
 import { loadConfig, resolveMemoryRoot, type ConclaveConfig } from "../lib/config.js";
+import { resolveKey } from "../lib/credentials.js";
 
 const execFile = promisify(execFileCallback);
 
@@ -396,10 +397,11 @@ function buildWorker(deps: ReworkDeps, config: ConclaveConfig): { work: (ctx: Pa
     budget: new BudgetTracker({ perPrUsd }),
     metrics: new MetricsRecorder(),
   });
-  const apiKey = process.env["ANTHROPIC_API_KEY"];
+  // v0.7.4 — env first, then stored credentials via `conclave config`.
+  const apiKey = resolveKey("anthropic");
   if (!apiKey) {
     throw new Error(
-      "rework: ANTHROPIC_API_KEY is not set (the worker agent needs it; pass --dry-run only after setting the key)",
+      "rework: anthropic key not set — run `conclave config` once, or export ANTHROPIC_API_KEY in CI.",
     );
   }
   const factory = deps.workerFactory ?? ((opts: ClaudeWorkerOptions) => new ClaudeWorker(opts));

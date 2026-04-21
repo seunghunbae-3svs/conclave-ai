@@ -10,6 +10,7 @@
  *     build its own without a core change.
  */
 import type { PlainSummaryLlm } from "@conclave-ai/core";
+import { resolveKey } from "./credentials.js";
 
 const DEFAULT_MODEL = "claude-haiku-4-5";
 const DEFAULT_MAX_TOKENS = 512;
@@ -53,10 +54,11 @@ export class ClaudeHaikuPlainSummaryLlm implements PlainSummaryLlm {
   private clientPromise: Promise<AnthropicLike> | null;
 
   constructor(opts: ClaudeHaikuPlainSummaryLlmOptions = {}) {
-    const key = opts.apiKey ?? process.env["ANTHROPIC_API_KEY"] ?? "";
+    // v0.7.4 — resolveKey honors env first, then stored credentials.
+    const key = opts.apiKey ?? resolveKey("anthropic") ?? "";
     if (!key && !opts.client) {
       throw new Error(
-        "ClaudeHaikuPlainSummaryLlm: ANTHROPIC_API_KEY not set (pass opts.apiKey or opts.client)",
+        "ClaudeHaikuPlainSummaryLlm: anthropic key not set (run `conclave config` or pass opts.apiKey)",
       );
     }
     this.apiKey = key;

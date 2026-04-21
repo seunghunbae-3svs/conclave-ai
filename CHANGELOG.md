@@ -2,6 +2,31 @@
 
 ## Unreleased
 
+### Added
+- **`conclave config` — persistent per-user credential storage (v0.7.4).**
+  Eliminates the daily API-key-paste friction in fresh shells. One-time
+  `conclave config` writes keys to `%USERPROFILE%\.conclave\
+  credentials.json` (Windows, ACL-restricted to the current user via
+  `icacls`) or `~/.config/conclave/credentials.json` (Unix, chmod 0600).
+  Subcommands: `set` (programmatic, accepts stdin via `-`), `get`
+  (masked by default, `--show-raw` for the full value), `list`
+  (length + last-4 chars, never full secret), `unset`, `path`,
+  `migrate` (imports current env-var values into storage). Resolution
+  order: **env var first** (CI unchanged), stored fallback, then nothing
+  (agent skipped). CLI entry-point hydrates `process.env` from storage
+  for any env var that isn't already set, so subprocess spawns
+  (`autofix` → `review --json`) and packages that read
+  `process.env` directly (`integration-telegram` CONCLAVE_TOKEN) pick
+  up stored values without per-package changes. All CLI call sites
+  (`review.ts` / `audit.ts` / `autofix.ts` / `rework.ts` /
+  `plain-summary-llm.ts`) migrated to `resolveKey()`. Supported keys:
+  `anthropic`, `openai`, `gemini` (accepts `GOOGLE_API_KEY` alias),
+  `conclave-token`, `xai`. No encryption at rest in v0.7.4 (file-mode
+  0600 / Windows ACL); master-password + OS Keychain integration
+  tracked for v0.8+. 33 new CLI tests; total 309 cli tests,
+  all 47 turbo tasks green. Bumps `@conclave-ai/cli` 0.7.3 → 0.7.4.
+  See `docs/releases/v0.7.4.md`.
+
 ### Fixed
 - **Telegram webhook Illegal-invocation + autofix exit-code handling (v0.7.2).**
   Two P0 bugs caught via live dogfood on `seunghunbae-3svs/eventbadge#21`.

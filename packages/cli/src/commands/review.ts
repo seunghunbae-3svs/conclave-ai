@@ -48,6 +48,7 @@ import {
 import { ClaudeHaikuPlainSummaryLlm } from "../lib/plain-summary-llm.js";
 import { resolveTierIds } from "../lib/tier-resolver.js";
 import { buildReviewJson, serializeReviewJson } from "../lib/review-json-output.js";
+import { resolveKey } from "../lib/credentials.js";
 
 type ReviewDomainInput = "code" | "design";
 interface ReviewArgs {
@@ -267,31 +268,38 @@ export async function review(argv: string[]): Promise<void> {
 
   function buildAgent(id: string, modelOverride?: string): Agent | null {
     const modelOpt = modelOverride ? { model: modelOverride } : {};
+    // v0.7.4 — credentials resolve from env FIRST, then the stored file
+    // (~/.config/conclave/credentials.json). One-time `conclave config`
+    // populates storage; subsequent runs + subprocess spawns pick it up
+    // without the parent shell setting any env var.
     if (id === "claude") {
-      if (!process.env["ANTHROPIC_API_KEY"]) return null;
-      return new ClaudeAgent({ gate, ...modelOpt });
+      const key = resolveKey("anthropic");
+      if (!key) return null;
+      return new ClaudeAgent({ apiKey: key, gate, ...modelOpt });
     }
     if (id === "design") {
-      if (!process.env["ANTHROPIC_API_KEY"]) {
-        process.stderr.write("conclave review: ANTHROPIC_API_KEY not set — skipping Design agent\n");
+      const key = resolveKey("anthropic");
+      if (!key) {
+        process.stderr.write("conclave review: anthropic key not set (env or `conclave config`) — skipping Design agent\n");
         return null;
       }
-      return new DesignAgent({ gate, ...modelOpt });
+      return new DesignAgent({ apiKey: key, gate, ...modelOpt });
     }
     if (id === "openai") {
-      if (!process.env["OPENAI_API_KEY"]) {
-        process.stderr.write("conclave review: OPENAI_API_KEY not set — skipping OpenAI agent\n");
+      const key = resolveKey("openai");
+      if (!key) {
+        process.stderr.write("conclave review: openai key not set (env or `conclave config`) — skipping OpenAI agent\n");
         return null;
       }
-      return new OpenAIAgent({ gate, ...modelOpt });
+      return new OpenAIAgent({ apiKey: key, gate, ...modelOpt });
     }
     if (id === "gemini") {
-      const hasKey = !!(process.env["GOOGLE_API_KEY"] || process.env["GEMINI_API_KEY"]);
-      if (!hasKey) {
-        process.stderr.write("conclave review: GOOGLE_API_KEY / GEMINI_API_KEY not set — skipping Gemini agent\n");
+      const key = resolveKey("gemini");
+      if (!key) {
+        process.stderr.write("conclave review: gemini key not set (env or `conclave config`) — skipping Gemini agent\n");
         return null;
       }
-      return new GeminiAgent({ gate, ...modelOpt });
+      return new GeminiAgent({ apiKey: key, gate, ...modelOpt });
     }
     if (id === "ollama") {
       // Ollama has no API key; we assume the daemon is running at
@@ -299,11 +307,12 @@ export async function review(argv: string[]): Promise<void> {
       return new OllamaAgent({ gate, ...modelOpt });
     }
     if (id === "grok") {
-      if (!process.env["XAI_API_KEY"]) {
-        process.stderr.write("conclave review: XAI_API_KEY not set — skipping Grok agent\n");
+      const key = resolveKey("xai");
+      if (!key) {
+        process.stderr.write("conclave review: xai key not set (env or `conclave config`) — skipping Grok agent\n");
         return null;
       }
-      return new GrokAgent({ gate, ...modelOpt });
+      return new GrokAgent({ apiKey: key, gate, ...modelOpt });
     }
     return null;
   }
