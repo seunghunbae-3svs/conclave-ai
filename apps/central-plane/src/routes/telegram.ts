@@ -18,8 +18,14 @@ import {
 
 /**
  * Factory — injects fetch for tests. Production passes globalThis.fetch.
+ * v0.7.3 — default now binds globalThis to avoid the "Illegal
+ * invocation" fault when downstream code calls the unbound native
+ * fetch (see router.ts for the top-level binding, this is a
+ * defence-in-depth layer).
  */
-export function createTelegramRoutes(fetchImpl: FetchLike = fetch): Hono<{ Bindings: Env }> {
+export function createTelegramRoutes(
+  fetchImpl: FetchLike = fetch.bind(globalThis) as FetchLike,
+): Hono<{ Bindings: Env }> {
   const app = new Hono<{ Bindings: Env }>();
 
   app.post("/telegram/webhook", async (c) => {

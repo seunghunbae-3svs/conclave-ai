@@ -33,6 +33,7 @@ import { formatFinding, scanPatch, type ScanResult } from "@conclave-ai/secret-g
 import { fetchPrState, type GhRunner, type PullRequestState } from "@conclave-ai/scm-github";
 import { loadConfig, resolveMemoryRoot, type ConclaveConfig } from "../lib/config.js";
 import { runPerBlocker, type GitLike, type WorkerLike } from "../lib/autofix-worker.js";
+import { runSpecialHandlers } from "../lib/autofix-handlers/index.js";
 import {
   detectCommand,
   runCommand,
@@ -609,12 +610,36 @@ export async function runAutofix(args: AutofixArgs, deps: AutofixDeps = {}): Pro
     }
 
     // --- Per-blocker worker invocations ---------------------------------
+    // v0.7.3 — SPECIAL-HANDLER layer runs FIRST. If a handler claims
+    //     the blocker, we skip the worker call + git-apply pipeline.
+    //     Handler-applied fixes are already staged on disk (e.g. the
+    //     binary-encoding handler re-writes the file and `git add`s
+    //     it) — they're tracked in `handlerStagedFixes` so the
+    //     apply-sequentially loop below can skip them.
+    const handlerStagedFixes = new Set<BlockerFix>();
     for (const t of targets) {
       // Budget early-exit — never burn past the cap.
       if (totalCost >= args.budgetUsd) {
         stdout(`autofix: budget ($${args.budgetUsd}) hit mid-iteration — finishing early\n`);
         break;
       }
+      // Try the special-handlers first. These handle blockers the
+      // unified-diff pipeline can't (binary files, etc.) and count as
+      // successfully-applied fixes when they succeed.
+      const handled = await runSpecialHandlers(t.agent, t.blocker, {
+        cwd: args.cwd,
+        git,
+        log: (m) => stdout(m),
+      });
+      if (handled.claimed && handled.fix) {
+        fixes.push(handled.fix);
+        if (handled.fix.status === "ready") {
+          handlerStagedFixes.add(handled.fix);
+        }
+        totalCost += handled.fix.costUsd ?? 0;
+        continue;
+      }
+
       let bfix: BlockerFix;
       try {
         bfix = await breaker.guard("worker", () =>
@@ -665,6 +690,11 @@ export async function runAutofix(args: AutofixArgs, deps: AutofixDeps = {}): Pro
     // --- Secret-guard + file-deny already applied per-patch. Now run
     //     one final secret scan across ALL ready patches for belt-and-
     //     suspenders (a multi-patch combo could sneak through).
+    //     v0.7.3 — handler-staged fixes (`ready` + no `patch`) are
+    //     already applied in-place on disk, so they're NOT scanned
+    //     here. They bypass the unified-diff secret scan because
+    //     the only handler today (binary-encoding) only re-encodes
+    //     existing file bytes; no new content is introduced.
     const readyFixes = fixes.filter((f) => f.status === "ready" && f.patch);
     if (!args.skipSecretGuard) {
       const scanner = deps.secretScan ?? scanPatch;
@@ -677,6 +707,13 @@ export async function runAutofix(args: AutofixArgs, deps: AutofixDeps = {}): Pro
       }
     }
     const stillReady = fixes.filter((f) => f.status === "ready" && f.patch);
+    // v0.7.3 — handler-staged ready fixes count toward "something got
+    // applied" but have no patch to feed `git apply`. Tracked
+    // separately so the diff-budget, dry-run, and apply loops can
+    // skip them.
+    const stillReadyHandlerStaged = fixes.filter(
+      (f) => f.status === "ready" && !f.patch && handlerStagedFixes.has(f),
+    );
 
     // --- Diff-budget guard ---------------------------------------------
     const patches = stillReady.map((f) => f.patch!);
@@ -702,9 +739,27 @@ export async function runAutofix(args: AutofixArgs, deps: AutofixDeps = {}): Pro
 
     // --- Dry-run: print + exit -----------------------------------------
     if (args.dryRun) {
-      stdout(`autofix[dry-run]: ${stillReady.length} patches would apply (${summary.totalLines} lines, ${summary.totalFiles} files)\n`);
+      // v0.7.3 — dry-run MUST NOT leave handler-staged edits on disk
+      // (binary-encoding handler re-wrote files already). Undo them.
+      for (const hf of stillReadyHandlerStaged) {
+        for (const f of hf.appliedFiles ?? []) {
+          await git("git", ["checkout", "--", f], { cwd: args.cwd }).catch(() => undefined);
+        }
+      }
+      stdout(
+        `autofix[dry-run]: ${stillReady.length} patches would apply (${summary.totalLines} lines, ${summary.totalFiles} files)` +
+          (stillReadyHandlerStaged.length > 0
+            ? ` + ${stillReadyHandlerStaged.length} handler-staged fixes (rolled back for dry-run)`
+            : "") +
+          `\n`,
+      );
       for (const rf of stillReady) {
         stdout(`--- ${rf.blocker.file ?? "(unscoped)"} — ${rf.blocker.category} ---\n${rf.patch}\n`);
+      }
+      for (const hf of stillReadyHandlerStaged) {
+        stdout(
+          `--- ${hf.blocker.file ?? "(unscoped)"} — ${hf.blocker.category} [handler] ---\n${hf.commitMessage ?? "(handler-applied)"}\n`,
+        );
       }
       const nonReady = fixes.filter((f) => f.status !== "ready");
       for (const nr of nonReady) {
@@ -724,7 +779,7 @@ export async function runAutofix(args: AutofixArgs, deps: AutofixDeps = {}): Pro
       };
     }
 
-    if (stillReady.length === 0) {
+    if (stillReady.length === 0 && stillReadyHandlerStaged.length === 0) {
       stderr(`autofix: no applicable patches this iteration (all blockers skipped/conflict) — stopping\n`);
       iterations.push(finalizeIteration(i, fixes, false, ["no-ready-patches"]));
       return {
@@ -857,10 +912,15 @@ export async function runAutofix(args: AutofixArgs, deps: AutofixDeps = {}): Pro
     // --- Commit ---------------------------------------------------------
     //     Everything passed — stage + commit one consolidated commit per
     //     iteration. The summary line comes from the first fix's
-    //     commitMessage or a generic fallback.
+    //     commitMessage or a generic fallback. v0.7.3 — handler-staged
+    //     fixes count toward the commit body/tally alongside patch fixes.
     await git("git", ["add", "-A"], { cwd: args.cwd });
-    const title = stillReady[0]?.commitMessage ?? `autofix: ${stillReady.length} blockers (conclave-ai)`;
-    const body = stillReady.map((f) => `- [${f.blocker.severity}/${f.blocker.category}] ${f.blocker.message}`).join("\n");
+    const committedFixes = [...stillReady, ...stillReadyHandlerStaged];
+    const title =
+      committedFixes[0]?.commitMessage ?? `autofix: ${committedFixes.length} blockers (conclave-ai)`;
+    const body = committedFixes
+      .map((f) => `- [${f.blocker.severity}/${f.blocker.category}] ${f.blocker.message}`)
+      .join("\n");
     const fullMsg = `${title} (conclave-ai)\n\n${body}`;
     await git(
       "git",
@@ -882,12 +942,23 @@ export async function runAutofix(args: AutofixArgs, deps: AutofixDeps = {}): Pro
     });
 
     iterations.push(
-      finalizeIteration(i, fixes, true, [`committed:${stillReady.length}`], {
-        buildOk,
-        testsOk,
-        ...(buildResult?.command ? { buildCommand: buildResult.command } : {}),
-        ...(testResult?.command ? { testCommand: testResult.command } : {}),
-      }),
+      finalizeIteration(
+        i,
+        fixes,
+        true,
+        [
+          `committed:${committedFixes.length}`,
+          ...(stillReadyHandlerStaged.length > 0
+            ? [`handler-staged:${stillReadyHandlerStaged.length}`]
+            : []),
+        ],
+        {
+          buildOk,
+          testsOk,
+          ...(buildResult?.command ? { buildCommand: buildResult.command } : {}),
+          ...(testResult?.command ? { testCommand: testResult.command } : {}),
+        },
+      ),
     );
 
     // --- Meta-review ----------------------------------------------------
