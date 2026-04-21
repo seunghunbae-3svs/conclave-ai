@@ -6,10 +6,12 @@ import {
   REVIEW_TOOL_INPUT_SCHEMA,
   SYSTEM_PROMPT,
   TEXT_UI_SYSTEM_PROMPT,
+  AUDIT_SYSTEM_PROMPT,
   buildUserPrompt,
   buildTextUIPrompt,
+  buildAuditPrompt,
 } from "./prompts.js";
-import { diffTouchesUi } from "./ui-globs.js";
+import { diffTouchesUi, isUiPath } from "./ui-globs.js";
 import { extractUiDiff, MAX_UI_DIFF_CHARS } from "./text-ui-extract.js";
 
 /**
@@ -132,6 +134,11 @@ export class DesignAgent implements Agent {
   }
 
   async review(ctx: ReviewContext): Promise<ReviewResult> {
+    // v0.6.0 — audit mode. Full file contents in `ctx.diff`, UI paths in
+    // `ctx.auditFiles`. If no UI files are in the batch, graceful approve.
+    if (ctx.mode === "audit") {
+      return this.reviewAudit(ctx);
+    }
     const artifacts = ctx.visualArtifacts ?? [];
     // Mode A — vision: screenshots present. Highest-signal mode; always
     // wins over Mode B when both are available.
@@ -152,6 +159,90 @@ export class DesignAgent implements Agent {
       summary:
         "skipped — no visual artifacts and no UI-relevant files in the diff. Design agent has nothing to review; approving by default.",
     };
+  }
+
+  /**
+   * v0.6.0 — audit mode. The batch's full file contents arrive in
+   * `ctx.diff` and the list of files in `ctx.auditFiles`. We filter down
+   * to UI-relevant files and, when there are any, run a design-focused
+   * audit prompt. When there are none, graceful approve.
+   */
+  private async reviewAudit(ctx: ReviewContext): Promise<ReviewResult> {
+    const files = (ctx.auditFiles ?? []).filter((p) => isUiPath(p));
+    if (files.length === 0) {
+      return {
+        agent: this.id,
+        verdict: "approve",
+        blockers: [],
+        summary:
+          "skipped — no UI-relevant files in this audit batch. Nothing to review from the design lens.",
+      };
+    }
+    const userText = buildAuditPrompt(ctx, ctx.diff, files);
+    const inputTokenEstimate =
+      estimateTokens(AUDIT_SYSTEM_PROMPT) + estimateTokens(userText);
+    const estimatedCostUsd =
+      (inputTokenEstimate * 15) / 1_000_000 + (this.maxTokens * 75) / 1_000_000;
+
+    const outcome = await this.gate.run<ReviewResult>(
+      {
+        agent: this.id,
+        cacheablePrefix: AUDIT_SYSTEM_PROMPT,
+        prompt: AUDIT_SYSTEM_PROMPT + "\n" + userText,
+        estimatedCostUsd,
+        forceModel: this.model,
+      },
+      async ({ model }) => {
+        const started = Date.now();
+        const client = await this.getClient();
+        const response = await client.messages.create({
+          model,
+          max_tokens: this.maxTokens,
+          system: [
+            { type: "text", text: AUDIT_SYSTEM_PROMPT, cache_control: { type: "ephemeral" } },
+          ],
+          messages: [
+            {
+              role: "user",
+              content: [
+                { type: "text", text: userText },
+                {
+                  type: "text",
+                  text: "Respond by calling submit_review exactly once.",
+                },
+              ],
+            },
+          ],
+          tools: [
+            {
+              name: REVIEW_TOOL_NAME,
+              description: REVIEW_TOOL_DESCRIPTION,
+              input_schema: REVIEW_TOOL_INPUT_SCHEMA,
+            },
+          ],
+          tool_choice: { type: "tool", name: REVIEW_TOOL_NAME },
+        });
+        const latencyMs = Date.now() - started;
+
+        const parsed = parseReviewResponse(response, this.id);
+        const usage = response.usage ?? { input_tokens: 0, output_tokens: 0 };
+        const costUsd = estimateActualCost(model, usage);
+
+        return {
+          result: {
+            ...parsed,
+            tokensUsed: usage.input_tokens + usage.output_tokens,
+            costUsd,
+          },
+          inputTokens: usage.input_tokens,
+          outputTokens: usage.output_tokens,
+          costUsd,
+          latencyMs,
+        };
+      },
+    );
+
+    return outcome.result;
   }
 
   /** Mode A — vision review. Original behavior, unchanged. */

@@ -8,11 +8,13 @@ export type {
 export {
   SYSTEM_PROMPT,
   TEXT_UI_SYSTEM_PROMPT,
+  AUDIT_SYSTEM_PROMPT,
   REVIEW_TOOL_NAME,
   REVIEW_TOOL_DESCRIPTION,
   REVIEW_TOOL_INPUT_SCHEMA,
   buildUserPrompt,
   buildTextUIPrompt,
+  buildAuditPrompt,
 } from "./prompts.js";
 export {
   UI_EXTENSIONS,

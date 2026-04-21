@@ -157,6 +157,18 @@ export const ConclaveConfigSchema = z.object({
       excludes: z.array(z.string()).optional(),
     })
     .optional(),
+  /**
+   * v0.6.0 — `conclave audit` defaults. Hard ceiling on `defaultBudgetUsd`
+   * is enforced at the CLI layer (HARD_BUDGET_CEILING_USD, $10) — this
+   * field is only the starting value when `--budget` is omitted.
+   */
+  audit: z
+    .object({
+      defaultBudgetUsd: z.number().positive().default(2),
+      defaultMaxFiles: z.number().int().positive().default(40),
+      defaultScope: z.enum(["all", "ui", "code", "infra", "docs"]).default("all"),
+    })
+    .optional(),
 });
 
 export type ConclaveConfig = z.infer<typeof ConclaveConfigSchema>;

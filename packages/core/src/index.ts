@@ -1,4 +1,4 @@
-export type { Agent, ReviewContext, ReviewResult, Blocker, Severity, PriorReview, ReviewDomain } from "./agent.js";
+export type { Agent, ReviewContext, ReviewResult, Blocker, Severity, PriorReview, ReviewDomain, ReviewMode } from "./agent.js";
 export { Council } from "./council.js";
 export type { CouncilOutcome, CouncilOptions, RoundOutcome } from "./council.js";
 export { TieredCouncil } from "./tiered-council.js";

@@ -1,5 +1,23 @@
 import type { ReviewContext } from "@conclave-ai/core";
 
+/**
+ * Audit-mode system prompt (v0.6.0). Full-project health check rather
+ * than a PR-diff review. See `agent-claude/src/prompts.ts` for the
+ * same rationale.
+ */
+export const AUDIT_SYSTEM_PROMPT = `You are a senior code auditor on a multi-agent council for Conclave AI. The council is auditing an already-shipped codebase — NOT a pull-request diff. Treat everything in the context as code that is live right now.
+
+Your goal: surface real issues a human should fix this week. You work alongside other agents (Claude, Gemini, possibly a design specialist); spurious findings dilute the signal and waste the user's budget.
+
+Rules:
+- Flag real problems: correctness, security, injection risk, regression risk, accessibility violations, missing input validation, dead code, design-token drift, performance cliffs on hot paths.
+- Do NOT pad with stylistic nits, import order, or taste-based naming suggestions.
+- Every blocker MUST name the file and (when you can tell) a line or line-range.
+- Severity — blocker = ships broken / unsafe; major = observable regression risk or clear a11y violation; minor = real issue but low blast radius; nit = polish.
+- Category — one of: security, a11y, correctness, regression, token-drift, dead-code, performance, test-coverage, docs.
+- When the file contents are short and clean, approve cleanly.
+- You MUST respond in the provided JSON schema. Any field marked nullable uses null when not applicable (do not omit it).`;
+
 export const SYSTEM_PROMPT = `You are a senior code reviewer on a multi-agent council for Conclave AI. The council reviews AI-generated code and design changes before merge.
 
 Your goal: catch real blockers, not style nits. You work alongside other agents (Claude, Gemini, possibly domain-specific specialists). Your reviews are weighed against theirs; spurious blockers hurt your agent score and waste the rework budget.
@@ -14,6 +32,7 @@ Rules:
 - You MUST respond in the provided JSON schema. Any field marked nullable uses null when not applicable (do not omit it).`;
 
 export function buildReviewPrompt(ctx: ReviewContext): string {
+  if (ctx.mode === "audit") return buildAuditPrompt(ctx);
   const sections: string[] = [];
   sections.push(`# Review target`);
   sections.push(`repo: ${ctx.repo}`);
@@ -85,8 +104,60 @@ export function buildReviewPrompt(ctx: ReviewContext): string {
   return sections.join("\n");
 }
 
+export function buildAuditPrompt(ctx: ReviewContext): string {
+  const sections: string[] = [];
+  sections.push(`# Audit target`);
+  sections.push(`repo: ${ctx.repo}`);
+  sections.push(`sha:  ${ctx.newSha}`);
+  if (ctx.auditFiles && ctx.auditFiles.length > 0) {
+    sections.push(`files in this batch (${ctx.auditFiles.length}): ${ctx.auditFiles.join(", ")}`);
+  }
+  sections.push("");
+
+  if (ctx.failureCatalog && ctx.failureCatalog.length > 0) {
+    sections.push(`# Known failure patterns (failure-catalog)`);
+    sections.push(
+      `These patterns caused real incidents in the past. Flag them aggressively if you see them in the files below.`,
+    );
+    sections.push("");
+    for (const entry of ctx.failureCatalog.slice(0, 8)) sections.push(`- ${entry}`);
+    sections.push("");
+  }
+
+  sections.push(`# Files (current state — already shipped)`);
+  sections.push("```");
+  sections.push(ctx.diff || "(empty — respond with verdict=approve and note the batch is empty)");
+  sections.push("```");
+  sections.push("");
+
+  if (ctx.priors && ctx.priors.length > 0) {
+    sections.push(`# Round ${ctx.round ?? 2} — other agents' audit findings from the previous round`);
+    sections.push(
+      `Read each agent's blockers. Update your verdict ONLY if you see a real issue you missed, or a false-positive you can now retract. Do not mirror the majority.`,
+    );
+    sections.push("");
+    for (const p of ctx.priors) {
+      sections.push(`## ${p.agent}: ${p.verdict}`);
+      if (p.blockers.length > 0) {
+        for (const b of p.blockers.slice(0, 5)) {
+          const loc = b.file ? ` (${b.file}${b.line ? ":" + b.line : ""})` : "";
+          sections.push(`- [${b.severity}/${b.category}] ${b.message}${loc}`);
+        }
+      } else {
+        sections.push(`- (no blockers)`);
+      }
+      sections.push("");
+    }
+  }
+
+  sections.push(
+    `Respond using the conclave_review JSON schema. Treat every file as already-shipped; do NOT assume there is a diff. Focus on blockers users should fix now.`,
+  );
+  return sections.join("\n");
+}
+
 export function buildCacheablePrefix(ctx: ReviewContext): string {
-  const parts: string[] = [SYSTEM_PROMPT];
+  const parts: string[] = [ctx.mode === "audit" ? AUDIT_SYSTEM_PROMPT : SYSTEM_PROMPT];
   if (ctx.answerKeys && ctx.answerKeys.length > 0) {
     parts.push("answer-keys:\n" + ctx.answerKeys.slice(0, 8).join("\n"));
   }
