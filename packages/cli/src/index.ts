@@ -3,6 +3,7 @@ import { review } from "./commands/review.js";
 import { audit } from "./commands/audit.js";
 import { recordOutcome } from "./commands/record-outcome.js";
 import { rework } from "./commands/rework.js";
+import { autofix } from "./commands/autofix.js";
 import { pollOutcomesCommand } from "./commands/poll-outcomes.js";
 import { seed } from "./commands/seed.js";
 import { migrate } from "./commands/migrate.js";
@@ -21,6 +22,7 @@ Commands:
   audit                 Full-project health check across the current codebase (v0.6+)
   review                Run a council review on the current branch
   rework                Apply a worker-generated patch for a pending council "rework" verdict
+  autofix               Autonomous fix loop — council verdict → patch → build → test → commit (v0.7)
   record-outcome        Record a PR's merge/reject/rework outcome manually
   poll-outcomes         Auto-classify pending reviews against live GitHub PR state
   seed                  Bootstrap failure-catalog from a legacy source (default: bundled solo-cto-agent)
@@ -69,6 +71,9 @@ export async function run(argv: string[]): Promise<void> {
       return;
     case "rework":
       await rework(rest);
+      return;
+    case "autofix":
+      await autofix(rest);
       return;
     case "record-outcome":
       await recordOutcome(rest);

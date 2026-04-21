@@ -12,6 +12,23 @@ export type { Platform, PreviewResolution, ResolvePreviewInput } from "./platfor
 export { computeAgentScore, computeAllAgentScores, AGENT_SCORE_WEIGHTS } from "./scoring.js";
 export type { AgentScore, AgentScoreComponents } from "./scoring.js";
 
+// Autofix (v0.7) — shared types for the autonomous fix loop. CLI lives
+// in @conclave-ai/cli; core only owns the data contracts so consumers
+// can render autofix verdicts without pulling the CLI dep graph.
+export {
+  isFileDenied,
+  summarizeAutofixPatches,
+  dedupeBlockersAcrossAgents,
+  DEFAULT_AUTOFIX_DENY_PATTERNS,
+} from "./autofix.js";
+export type {
+  BlockerFix,
+  BlockerFixStatus,
+  AutofixIteration,
+  AutofixResult,
+  AutofixResultStatus,
+} from "./autofix.js";
+
 // Plain-language summary (v0.6.1) — routes every council/audit output through
 // one cheap LLM call to produce jargon-free prose for non-dev stakeholders
 // on Telegram/Discord/Slack. See plain-summary.ts for the contract.
