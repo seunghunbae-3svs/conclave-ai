@@ -55,6 +55,7 @@ import {
 } from "../lib/audit-output.js";
 import { ClaudeHaikuPlainSummaryLlm } from "../lib/plain-summary-llm.js";
 import { renderPlainSummarySection } from "../lib/output.js";
+import { resolveKey } from "../lib/credentials.js";
 
 const execFile = promisify(execFileCb);
 
@@ -216,24 +217,28 @@ function buildAgentsForDomain(
   // coverage wins).
   const resolved: "code" | "design" | "mixed" = domain === "auto" ? "mixed" : domain;
 
+  // v0.7.4 — resolveKey checks env, then stored credentials (~/.config/
+  // conclave/credentials.json). After `conclave config` the file path is
+  // sufficient, so audit runs without the shell re-exporting keys.
   const addClaude = () => {
-    if (process.env["ANTHROPIC_API_KEY"]) agents.push(new ClaudeAgent({ gate }));
-    else skipped.push("claude (ANTHROPIC_API_KEY not set)");
+    const key = resolveKey("anthropic");
+    if (key) agents.push(new ClaudeAgent({ apiKey: key, gate }));
+    else skipped.push("claude (anthropic key not set — run `conclave config`)");
   };
   const addOpenAI = () => {
-    if (process.env["OPENAI_API_KEY"]) agents.push(new OpenAIAgent({ gate }));
-    else skipped.push("openai (OPENAI_API_KEY not set)");
+    const key = resolveKey("openai");
+    if (key) agents.push(new OpenAIAgent({ apiKey: key, gate }));
+    else skipped.push("openai (openai key not set — run `conclave config`)");
   };
   const addGemini = () => {
-    if (process.env["GOOGLE_API_KEY"] || process.env["GEMINI_API_KEY"]) {
-      agents.push(new GeminiAgent({ gate }));
-    } else {
-      skipped.push("gemini (GOOGLE_API_KEY not set)");
-    }
+    const key = resolveKey("gemini");
+    if (key) agents.push(new GeminiAgent({ apiKey: key, gate }));
+    else skipped.push("gemini (gemini key not set — run `conclave config`)");
   };
   const addDesign = () => {
-    if (process.env["ANTHROPIC_API_KEY"]) agents.push(new DesignAgent({ gate }));
-    else skipped.push("design (ANTHROPIC_API_KEY not set)");
+    const key = resolveKey("anthropic");
+    if (key) agents.push(new DesignAgent({ apiKey: key, gate }));
+    else skipped.push("design (anthropic key not set — run `conclave config`)");
   };
 
   if (resolved === "code") {

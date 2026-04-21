@@ -26,17 +26,49 @@ conclave --version
 
 ## 2. Set agent API keys
 
+**Recommended (v0.7.4+)** — run `conclave config` ONCE and never paste
+again. Keys are stored per-user in `%USERPROFILE%\.conclave\
+credentials.json` (Windows, ACL-restricted) or
+`~/.config/conclave/credentials.json` (Unix, chmod 600).
+
+```bash
+conclave config
+#   anthropic (ANTHROPIC_API_KEY) → <paste>
+#   openai (OPENAI_API_KEY)       → <paste>
+#   gemini (GEMINI_API_KEY)       → Enter to skip
+#   conclave-token (CONCLAVE_TOKEN) → <paste> (only if using central-plane Telegram)
+#   xai (XAI_API_KEY)             → Enter to skip
+```
+
+Subsequent `conclave` subcommands resolve keys from storage — no
+shell env-var dance, no retyping in new PowerShell / terminal
+sessions.
+
+If you prefer env vars (CI / CD, or you already have them set):
+
 | Agent | Env var |
 |---|---|
 | Claude | `ANTHROPIC_API_KEY` |
 | OpenAI | `OPENAI_API_KEY` |
-| Gemini | `GOOGLE_API_KEY` (or `GEMINI_API_KEY` as fallback) |
+| Gemini | `GEMINI_API_KEY` (or `GOOGLE_API_KEY`) |
+| Grok | `XAI_API_KEY` |
+| Central-plane Telegram | `CONCLAVE_TOKEN` |
 
 ```bash
 export ANTHROPIC_API_KEY=sk-ant-...
 # Optional:
 export OPENAI_API_KEY=sk-proj-...
-export GOOGLE_API_KEY=...
+export GEMINI_API_KEY=...
+```
+
+**Resolution order**: env var first, stored `credentials.json` as
+fallback, nothing (agent skipped) otherwise. CI workflows that export
+env vars from GitHub secrets keep working unchanged.
+
+Already have env vars set and want to move them into storage?
+
+```bash
+conclave config migrate
 ```
 
 ## 3. Initialize the target repo

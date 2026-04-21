@@ -34,6 +34,7 @@ import { fetchPrState, type GhRunner, type PullRequestState } from "@conclave-ai
 import { loadConfig, resolveMemoryRoot, type ConclaveConfig } from "../lib/config.js";
 import { runPerBlocker, type GitLike, type WorkerLike } from "../lib/autofix-worker.js";
 import { runSpecialHandlers } from "../lib/autofix-handlers/index.js";
+import { resolveKey } from "../lib/credentials.js";
 import {
   detectCommand,
   runCommand,
@@ -1102,9 +1103,14 @@ function buildWorker(deps: AutofixDeps, config: ConclaveConfig): WorkerLike {
     budget: new BudgetTracker({ perPrUsd }),
     metrics: new MetricsRecorder(),
   });
-  const apiKey = process.env["ANTHROPIC_API_KEY"];
+  // v0.7.4 — resolves from env, then stored credentials. Subprocess
+  // spawns of `conclave review` inherit this too, so the daily paste of
+  // $env:ANTHROPIC_API_KEY is gone once `conclave config` has been run.
+  const apiKey = resolveKey("anthropic");
   if (!apiKey) {
-    throw new Error("autofix: ANTHROPIC_API_KEY is not set (the worker agent needs it)");
+    throw new Error(
+      "autofix: anthropic key not set — run `conclave config` once, or export ANTHROPIC_API_KEY in CI.",
+    );
   }
   const factory = deps.workerFactory ?? ((opts: ClaudeWorkerOptions) => new ClaudeWorker(opts));
   return factory({ apiKey, gate });

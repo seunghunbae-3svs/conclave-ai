@@ -1,6 +1,7 @@
 import { init } from "./commands/init.js";
 import { review } from "./commands/review.js";
 import { audit } from "./commands/audit.js";
+import { config } from "./commands/config.js";
 import { recordOutcome } from "./commands/record-outcome.js";
 import { rework } from "./commands/rework.js";
 import { autofix } from "./commands/autofix.js";
@@ -11,6 +12,7 @@ import { scores } from "./commands/scores.js";
 import { sync } from "./commands/sync.js";
 import { mcpServer } from "./commands/mcp-server.js";
 import { CLI_VERSION } from "./version.js";
+import { hydrateEnvFromStorage } from "./lib/credentials.js";
 
 const HELP = `conclave — Conclave AI CLI
 
@@ -19,6 +21,7 @@ Usage:
 
 Commands:
   init                  Set up conclave in the current repo (config + skeleton)
+  config                Persistent per-user credential storage — set API keys once (v0.7.4)
   audit                 Full-project health check across the current codebase (v0.6+)
   review                Run a council review on the current branch
   rework                Apply a worker-generated patch for a pending council "rework" verdict
@@ -35,6 +38,8 @@ Commands:
 
 Examples:
   conclave init
+  conclave config                         # one-time interactive setup — stores API keys persistently (v0.7.4)
+  conclave config list                    # show which keys are set and where
   conclave audit                          # run right after init — full-project health check
   conclave audit --dry-run --scope ui     # preview which files would be audited
   conclave review --pr 42 --visual
@@ -59,9 +64,26 @@ export async function run(argv: string[]): Promise<void> {
     return;
   }
 
+  // v0.7.4 — hydrate process.env from stored credentials BEFORE any
+  // command runs so downstream packages that still read `process.env`
+  // directly (integration-telegram's CONCLAVE_TOKEN check, visual-review
+  // judge, etc.) see the stored value. Env vars always win — this only
+  // fills blanks. `config` commands skip hydration so `list` / `get`
+  // can tell apart env-vs-stored precedence honestly.
+  if (cmd !== "config") {
+    try {
+      hydrateEnvFromStorage();
+    } catch {
+      // Never block a command start on credential-file issues.
+    }
+  }
+
   switch (cmd) {
     case "init":
       await init(rest);
+      return;
+    case "config":
+      await config(rest);
       return;
     case "audit":
       await audit(rest);
