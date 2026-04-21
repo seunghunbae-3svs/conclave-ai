@@ -175,14 +175,6 @@ export const ConclaveConfigSchema = z.object({
    * output into 3 jargon-free paragraphs. The summary is routed to
    * non-dev surfaces (Telegram first) while the technical verdict stays
    * on GitHub for devs.
-   *
-   *   enabled     — master switch (default true)
-   *   locale      — "en" or "ko" (default "en"); KO uses 평어 (반말),
-   *                 not 존댓말, to match Bae's preferred voice
-   *   deliveries  — where to surface the summary. "telegram" swaps the
-   *                 bot message body to plain prose. "pr-comment"
-   *                 appends a "### Plain summary" section to the PR
-   *                 comment / audit issue body. Default both.
    */
   output: z
     .object({
@@ -195,6 +187,19 @@ export const ConclaveConfigSchema = z.object({
             .default(["telegram", "pr-comment"]),
         })
         .optional(),
+    })
+    .optional(),
+  /**
+   * v0.6.4 — project + design context auto-injection. Controls the
+   * bounded slice of README / `.conclave/project-context.md` / design
+   * reference images that the CLI passes into every review + audit.
+   */
+  context: z
+    .object({
+      readmeMaxChars: z.number().int().positive().default(500),
+      maxDesignReferences: z.number().int().nonnegative().default(4),
+      maxDesignImageBytes: z.number().int().positive().default(512_000),
+      includeDesignReferences: z.boolean().default(true),
     })
     .optional(),
 });

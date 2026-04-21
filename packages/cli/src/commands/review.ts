@@ -36,6 +36,7 @@ import { EmailNotifier } from "@conclave-ai/integration-email";
 import type { Notifier } from "@conclave-ai/core";
 import { fetchDeployStatus } from "@conclave-ai/scm-github";
 import { loadConfig, resolveMemoryRoot } from "../lib/config.js";
+import { loadProjectContext, loadDesignContext } from "../lib/project-context.js";
 import { loadPrDiff, loadGitDiff, loadFileDiff, type LoadedDiff } from "../lib/diff-source.js";
 import { renderPlainSummarySection, renderReview, verdictToExitCode } from "../lib/output.js";
 import { buildPlatforms, type PlatformId } from "../lib/platform-factory.js";
@@ -132,6 +133,13 @@ export async function review(argv: string[]): Promise<void> {
   }
   const { config, configDir } = await loadConfig();
   const memoryRoot = resolveMemoryRoot(config, configDir);
+  // v0.6.4 — load project + design context from the repo root (configDir
+  // is the directory holding .conclaverc.json; it's where users drop
+  // `.conclave/project-context.md` etc.). Silent-skip when absent.
+  const ctxCfg = config.context;
+  const projectCtxLoaded = await loadProjectContext(configDir, {
+    ...(ctxCfg?.readmeMaxChars ? { readmeMaxChars: ctxCfg.readmeMaxChars } : {}),
+  });
 
   // 1. Load diff
   let loaded: LoadedDiff;
@@ -383,6 +391,21 @@ export async function review(argv: string[]): Promise<void> {
   if (deployStatus !== "unknown") {
     process.stdout.write(`  deploy: ${deployStatus}\n`);
   }
+  // v0.6.4 — design-context + brand reference PNGs load only when the
+  // resolved domain is design or mixed. Code-only runs skip the design
+  // load entirely (avoids an unused disk scan on non-UI PRs).
+  const designCtxLoaded =
+    resolvedDomain === "design" || resolvedDomain === "mixed"
+      ? await loadDesignContext(configDir, {
+          ...(ctxCfg?.maxDesignReferences !== undefined
+            ? { maxReferences: ctxCfg.maxDesignReferences }
+            : {}),
+          ...(ctxCfg?.maxDesignImageBytes !== undefined
+            ? { maxImageBytes: ctxCfg.maxDesignImageBytes }
+            : {}),
+        })
+      : {};
+
   const reviewCtx: ReviewContext = {
     diff: loaded.diff,
     repo: loaded.repo,
@@ -394,6 +417,20 @@ export async function review(argv: string[]): Promise<void> {
     deployStatus,
   };
   if (loaded.prevSha) reviewCtx.prevSha = loaded.prevSha;
+  if (projectCtxLoaded.projectContext) {
+    reviewCtx.projectContext = projectCtxLoaded.projectContext;
+  }
+  if (designCtxLoaded.designContext) {
+    reviewCtx.designContext = designCtxLoaded.designContext;
+  }
+  // includeDesignReferences defaults to true; honor it when present.
+  if (
+    designCtxLoaded.designReferences &&
+    designCtxLoaded.designReferences.length > 0 &&
+    (ctxCfg?.includeDesignReferences ?? true)
+  ) {
+    reviewCtx.designReferences = designCtxLoaded.designReferences;
+  }
 
   const outcome = await council.deliberate(reviewCtx);
 

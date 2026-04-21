@@ -40,6 +40,13 @@ export function buildReviewPrompt(ctx: ReviewContext): string {
   sections.push(`sha: ${ctx.newSha}${ctx.prevSha ? ` (from ${ctx.prevSha})` : ""}`);
   sections.push("");
 
+  // v0.6.4 — project context first; repo purpose grounds the review.
+  if (ctx.projectContext) {
+    sections.push(`# Project context`);
+    sections.push(ctx.projectContext);
+    sections.push("");
+  }
+
   if (ctx.deployStatus && ctx.deployStatus !== "unknown") {
     sections.push(`# Deploy status`);
     if (ctx.deployStatus === "failure") {
@@ -113,6 +120,13 @@ export function buildAuditPrompt(ctx: ReviewContext): string {
     sections.push(`files in this batch (${ctx.auditFiles.length}): ${ctx.auditFiles.join(", ")}`);
   }
   sections.push("");
+
+  // v0.6.4 — project context frames the audit against repo intent.
+  if (ctx.projectContext) {
+    sections.push(`# Project context`);
+    sections.push(ctx.projectContext);
+    sections.push("");
+  }
 
   if (ctx.failureCatalog && ctx.failureCatalog.length > 0) {
     sections.push(`# Known failure patterns (failure-catalog)`);

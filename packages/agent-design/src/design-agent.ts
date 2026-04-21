@@ -245,20 +245,26 @@ export class DesignAgent implements Agent {
     return outcome.result;
   }
 
-  /** Mode A — vision review. Original behavior, unchanged. */
+  /**
+   * Mode A — vision review. v0.6.4 adds optional brand-reference images
+   * (ctx.designReferences) rendered ahead of the PR before/after pairs
+   * so the model sees "what this brand looks like when it's right"
+   * before judging the diff.
+   */
   private async reviewVision(
     ctx: ReviewContext,
     artifacts: NonNullable<ReviewContext["visualArtifacts"]>,
   ): Promise<ReviewResult> {
     const routes = artifacts.map((a) => a.route);
     const userText = buildUserPrompt(ctx, routes);
+    const designRefs = ctx.designReferences ?? [];
     // Rough token estimate for budget reservation. Images cost ~1.5k tokens
     // each for Anthropic vision; we over-estimate to stay safe.
     const perImageTokens = 1_500;
     const inputTokenEstimate =
       estimateTokens(SYSTEM_PROMPT) +
       estimateTokens(userText) +
-      artifacts.length * 2 * perImageTokens;
+      (artifacts.length * 2 + designRefs.length) * perImageTokens;
     // Rough pre-flight cost. EfficiencyGate only uses this to reserve
     // against the per-PR budget; it does not gate on the exact number.
     // We pick a conservative USD/1M-input-tokens figure for Opus vision.
@@ -275,7 +281,7 @@ export class DesignAgent implements Agent {
       async ({ model }) => {
         const started = Date.now();
         const client = await this.getClient();
-        const content = buildVisionContent(userText, artifacts);
+        const content = buildVisionContent(userText, artifacts, designRefs);
         const response = await client.messages.create({
           model,
           max_tokens: this.maxTokens,
@@ -323,9 +329,14 @@ export class DesignAgent implements Agent {
    */
   private async reviewTextUI(ctx: ReviewContext): Promise<ReviewResult> {
     const extracted = extractUiDiff(ctx.diff, MAX_UI_DIFF_CHARS);
-    const userText = buildTextUIPrompt(ctx, extracted.text, extracted.files, {
-      truncated: extracted.truncated,
-    });
+    const textUIOpts: {
+      truncated?: boolean;
+      projectContext?: string;
+      designContext?: string;
+    } = { truncated: extracted.truncated };
+    if (ctx.projectContext) textUIOpts.projectContext = ctx.projectContext;
+    if (ctx.designContext) textUIOpts.designContext = ctx.designContext;
+    const userText = buildTextUIPrompt(ctx, extracted.text, extracted.files, textUIOpts);
     const inputTokenEstimate =
       estimateTokens(TEXT_UI_SYSTEM_PROMPT) + estimateTokens(userText);
     const estimatedCostUsd =
@@ -402,6 +413,7 @@ export class DesignAgent implements Agent {
 function buildVisionContent(
   userText: string,
   artifacts: ReadonlyArray<{ before: Buffer | string; after: Buffer | string; route: string }>,
+  designReferences: ReadonlyArray<{ filename: string; bytes: Buffer | Uint8Array }> = [],
 ): Array<
   | { type: "text"; text: string }
   | { type: "image"; source: { type: "base64"; media_type: "image/png"; data: string } }
@@ -410,6 +422,27 @@ function buildVisionContent(
     | { type: "text"; text: string }
     | { type: "image"; source: { type: "base64"; media_type: "image/png"; data: string } }
   > = [{ type: "text", text: userText }];
+  // v0.6.4 — brand reference images come FIRST so the model sees what
+  // "good" looks like before it judges the PR's before/after pair. Each
+  // gets an explicit "Brand reference" label so ordering can't be
+  // confused with visualArtifacts.
+  if (designReferences.length > 0) {
+    blocks.push({
+      type: "text",
+      text: `--- Brand reference images (use these as the visual target for this product's brand) ---`,
+    });
+    for (const ref of designReferences) {
+      blocks.push({ type: "text", text: `--- Brand reference: ${ref.filename} ---` });
+      blocks.push({
+        type: "image",
+        source: { type: "base64", media_type: "image/png", data: toBase64(ref.bytes) },
+      });
+    }
+    blocks.push({
+      type: "text",
+      text: `--- End brand references. PR-specific before/after pairs follow. ---`,
+    });
+  }
   for (const art of artifacts) {
     blocks.push({ type: "text", text: `--- Route: ${art.route} — BEFORE ---` });
     blocks.push({
@@ -429,7 +462,7 @@ function buildVisionContent(
   return blocks;
 }
 
-function toBase64(input: Buffer | string): string {
+function toBase64(input: Buffer | Uint8Array | string): string {
   if (typeof input === "string") {
     // Treat the string as already-base64. Stripping whitespace/newlines
     // guards against accidental pretty-printing.
