@@ -3,6 +3,31 @@
 ## Unreleased
 
 ### Added
+- **`conclave review --json` + `conclave autofix` auto-spawn (v0.7.1).**
+  `conclave autofix --pr N` now works with ONLY `ANTHROPIC_API_KEY` set
+  — no more hand-crafted verdict JSON file. When `--verdict` is
+  omitted, autofix spawns `conclave review --pr N --json` as a
+  subprocess, parses its structured JSON stdout, and feeds the verdict
+  into the existing fix loop. Closes the v0.7.0 dogfood gap on
+  `seunghunbae-3svs/eventbadge#21`, where hand-crafting verdict JSON
+  on PowerShell hit UTF-16 BOM issues on temp files. Three
+  complementary paths: (a) auto-spawn (default), (b) `--verdict <file>`
+  (preserved for CI / air-gapped), (c) `--verdict -` (reads stdin, lets
+  users pipe `gh api ... | conclave autofix --pr N --verdict -`). New
+  `--json` flag on `conclave review` emits a single newline-terminated
+  JSON object with a **pinned v0.7.1 schema** (verdict / domain / tiers
+  / agents / metrics / episodicId / sha / repo / prNumber / optional
+  plainSummary); exit code preserved (0 approve / 1 rework / 2 reject);
+  diagnostics routed to stderr. Pure emitter at
+  `packages/cli/src/lib/review-json-output.ts` (`buildReviewJson` +
+  `serializeReviewJson`). `parseVerdictFile` now accepts all three
+  shapes (episodic / standalone / `--json`) and normalizes `agents[]`
+  → `reviews[]` internally. Subprocess failure, non-zero exit (outside
+  0/1/2), unparseable stdout, and timeout each surface a clear error
+  with the fallback suggestion. 19 new tests across 2 new files
+  (247 total, 0 failing). Bumps `@conclave-ai/cli` 0.7.0 → 0.7.1. No
+  other package changes. See `docs/releases/v0.7.1.md`.
+
 - **`conclave autofix` — autonomous fix loop (v0.7.0).** Council verdicts
   now become committed, build-verified, test-verified patches. For each
   blocker, `ClaudeWorker` from `@conclave-ai/agent-worker` generates a

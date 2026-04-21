@@ -47,6 +47,7 @@ import {
 } from "../lib/domain-detect.js";
 import { ClaudeHaikuPlainSummaryLlm } from "../lib/plain-summary-llm.js";
 import { resolveTierIds } from "../lib/tier-resolver.js";
+import { buildReviewJson, serializeReviewJson } from "../lib/review-json-output.js";
 
 type ReviewDomainInput = "code" | "design";
 interface ReviewArgs {
@@ -60,6 +61,8 @@ interface ReviewArgs {
   noPlainSummary: boolean;
   plainSummaryOnly: boolean;
   plainSummaryLocale?: PlainSummaryLocale;
+  /** v0.7.1 — structured JSON output on stdout (for autofix + downstream tools). */
+  json: boolean;
 }
 function parseArgv(argv: string[]): ReviewArgs {
   const out: ReviewArgs = {
@@ -68,6 +71,7 @@ function parseArgv(argv: string[]): ReviewArgs {
     noVisual: false,
     noPlainSummary: false,
     plainSummaryOnly: false,
+    json: false,
   };
   for (let i = 0; i < argv.length; i += 1) {
     const a = argv[i];
@@ -76,6 +80,7 @@ function parseArgv(argv: string[]): ReviewArgs {
     else if (a === "--no-visual") out.noVisual = true;
     else if (a === "--no-plain-summary") out.noPlainSummary = true;
     else if (a === "--plain-summary-only") out.plainSummaryOnly = true;
+    else if (a === "--json") out.json = true;
     else if (a === "--plain-summary-locale" && argv[i + 1]) {
       const v = argv[i + 1];
       if (v === "en" || v === "ko") out.plainSummaryLocale = v;
@@ -116,6 +121,10 @@ Options:
   --no-plain-summary  Disable the plain-language (non-dev) summary for this run.
   --plain-summary-locale <en|ko>  Override the summary locale (default from .conclaverc.json).
   --plain-summary-only  Post ONLY the plain summary to the PR comment, skip the technical block.
+  --json         v0.7.1 — emit a single structured JSON object to stdout instead
+                 of the ANSI-colored human block. Exit code is preserved
+                 (0 approve / 1 rework / 2 reject). Use this to pipe into
+                 'conclave autofix --verdict -' or downstream tools.
 
 Environment:
   ANTHROPIC_API_KEY   required — Claude review call.
@@ -131,6 +140,12 @@ export async function review(argv: string[]): Promise<void> {
     process.stdout.write(HELP);
     return;
   }
+  // v0.7.1 — when --json, route all informational/diagnostic stdout writes
+  // to stderr so stdout stays reserved for the single JSON payload. stderr
+  // still carries the tier agent list, deploy status, etc.
+  const infoOut: (s: string) => void = args.json
+    ? (s) => process.stderr.write(s)
+    : (s) => process.stdout.write(s);
   const { config, configDir } = await loadConfig();
   const memoryRoot = resolveMemoryRoot(config, configDir);
   // v0.6.4 — load project + design context from the repo root (configDir
@@ -212,12 +227,12 @@ export async function review(argv: string[]): Promise<void> {
   let detection: DomainDetectionResult | null = null;
   if (args.domain) {
     resolvedDomain = args.domain;
-    process.stdout.write(
+    infoOut(
       `conclave review: domain: ${resolvedDomain} (explicit --domain)\n`,
     );
   } else if (autoDetectCfg.enabled === false) {
     resolvedDomain = "code";
-    process.stdout.write(
+    infoOut(
       `conclave review: domain: code (autoDetect disabled)\n`,
     );
   } else {
@@ -227,7 +242,7 @@ export async function review(argv: string[]): Promise<void> {
     if (autoDetectCfg.excludes) detectOpts.excludes = autoDetectCfg.excludes;
     detection = detectDomain(changed, detectOpts);
     resolvedDomain = detection.domain;
-    process.stdout.write(
+    infoOut(
       `conclave review: auto-detected domain: ${detection.domain} (reason: ${detection.reason})\n`,
     );
   }
@@ -297,6 +312,11 @@ export async function review(argv: string[]): Promise<void> {
     deliberate: (ctx: ReviewContext) => Promise<TieredCouncilOutcome | Awaited<ReturnType<Council["deliberate"]>>>;
   };
   let council: CouncilLike;
+  // v0.7.1 — resolved tier ids captured for the --json emitter. Plain
+  // Council runs leave these empty (json path uses `results` length
+  // instead for tier1Count).
+  let tier1IdsResolved: string[] = [];
+  let tier2IdsResolved: string[] = [];
 
   if (useTiered && domainConfig) {
     // For "mixed" runs, union tier-1 / tier-2 across code + design
@@ -330,11 +350,16 @@ export async function review(argv: string[]): Promise<void> {
     // (credential-skipped agents don't show up), matching what the
     // council will deliberate with.
     const tier1IdLog = tier1.map((a) => a.id).join(", ");
-    process.stdout.write(`conclave review: tier-1 agents: [${tier1IdLog}]\n`);
+    infoOut(`conclave review: tier-1 agents: [${tier1IdLog}]\n`);
     if (tier2.length > 0) {
       const tier2IdLog = tier2.map((a) => a.id).join(", ");
-      process.stdout.write(`conclave review: tier-2 agents: [${tier2IdLog}]\n`);
+      infoOut(`conclave review: tier-2 agents: [${tier2IdLog}]\n`);
     }
+    // Cache the resolved tier id lists so the --json emitter below has
+    // access (pure outcome object doesn't carry this — the agents field
+    // is per-deliberation, whereas tierNIds is the *config*'d roster).
+    tier1IdsResolved = tier1.map((a) => a.id);
+    tier2IdsResolved = tier2.map((a) => a.id);
     if (tier1.length === 0) {
       process.stderr.write(
         `conclave review: no tier-1 agents available for domain "${resolvedDomain}". Set at least one agent's API key.\n`,
@@ -389,7 +414,7 @@ export async function review(argv: string[]): Promise<void> {
     ? await fetchDeployStatus(loaded.repo, loaded.newSha).catch(() => "unknown" as const)
     : ("unknown" as const);
   if (deployStatus !== "unknown") {
-    process.stdout.write(`  deploy: ${deployStatus}\n`);
+    infoOut(`  deploy: ${deployStatus}\n`);
   }
   // v0.6.4 — design-context + brand reference PNGs load only when the
   // resolved domain is design or mixed. Code-only runs skip the design
@@ -544,23 +569,59 @@ export async function review(argv: string[]): Promise<void> {
   // PR comment): technical block (+ plain appended), or plain only.
   const deliveries = plainCfg?.deliveries ?? ["telegram", "pr-comment"];
   const appendPlainToPr = plainEnabled && !args.noPlainSummary && deliveries.includes("pr-comment");
-  if (args.plainSummaryOnly && plainSummary) {
-    process.stdout.write(
-      `conclave review — ${loaded.repo}${loaded.pullNumber ? ` #${loaded.pullNumber}` : ""}\n`,
-    );
-    process.stdout.write(`  sha: ${loaded.newSha.slice(0, 12)}\n\n`);
-    process.stdout.write(renderPlainSummarySection(plainSummary));
-  } else {
-    process.stdout.write(renderReview(renderInput));
-    if (plainSummary && appendPlainToPr) {
-      process.stdout.write(renderPlainSummarySection(plainSummary));
+  if (args.json) {
+    // v0.7.1 — structured JSON path. Stdout carries exactly one JSON
+    // object terminated by newline; all diagnostics went to stderr via
+    // `infoOut`. Preserves exit code below.
+    const tier1Ids = tier1IdsResolved;
+    const tier2Ids = tier2IdsResolved;
+    const jsonInput: Parameters<typeof buildReviewJson>[0] = {
+      repo: loaded.repo,
+      sha: loaded.newSha,
+      councilVerdict: outcome.verdict,
+      domain: resolvedDomain,
+      results: outcome.results,
+      metrics: gate.metrics.summary(),
+      episodicId: episodic.id,
+    };
+    if (loaded.pullNumber) jsonInput.pullNumber = loaded.pullNumber;
+    if (tieredOutcome) {
+      const tierEntry: NonNullable<Parameters<typeof buildReviewJson>[0]["tier"]> = {
+        escalated: tieredOutcome.escalated,
+        reason: tieredOutcome.escalationReason,
+        tier1Rounds: tieredOutcome.tier1Outcome.rounds,
+        tier1Ids,
+        tier2Ids,
+        tier1Verdict: tieredOutcome.tier1Outcome.verdict,
+      };
+      if (tieredOutcome.tier2Outcome) {
+        tierEntry.tier2Rounds = tieredOutcome.tier2Outcome.rounds;
+        tierEntry.tier2Verdict = tieredOutcome.tier2Outcome.verdict;
+      }
+      jsonInput.tier = tierEntry;
     }
+    if (plainSummary) jsonInput.plainSummary = plainSummary;
+    const payload = buildReviewJson(jsonInput);
+    process.stdout.write(serializeReviewJson(payload));
+  } else {
+    if (args.plainSummaryOnly && plainSummary) {
+      process.stdout.write(
+        `conclave review — ${loaded.repo}${loaded.pullNumber ? ` #${loaded.pullNumber}` : ""}\n`,
+      );
+      process.stdout.write(`  sha: ${loaded.newSha.slice(0, 12)}\n\n`);
+      process.stdout.write(renderPlainSummarySection(plainSummary));
+    } else {
+      process.stdout.write(renderReview(renderInput));
+      if (plainSummary && appendPlainToPr) {
+        process.stdout.write(renderPlainSummarySection(plainSummary));
+      }
+    }
+    process.stdout.write(
+      `\nepisodic: ${episodic.id}\n` +
+        `  when the PR lands, close the loop with:\n` +
+        `    conclave record-outcome --id ${episodic.id} --result merged\n`,
+    );
   }
-  process.stdout.write(
-    `\nepisodic: ${episodic.id}\n` +
-      `  when the PR lands, close the loop with:\n` +
-      `    conclave record-outcome --id ${episodic.id} --result merged\n`,
-  );
 
   // 8. Optional integrations — equal-weight per decision #24. Missing
   //    credentials skip with stderr warning; integration failures never
@@ -735,7 +796,7 @@ export async function review(argv: string[]): Promise<void> {
             };
           }
           const vResult = await runVisualReview(visualInput);
-          process.stdout.write(
+          infoOut(
             `\n── visual review ──\n` +
               `  severity:   ${vResult.severity}\n` +
               `  diff ratio: ${(vResult.diff.diffRatio * 100).toFixed(2)}% ` +
@@ -749,14 +810,14 @@ export async function review(argv: string[]): Promise<void> {
           );
           if (vResult.judgment) {
             const j = vResult.judgment;
-            process.stdout.write(
+            infoOut(
               `  judgment:   ${j.category} (conf ${(j.confidence * 100).toFixed(0)}%)\n` +
                 `    ${j.summary}\n`,
             );
             if (j.concerns.length > 0) {
-              process.stdout.write(`  concerns:\n`);
+              infoOut(`  concerns:\n`);
               for (const c of j.concerns) {
-                process.stdout.write(`    [${c.severity.toUpperCase()}] (${c.kind}) ${c.message}\n`);
+                infoOut(`    [${c.severity.toUpperCase()}] (${c.kind}) ${c.message}\n`);
               }
             }
           }
