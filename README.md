@@ -51,6 +51,12 @@ Council — up to 3 rounds of debate across N agents
   Round 2: each agent sees the others' blockers, can revise
   Round 3: final vote; early-exit the moment all approve OR any reject
   ↓
+rework? ──→  conclave autofix (v0.7) — autonomous fix loop
+              • ClaudeWorker generates per-blocker unified-diff patches
+              • secret-guard + deny-list + diff-budget checks
+              • build + tests must pass before commit
+              • meta-review → approve (L2: await Bae / L3: auto-merge)
+  ↓
 Merged  → success pattern → answer-keys 
 Rejected → failure pattern → failure-catalog
   ↓
@@ -66,8 +72,9 @@ negative); here `answer-keys ∥ failure-catalog` is the primitive — decision 
   4 notifiers (Telegram/Discord/Slack/Email) + 5 platform adapters
   (Vercel/Netlify/Cloudflare Pages/Railway/GitHub deployment_status) +
   SCM + observability + visual review + CLI.
-- **10 CLI commands** covering init → review → outcome capture →
-  seeding → migration → scoring → federated sync → MCP server.
+- **11 CLI commands** covering init → audit → review → **autofix (v0.7)** →
+  rework → outcome capture → seeding → migration → scoring →
+  federated sync → MCP server.
 - **Cost per PR**: ~$0.05-$0.20 at current pricing with caching + triage,
   capped by a per-PR budget that the efficiency gate enforces before any
   LLM call fires.

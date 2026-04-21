@@ -3,6 +3,26 @@
 ## Unreleased
 
 ### Added
+- **`conclave autofix` — autonomous fix loop (v0.7.0).** Council verdicts
+  now become committed, build-verified, test-verified patches. For each
+  blocker, `ClaudeWorker` from `@conclave-ai/agent-worker` generates a
+  unified-diff patch; every patch runs through `git apply --check
+  --recount` validation + secret-guard + a default deny-list
+  (`.env*` / `*.pem` / `*.key` / `*secret*` / `*.credentials*`) + a
+  500-line cross-patch diff budget before any apply. Applied iterations
+  run auto-detected build + test commands (`pnpm`/`cargo`/`pytest`);
+  failure reverts via `git reset --hard HEAD` and bails. On pass,
+  commit authored as `conclave-autofix[bot]`, push, meta-review. L2
+  (default) prints "awaiting Bae approval"; L3 runs `gh pr merge
+  --squash`. Hard rails: 3 iterations, $10 budget, 500 lines. Design-
+  domain blockers skipped (v0.7.1 follow-up). 17 new tests; bumps
+  `@conclave-ai/cli` 0.6.4 → 0.7.0, `@conclave-ai/core` 0.6.4 → 0.7.0
+  (adds `BlockerFix` / `AutofixResult` / `isFileDenied` /
+  `summarizeAutofixPatches` / `dedupeBlockersAcrossAgents`),
+  `@conclave-ai/agent-worker` 0.4.0 → 0.7.0 (first real CLI consumer).
+  Closes the eventbadge#21 dogfood gap. See `docs/releases/v0.7.0.md`
+  and `docs/guides/autofix.md`.
+
 - **Auto-injected project + design context (v0.6.4).** Every `conclave review` and `conclave audit` run now loads a bounded slice of the repo's own docs and passes them into every agent — so the council sees product intent alongside the diff, not just the hunks in isolation. Sources (priority order, silent-skip when absent): `README.md` (first 500 chars), `.conclave/project-context.md` (full), `.conclave/design-context.md` (full, DesignAgent only), `.conclave/design-reference/*.png` (≤ 4 × 500KB, DesignAgent vision mode). Fixes the class of false-positives eventbadge PR #20 hit: council called `with: cli-version: latest` a "CI config error" because it couldn't see the reusable-workflow `uses:` line just above the diff. With a project-context file present, agents understand the convention and correctly don't flag it. New `packages/cli/src/lib/project-context.ts` loader; 25 new tests; optional `context` config section; no `.conclaverc.json` regeneration required. Bumps: cli, core, agent-claude, agent-openai, agent-gemini, agent-design → 0.6.4. See `docs/releases/v0.6.4.md` and `docs/guides/project-context.md`.
 
 ### Fixed
