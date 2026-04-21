@@ -5,14 +5,19 @@ import {
   EfficiencyGate,
   FileSystemFederatedBaselineStore,
   FileSystemMemoryStore,
+  InMemoryPlainSummaryCache,
   MetricsRecorder,
   OutcomeWriter,
   TieredCouncil,
   buildFrequencyMap,
   formatAnswerKeyForPrompt,
   formatFailureForPrompt,
+  generatePlainSummary,
   type Agent,
   type MetricsSink,
+  type PlainSummary,
+  type PlainSummaryBlocker,
+  type PlainSummaryLocale,
   type ReviewContext,
   type ReviewDomain,
   type TieredCouncilOutcome,
@@ -32,16 +37,17 @@ import type { Notifier } from "@conclave-ai/core";
 import { fetchDeployStatus } from "@conclave-ai/scm-github";
 import { loadConfig, resolveMemoryRoot } from "../lib/config.js";
 import { loadPrDiff, loadGitDiff, loadFileDiff, type LoadedDiff } from "../lib/diff-source.js";
-import { renderReview, verdictToExitCode } from "../lib/output.js";
+import { renderPlainSummarySection, renderReview, verdictToExitCode } from "../lib/output.js";
 import { buildPlatforms, type PlatformId } from "../lib/platform-factory.js";
 import {
   detectDomain,
   extractChangedFilesFromDiff,
   type DomainDetectionResult,
 } from "../lib/domain-detect.js";
+import { ClaudeHaikuPlainSummaryLlm } from "../lib/plain-summary-llm.js";
 
 type ReviewDomainInput = "code" | "design";
-function parseArgv(argv: string[]): {
+interface ReviewArgs {
   pr?: number;
   diff?: string;
   base?: string;
@@ -49,22 +55,30 @@ function parseArgv(argv: string[]): {
   noVisual: boolean;
   help: boolean;
   domain?: ReviewDomainInput;
-} {
-  const out: {
-    pr?: number;
-    diff?: string;
-    base?: string;
-    visual: boolean;
-    noVisual: boolean;
-    help: boolean;
-    domain?: ReviewDomainInput;
-  } = { help: false, visual: false, noVisual: false };
+  noPlainSummary: boolean;
+  plainSummaryOnly: boolean;
+  plainSummaryLocale?: PlainSummaryLocale;
+}
+function parseArgv(argv: string[]): ReviewArgs {
+  const out: ReviewArgs = {
+    help: false,
+    visual: false,
+    noVisual: false,
+    noPlainSummary: false,
+    plainSummaryOnly: false,
+  };
   for (let i = 0; i < argv.length; i += 1) {
     const a = argv[i];
     if (a === "--help" || a === "-h") out.help = true;
     else if (a === "--visual") out.visual = true;
     else if (a === "--no-visual") out.noVisual = true;
-    else if (a === "--pr" && argv[i + 1]) {
+    else if (a === "--no-plain-summary") out.noPlainSummary = true;
+    else if (a === "--plain-summary-only") out.plainSummaryOnly = true;
+    else if (a === "--plain-summary-locale" && argv[i + 1]) {
+      const v = argv[i + 1];
+      if (v === "en" || v === "ko") out.plainSummaryLocale = v;
+      i += 1;
+    } else if (a === "--pr" && argv[i + 1]) {
       const n = Number.parseInt(argv[i + 1]!, 10);
       if (!Number.isNaN(n)) out.pr = n;
       i += 1;
@@ -97,6 +111,9 @@ Options:
                  run to "mixed" (code agents + Design agent).
   --visual       Force-enable before/after visual diff (needs platform tokens + playwright).
   --no-visual    Force-disable visual diff for this run (overrides .conclaverc.json).
+  --no-plain-summary  Disable the plain-language (non-dev) summary for this run.
+  --plain-summary-locale <en|ko>  Override the summary locale (default from .conclaverc.json).
+  --plain-summary-only  Post ONLY the plain summary to the PR comment, skip the technical block.
 
 Environment:
   ANTHROPIC_API_KEY   required — Claude review call.
@@ -430,7 +447,92 @@ export async function review(argv: string[]): Promise<void> {
       ...(tieredOutcome.tier2Outcome ? { tier2Rounds: tieredOutcome.tier2Outcome.rounds } : {}),
     };
   }
-  process.stdout.write(renderReview(renderInput));
+
+  // 7a. v0.6.1 — plain-language summary for non-dev stakeholders. One
+  //     cheap LLM call (claude-haiku-4-5). Disabled by --no-plain-summary
+  //     or `output.plainSummary.enabled: false` in config. Failures here
+  //     never kill the review; we fall back to the original output.
+  const plainCfg = config.output?.plainSummary;
+  const plainEnabled =
+    !args.noPlainSummary &&
+    (plainCfg === undefined ? true : plainCfg.enabled);
+  let plainSummary: PlainSummary | undefined;
+  if (plainEnabled) {
+    try {
+      const locale: PlainSummaryLocale =
+        args.plainSummaryLocale ?? plainCfg?.locale ?? "en";
+      const deliveries = plainCfg?.deliveries ?? ["telegram", "pr-comment"];
+      const blockers: PlainSummaryBlocker[] = [];
+      const seen = new Set<string>();
+      for (const r of outcome.results) {
+        for (const b of r.blockers) {
+          // Drop nit-level: non-devs don't need typo comments surfaced.
+          if (b.severity === "nit") continue;
+          const sev: "major" | "minor" = b.severity === "blocker" || b.severity === "major" ? "major" : "minor";
+          const key = `${sev}|${b.category}|${b.file ?? ""}|${b.message.slice(0, 60)}`;
+          if (seen.has(key)) continue;
+          seen.add(key);
+          const pb: PlainSummaryBlocker = {
+            severity: sev,
+            category: b.category,
+            oneLine: b.message.replace(/\n+/g, " ").slice(0, 220),
+          };
+          if (b.file) pb.file = b.file;
+          blockers.push(pb);
+        }
+      }
+      const diffStats = summarizeDiff(loaded.diff);
+      const subject: Parameters<typeof generatePlainSummary>[0]["subject"] = { repo: loaded.repo };
+      if (loaded.pullNumber) subject.prNumber = loaded.pullNumber;
+      if (loaded.newSha) subject.sha = loaded.newSha;
+      const prUrl =
+        loaded.pullNumber && loaded.source === "gh-pr"
+          ? `https://github.com/${loaded.repo}/pull/${loaded.pullNumber}`
+          : undefined;
+      plainSummary = await generatePlainSummary(
+        {
+          mode: "review",
+          verdict: outcome.verdict,
+          subject,
+          changes: diffStats,
+          blockers,
+          locale,
+        },
+        {
+          llm: new ClaudeHaikuPlainSummaryLlm(),
+          cache: new InMemoryPlainSummaryCache(),
+          ...(prUrl ? { fullReportUrl: prUrl } : {}),
+        },
+      );
+      // Emit for telemetry visibility in stderr — keeps stdout (which the
+      // workflow greps for the PR comment) clean unless --plain-summary-only.
+      process.stderr.write(
+        `conclave review: plain summary ready (${locale}, ${deliveries.join("+")})\n`,
+      );
+    } catch (err) {
+      process.stderr.write(
+        `conclave review: plain summary generation failed — ${(err as Error).message}\n`,
+      );
+      plainSummary = undefined;
+    }
+  }
+
+  // Decide what goes to stdout (which the wrapper workflow pipes into the
+  // PR comment): technical block (+ plain appended), or plain only.
+  const deliveries = plainCfg?.deliveries ?? ["telegram", "pr-comment"];
+  const appendPlainToPr = plainEnabled && !args.noPlainSummary && deliveries.includes("pr-comment");
+  if (args.plainSummaryOnly && plainSummary) {
+    process.stdout.write(
+      `conclave review — ${loaded.repo}${loaded.pullNumber ? ` #${loaded.pullNumber}` : ""}\n`,
+    );
+    process.stdout.write(`  sha: ${loaded.newSha.slice(0, 12)}\n\n`);
+    process.stdout.write(renderPlainSummarySection(plainSummary));
+  } else {
+    process.stdout.write(renderReview(renderInput));
+    if (plainSummary && appendPlainToPr) {
+      process.stdout.write(renderPlainSummarySection(plainSummary));
+    }
+  }
   process.stdout.write(
     `\nepisodic: ${episodic.id}\n` +
       `  when the PR lands, close the loop with:\n` +
@@ -533,6 +635,9 @@ export async function review(argv: string[]): Promise<void> {
     }
   }
   if (notifiers.length > 0) {
+    // Only pass plainSummary to notifiers if the "telegram" delivery is
+    // enabled for plain summary (Telegram is our primary non-dev surface).
+    const telegramDelivery = plainEnabled && deliveries.includes("telegram") && plainSummary;
     const notifyInput = {
       outcome,
       ctx: reviewCtx,
@@ -541,6 +646,7 @@ export async function review(argv: string[]): Promise<void> {
       ...(loaded.pullNumber && loaded.source === "gh-pr"
         ? { prUrl: `https://github.com/${loaded.repo}/pull/${loaded.pullNumber}` }
         : {}),
+      ...(telegramDelivery ? { plainSummary } : {}),
     };
     await Promise.all(
       notifiers.map(async (n) => {
@@ -639,4 +745,51 @@ export async function review(argv: string[]): Promise<void> {
   }
 
   process.exit(verdictToExitCode(outcome.verdict));
+}
+
+/**
+ * Lightweight diff parser for the plain-summary changes block. Walks the
+ * unified-diff text once, counting `+` / `-` lines (excluding headers)
+ * and collecting unique file paths sorted by total churn. We want rough
+ * numbers for the prose — do not use this for anything security-critical.
+ */
+export function summarizeDiff(diff: string): {
+  filesChanged: number;
+  linesAdded: number;
+  linesRemoved: number;
+  topFiles: string[];
+} {
+  const perFile = new Map<string, { added: number; removed: number }>();
+  let currentFile: string | null = null;
+  let linesAdded = 0;
+  let linesRemoved = 0;
+  const lines = diff.split(/\r?\n/);
+  for (const line of lines) {
+    if (line.startsWith("+++ b/")) {
+      currentFile = line.slice("+++ b/".length).trim();
+      if (currentFile === "/dev/null") currentFile = null;
+      else if (!perFile.has(currentFile)) perFile.set(currentFile, { added: 0, removed: 0 });
+      continue;
+    }
+    if (line.startsWith("--- a/")) continue;
+    if (line.startsWith("diff --git ") || line.startsWith("index ") || line.startsWith("@@ ")) continue;
+    if (!currentFile) continue;
+    if (line.startsWith("+") && !line.startsWith("+++")) {
+      linesAdded += 1;
+      perFile.get(currentFile)!.added += 1;
+    } else if (line.startsWith("-") && !line.startsWith("---")) {
+      linesRemoved += 1;
+      perFile.get(currentFile)!.removed += 1;
+    }
+  }
+  const topFiles = [...perFile.entries()]
+    .sort((a, b) => b[1].added + b[1].removed - (a[1].added + a[1].removed))
+    .slice(0, 5)
+    .map(([f]) => f);
+  return {
+    filesChanged: perFile.size,
+    linesAdded,
+    linesRemoved,
+    topFiles,
+  };
 }

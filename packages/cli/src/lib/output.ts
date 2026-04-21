@@ -1,4 +1,4 @@
-import type { Blocker, ReviewResult, MetricsSummary } from "@conclave-ai/core";
+import type { Blocker, PlainSummary, ReviewResult, MetricsSummary } from "@conclave-ai/core";
 
 export interface PrintReviewInput {
   repo: string;
@@ -110,4 +110,30 @@ export function verdictToExitCode(v: "approve" | "rework" | "reject"): number {
   if (v === "approve") return 0;
   if (v === "rework") return 1;
   return 2;
+}
+
+/**
+ * v0.6.1 — render the plain-language summary as a standalone section
+ * appended to the review stdout (which the workflow pipes into the PR
+ * comment). Keeps markdown heading style consistent with the workflow's
+ * `## 🏛️ Conclave AI Review` banner.
+ */
+export function renderPlainSummarySection(summary: PlainSummary): string {
+  const locale = summary.locale;
+  const heading = locale === "ko" ? "### 한 줄 요약 (비개발자용)" : "### Plain summary";
+  const lines: string[] = [];
+  lines.push("");
+  lines.push(heading);
+  lines.push("");
+  if (summary.whatChanged) lines.push(summary.whatChanged);
+  if (summary.verdictInPlain) {
+    lines.push("");
+    lines.push(summary.verdictInPlain);
+  }
+  if (summary.nextAction) {
+    lines.push("");
+    lines.push(summary.nextAction);
+  }
+  lines.push("");
+  return lines.join("\n");
 }

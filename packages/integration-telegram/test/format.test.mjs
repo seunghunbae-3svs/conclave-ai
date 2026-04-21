@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { formatReviewForTelegram } from "../dist/index.js";
+import { formatReviewForTelegram, formatPlainSummaryForTelegram } from "../dist/index.js";
 
 function mkInput(overrides = {}) {
   return {
@@ -193,4 +193,54 @@ test("formatReviewForTelegram: no blockers named but not approved → fallback n
     }),
   );
   assert.match(msg, /No specific blockers named/);
+});
+
+// ─── plain summary (v0.6.1) ───────────────────────────────────────────
+
+test("formatPlainSummaryForTelegram: uses plain prose instead of severity tags", () => {
+  const msg = formatPlainSummaryForTelegram(
+    mkInput({
+      prUrl: "https://github.com/acme/app/pull/42",
+      plainSummary: {
+        whatChanged: "This change tightens badge contrast across the event page.",
+        verdictInPlain: "One small visual issue to fix before it is ready.",
+        nextAction: "Fix the contrast, re-open the preview, confirm on mobile.",
+        raw: "...",
+        locale: "en",
+      },
+    }),
+  );
+  // Plain summary is the primary body.
+  assert.match(msg, /tightens badge contrast/);
+  assert.match(msg, /One small visual issue/);
+  assert.match(msg, /Fix the contrast/);
+  // Link back to full GitHub report.
+  assert.match(msg, /<a href="https:\/\/github\.com\/acme\/app\/pull\/42">Full report<\/a>/);
+  // Technical severity labels are absent.
+  assert.ok(!/\[BLOCKER\]|\[MAJOR\]|\[MINOR\]/i.test(msg));
+  assert.ok(!/Severity:/i.test(msg));
+});
+
+test("formatPlainSummaryForTelegram: ko locale uses Korean 'Full report' label", () => {
+  const msg = formatPlainSummaryForTelegram(
+    mkInput({
+      prUrl: "https://github.com/acme/app/pull/7",
+      plainSummary: {
+        whatChanged: "배지 대비를 다듬었다.",
+        verdictInPlain: "한 군데만 고치면 된다.",
+        nextAction: "대비를 올리고 모바일에서 확인한다.",
+        raw: "...",
+        locale: "ko",
+      },
+    }),
+  );
+  assert.match(msg, /배지 대비/);
+  assert.match(msg, /전체 리포트/);
+});
+
+test("formatPlainSummaryForTelegram: falls back to tech format when plainSummary absent", () => {
+  const msg = formatPlainSummaryForTelegram(mkInput());
+  // No plainSummary → the function delegates back to the original formatter,
+  // so we should see the tier verdict label.
+  assert.match(msg, /Approved/);
 });

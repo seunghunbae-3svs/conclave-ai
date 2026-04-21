@@ -130,6 +130,9 @@ importers:
 
   packages/cli:
     dependencies:
+      '@anthropic-ai/sdk':
+        specifier: ^0.65.0
+        version: 0.65.0(zod@3.25.76)
       '@conclave-ai/agent-claude':
         specifier: workspace:*
         version: link:../agent-claude

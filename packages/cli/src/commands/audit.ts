@@ -21,8 +21,13 @@ import {
   BudgetTracker,
   Council,
   EfficiencyGate,
+  InMemoryPlainSummaryCache,
   MetricsRecorder,
+  generatePlainSummary,
   type Agent,
+  type PlainSummary,
+  type PlainSummaryBlocker,
+  type PlainSummaryLocale,
   type ReviewContext,
   type ReviewResult,
 } from "@conclave-ai/core";
@@ -47,6 +52,8 @@ import {
   type AuditReport,
   type PerBatchResult,
 } from "../lib/audit-output.js";
+import { ClaudeHaikuPlainSummaryLlm } from "../lib/plain-summary-llm.js";
+import { renderPlainSummarySection } from "../lib/output.js";
 
 const execFile = promisify(execFileCb);
 
@@ -76,6 +83,9 @@ interface ParsedArgs {
   tier1Only: boolean;
   cwd?: string;
   jsonPath?: string;
+  noPlainSummary: boolean;
+  plainSummaryOnly: boolean;
+  plainSummaryLocale?: PlainSummaryLocale;
 }
 
 const HELP = `conclave audit — full-project health check across the current codebase
@@ -96,6 +106,9 @@ Options:
   --tier-1-only       skip tier-2 debate; cheaper, faster, less precise
   --cwd <path>        repo to audit (default: process.cwd())
   --json-out <path>   write JSON to a file (implies --output json if not set)
+  --no-plain-summary          Disable the plain-language (non-dev) summary.
+  --plain-summary-locale <en|ko>  Override the summary locale (default from config).
+  --plain-summary-only        Emit ONLY the plain summary to the issue body.
 
 Environment:
   ANTHROPIC_API_KEY   required — primary Claude agent.
@@ -122,13 +135,20 @@ function parseArgv(argv: string[]): ParsedArgs {
     domain: "auto",
     dryRun: false,
     tier1Only: false,
+    noPlainSummary: false,
+    plainSummaryOnly: false,
   };
   for (let i = 0; i < argv.length; i += 1) {
     const a = argv[i];
     if (a === "--help" || a === "-h") out.help = true;
     else if (a === "--dry-run") out.dryRun = true;
     else if (a === "--tier-1-only") out.tier1Only = true;
-    else if (a === "--scope" && argv[i + 1]) {
+    else if (a === "--no-plain-summary") out.noPlainSummary = true;
+    else if (a === "--plain-summary-only") out.plainSummaryOnly = true;
+    else if (a === "--plain-summary-locale" && argv[i + 1]) {
+      const v = argv[++i]!;
+      if (v === "en" || v === "ko") out.plainSummaryLocale = v;
+    } else if (a === "--scope" && argv[i + 1]) {
       const v = argv[++i]!;
       if (v === "all" || v === "ui" || v === "code" || v === "infra" || v === "docs") out.scope = v;
     } else if (a === "--budget" && argv[i + 1]) {
@@ -431,11 +451,88 @@ export async function audit(argv: string[]): Promise<void> {
     metrics: metrics.summary(),
   };
 
+  // 7a. v0.6.1 — plain-language summary for non-dev stakeholders. Same
+  //     cheap-LLM path as `conclave review`. Failures fall back to the
+  //     original audit body.
+  const plainCfg = config.output?.plainSummary;
+  const plainEnabled =
+    !args.noPlainSummary &&
+    (plainCfg === undefined ? true : plainCfg.enabled);
+  let plainSummary: PlainSummary | undefined;
+  if (plainEnabled && findings.length >= 0) {
+    try {
+      const locale: PlainSummaryLocale = args.plainSummaryLocale ?? plainCfg?.locale ?? "en";
+      // Audit has no single outcome verdict — derive from findings.
+      const hasBlockerOrMajor = findings.some(
+        (f) => f.severity === "blocker" || f.severity === "major",
+      );
+      const hasAny = findings.length > 0;
+      const derivedVerdict: "approve" | "rework" | "reject" = hasBlockerOrMajor
+        ? "rework"
+        : hasAny
+          ? "rework"
+          : "approve";
+
+      const blockers: PlainSummaryBlocker[] = [];
+      const seen = new Set<string>();
+      for (const f of findings) {
+        if (f.severity === "nit") continue;
+        const sev: "major" | "minor" =
+          f.severity === "blocker" || f.severity === "major" ? "major" : "minor";
+        const file = f.file;
+        const msg = f.message.replace(/\n+/g, " ").slice(0, 220);
+        const key = `${sev}|${f.category}|${file ?? ""}|${msg.slice(0, 60)}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        const pb: PlainSummaryBlocker = { severity: sev, category: f.category, oneLine: msg };
+        if (file) pb.file = file;
+        blockers.push(pb);
+      }
+      const categories = Array.from(new Set(discovery.files.map((f) => f.category)));
+      plainSummary = await generatePlainSummary(
+        {
+          mode: "audit",
+          verdict: derivedVerdict,
+          subject: { repo, sha },
+          scope: {
+            filesAudited: discovery.files.length,
+            filesInScope: discovery.totalMatched,
+            categories,
+          },
+          blockers,
+          locale,
+        },
+        {
+          llm: new ClaudeHaikuPlainSummaryLlm(),
+          cache: new InMemoryPlainSummaryCache(),
+        },
+      );
+      process.stderr.write(
+        `conclave audit: plain summary ready (${locale})\n`,
+      );
+    } catch (err) {
+      process.stderr.write(
+        `conclave audit: plain summary generation failed — ${(err as Error).message}\n`,
+      );
+      plainSummary = undefined;
+    }
+  }
+
   // 8. Emit per --output.
   const output = args.output;
+  const deliveries = plainCfg?.deliveries ?? ["telegram", "pr-comment"];
+  const appendPlainToIssue =
+    !!plainSummary && plainEnabled && deliveries.includes("pr-comment");
+  const plainSection = plainSummary ? renderPlainSummarySection(plainSummary) : "";
+
   if (output === "stdout" || output === "both") {
     process.stdout.write("\n");
-    process.stdout.write(renderAuditStdout(report));
+    if (args.plainSummaryOnly && plainSummary) {
+      process.stdout.write(plainSection);
+    } else {
+      process.stdout.write(renderAuditStdout(report));
+      if (appendPlainToIssue) process.stdout.write(plainSection);
+    }
   }
   if (output === "json" || args.jsonPath) {
     const json = renderAuditJson(report);
@@ -448,7 +545,8 @@ export async function audit(argv: string[]): Promise<void> {
     }
   }
   if (output === "issue" || output === "both") {
-    const body = renderAuditIssueBody(report);
+    let body = args.plainSummaryOnly && plainSummary ? plainSection.trim() : renderAuditIssueBody(report);
+    if (!args.plainSummaryOnly && appendPlainToIssue) body = body + "\n\n" + plainSection.trim();
     const date = new Date().toISOString().slice(0, 10);
     const title = `Conclave Project Audit — ${date}`;
     try {
@@ -464,6 +562,7 @@ export async function audit(argv: string[]): Promise<void> {
       );
       process.stdout.write("\n");
       process.stdout.write(renderAuditStdout(report));
+      if (appendPlainToIssue) process.stdout.write(plainSection);
     }
   }
 
