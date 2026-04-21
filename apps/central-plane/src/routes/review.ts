@@ -43,7 +43,16 @@ import { TelegramClient } from "../telegram.js";
  * click. Keep parity with `apps/central-plane/src/routes/telegram.ts`
  * which parses `ep:<episodicId>:<outcome>` callbacks.
  */
-export function createReviewRoutes(fetchImpl: FetchLike = fetch): Hono<{ Bindings: Env }> {
+// v0.7.3 — default parameter must be a BOUND fetch. Bare `fetch` here
+// hands the unbound native fetch to downstream clients (notably
+// TelegramClient), which then call `this.fetchImpl(...)` with `this`
+// set to the instance — Cloudflare's Workers runtime rejects that
+// with "Illegal invocation". Binding once at the factory top cures
+// every outgoing call in this route. Tests continue to inject their
+// own fetch (a plain function, binding is a no-op for those).
+export function createReviewRoutes(
+  fetchImpl: FetchLike = fetch.bind(globalThis) as FetchLike,
+): Hono<{ Bindings: Env }> {
   const app = new Hono<{ Bindings: Env }>();
 
   app.post("/review/notify", async (c) => {

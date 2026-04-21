@@ -8,8 +8,12 @@ import { fetchRepoPermissions, pollDeviceToken, requestDeviceCode, type FetchLik
 
 /**
  * Factory so tests can inject a mock fetch; production gets globalThis.fetch.
+ * v0.7.3 — default now binds globalThis to avoid the "Illegal
+ * invocation" fault on Workers (see router.ts for context).
  */
-export function createOAuthRoutes(fetchImpl: FetchLike = fetch): Hono<{ Bindings: Env }> {
+export function createOAuthRoutes(
+  fetchImpl: FetchLike = fetch.bind(globalThis) as FetchLike,
+): Hono<{ Bindings: Env }> {
   const app = new Hono<{ Bindings: Env }>();
 
   app.post("/oauth/device/start", async (c) => {
