@@ -294,47 +294,29 @@ jobs:
           } > /tmp/pr-body.md
           gh pr comment ${{ github.event.pull_request.number }} --body-file /tmp/pr-body.md || true
 
-      # Persist-episodic: only runs if ORCHESTRATOR_PAT is provided. Required
-      # for the rework-button loop (later rework/merge/reject workflows grep
-      # .conclave/episodic on main to resolve episodic ids). Review alone
-      # works without it. Guarded the same way as the review step — writing
-      # to main from an attacker-controlled PR branch would be worse than
-      # leaking secrets.
-      - name: Persist episodic entries to default branch
-        if: env.SKIP_REVIEW != 'true' && github.event.pull_request.head.repo.fork == false && github.event.pull_request.user.login == github.repository_owner
-        env:
-          HAS_PAT: ${{ secrets.ORCHESTRATOR_PAT != '' && 'yes' || 'no' }}
-          GH_TOKEN: ${{ secrets.ORCHESTRATOR_PAT }}
-        run: |
-          set -euo pipefail
-          if [ "$HAS_PAT" != "yes" ]; then
-            echo "ORCHESTRATOR_PAT not set — skipping episodic persist (rework button will not work, review-only install)."
-            exit 0
-          fi
-          git clone --depth 1 "https://x-access-token:${GH_TOKEN}@github.com/${{ github.repository }}.git" /tmp/main-repo
-          mkdir -p /tmp/main-repo/.conclave
-          if [ -d .conclave/episodic ]; then
-            mkdir -p /tmp/main-repo/.conclave/episodic
-            cp -r .conclave/episodic/. /tmp/main-repo/.conclave/episodic/
-          fi
-          if [ -d .conclave/answer-keys ]; then
-            mkdir -p /tmp/main-repo/.conclave/answer-keys
-            cp -r .conclave/answer-keys/. /tmp/main-repo/.conclave/answer-keys/ || true
-          fi
-          if [ -d .conclave/failure-catalog ]; then
-            mkdir -p /tmp/main-repo/.conclave/failure-catalog
-            cp -r .conclave/failure-catalog/. /tmp/main-repo/.conclave/failure-catalog/ || true
-          fi
-          cd /tmp/main-repo
-          git config user.name  "conclave-bot[memory]"
-          git config user.email "memory@conclave.ai"
-          git add .conclave/
-          if git diff --cached --quiet; then
-            echo "No memory changes to commit."
-            exit 0
-          fi
-          git commit -m "chore(conclave): persist episodic for PR #${{ github.event.pull_request.number }} [skip ci]"
-          git push origin HEAD:main
+      # v0.9.2 — persist-episodic-to-main step REMOVED.
+      #
+      # Rationale: every review fired a `conclave-bot[memory]` commit to
+      # the consumer's default branch, which re-triggered any Vercel/
+      # Netlify/CF-Pages production deploy watching that branch. With
+      # Conclave running on every PR synchronize, this produced dozens
+      # of instant-ERROR production deploys per day — quiet cost drain
+      # for consumers and a user-visible "nothing ever deploys green"
+      # signal on the repo's Vercel dashboard.
+      #
+      # The replacement is: pr_number is propagated in the
+      # repository_dispatch client_payload (auto-dispatch side already
+      # did this since v0.8; manual Telegram-button side is getting the
+      # same treatment in the central plane). The rework/merge/reject
+      # workflows prefer payload.pr_number over the legacy
+      # grep-on-main fallback, so episodic memory no longer needs to
+      # live on the default branch to route dispatches.
+      #
+      # Long-term (v0.10) — episodic storage moves to D1 entirely,
+      # eliminating the fallback grep as well. Until then, the grep
+      # path remains as a safety net but will find nothing on repos
+      # that never had persist enabled (which is fine — payload path
+      # handles it).
 
       - name: Skip notice
         if: env.SKIP_REVIEW == 'true'

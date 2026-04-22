@@ -222,11 +222,37 @@ export function createTelegramRoutes(
       }
 
       const { eventType } = classified;
-      const clientPayload = {
+      // v0.9.2 — resolve pr_number from review_notify_dedupe so the
+      // consumer's rework/merge/reject workflow can dispatch without
+      // the legacy grep-on-main fallback (which was paired with the
+      // persist-episodic step removed in the same release). If the
+      // episodic hasn't been notified yet (shouldn't happen — the
+      // button only appears after notify), the consumer workflow's
+      // grep fallback still kicks in.
+      let prNumber: number | null = null;
+      try {
+        const row = await c.env.DB
+          .prepare(
+            `SELECT pr_number FROM review_notify_dedupe
+             WHERE episodic_id = ? AND install_id = ?
+             ORDER BY notified_at DESC LIMIT 1`,
+          )
+          .bind(parsed.episodicId, install.id)
+          .first<{ pr_number: number | null }>();
+        if (row && typeof row.pr_number === "number" && Number.isFinite(row.pr_number)) {
+          prNumber = row.pr_number;
+        }
+      } catch (err) {
+        console.error("pr_number lookup failed (non-fatal, dispatch continues):", err);
+      }
+      const clientPayload: Record<string, unknown> = {
         episodic: parsed.episodicId,
         outcome: parsed.outcome,
         triggeredBy: user ?? "telegram",
       };
+      if (prNumber !== null) {
+        clientPayload.pr_number = prNumber;
+      }
 
       try {
         await dispatchRepositoryEvent(
