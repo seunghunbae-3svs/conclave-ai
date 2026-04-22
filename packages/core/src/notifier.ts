@@ -17,6 +17,20 @@ export interface NotifyReviewInput {
    * backward compatibility.
    */
   plainSummary?: PlainSummary;
+  /**
+   * v0.8 — autonomy loop telemetry. `reworkCycle` is the zero-based
+   * counter of auto-rework cycles that have completed BEFORE this review
+   * (i.e. first review on a fresh PR is cycle 0; after one rework push
+   * it's cycle 1). `maxReworkCycles` is the hard stop from config.
+   * When both are present, the central plane renders the 4-state
+   * autonomy keyboard instead of the legacy 3-button keyboard.
+   */
+  reworkCycle?: number;
+  maxReworkCycles?: number;
+  /** v0.8 — allow the unsafe-merge button at max cycles. */
+  allowUnsafeMerge?: boolean;
+  /** v0.8 — count of blockers in the current review (for UI prose). */
+  blockerCount?: number;
 }
 
 /**

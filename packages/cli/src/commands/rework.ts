@@ -18,6 +18,7 @@ import {
 import { ClaudeWorker, type ClaudeWorkerOptions, type FileSnapshot, type WorkerOutcome } from "@conclave-ai/agent-worker";
 import { fetchPrState, type GhRunner, type PullRequestState } from "@conclave-ai/scm-github";
 import { formatFinding, scanPatch, type ScanResult } from "@conclave-ai/secret-guard";
+import { formatCycleMarker } from "@conclave-ai/core";
 import { loadConfig, resolveMemoryRoot, type ConclaveConfig } from "../lib/config.js";
 import { resolveKey } from "../lib/credentials.js";
 
@@ -40,6 +41,9 @@ Options:
   --breaker-threshold N Consecutive worker failures before the circuit opens (default 3).
   --allow-secret <id>   Allow-list a secret-guard rule id (repeatable). Use only after human review.
   --skip-secret-guard   Disable the pre-apply secret scan (discouraged — use --allow-secret instead).
+  --rework-cycle N      v0.8 — cycle number for the autonomous pipeline (N>=1). Embeds
+                        [conclave-rework-cycle:N] in the commit message so the subsequent
+                        review.yml run can extract it and continue or halt the auto-loop.
 
 Environment:
   ANTHROPIC_API_KEY     required — the worker uses Claude.
@@ -65,6 +69,13 @@ export interface ReworkArgs {
   allowSecrets: string[];
   skipSecretGuard: boolean;
   help: boolean;
+  /**
+   * v0.8 — the cycle number this rework is executing (1-based; 1 means
+   * "first auto-fix after a human commit"). The CLI embeds
+   * [conclave-rework-cycle:N] in the commit message so the subsequent
+   * review.yml run can extract it and continue the loop.
+   */
+  reworkCycle?: number;
 }
 
 export function parseArgv(argv: string[]): ReworkArgs {
@@ -111,6 +122,10 @@ export function parseArgv(argv: string[]): ReworkArgs {
       i += 1;
     } else if (a === "--skip-secret-guard") {
       out.skipSecretGuard = true;
+    } else if (a === "--rework-cycle" && argv[i + 1]) {
+      const n = Number.parseInt(argv[i + 1]!, 10);
+      if (!Number.isNaN(n) && n >= 0) out.reworkCycle = n;
+      i += 1;
     }
   }
   return out;
@@ -362,6 +377,15 @@ export async function runRework(args: ReworkArgs, deps: ReworkDeps = {}): Promis
   // post-apply is more robust than the worker's self-report.
   await git("git", ["add", "-A"], { cwd: args.cwd });
 
+  // v0.8 — autonomous pipeline: embed the cycle counter in the commit
+  // message so the subsequent review.yml run can extract it via the
+  // [conclave-rework-cycle:N] marker. Review workflow uses this to
+  // decide whether the auto-loop continues or hands back to the user.
+  const commitMessage =
+    args.reworkCycle !== undefined && args.reworkCycle > 0
+      ? `${outcome.message}\n\n${formatCycleMarker(args.reworkCycle)}`
+      : outcome.message;
+
   await git(
     "git",
     [
@@ -371,7 +395,7 @@ export async function runRework(args: ReworkArgs, deps: ReworkDeps = {}): Promis
       "user.email=noreply@conclave.ai",
       "commit",
       "-m",
-      outcome.message,
+      commitMessage,
       "--author",
       "conclave-worker[bot] <noreply@conclave.ai>",
     ],

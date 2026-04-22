@@ -219,7 +219,10 @@ test("LIVE: /review/notify happy path — globalThis.fetch is invokable without 
     assert.match(stand.requests[0].url, /\/sendMessage$/);
     const payload = JSON.parse(stand.requests[0].body);
     assert.equal(payload.chat_id, 777);
-    assert.equal(payload.text, "live-fetch test");
+    // v0.8 — verdict=approve + episodic_id triggers the autonomy renderer
+    // (state=approved), which rewrites the body. Assert on the rendered
+    // shape rather than the raw `message` passthrough.
+    assert.match(payload.text, /Ready to merge/);
     assert.equal(payload.parse_mode, "HTML");
     assert.ok(payload.reply_markup, "episodic_id must attach inline keyboard");
   } finally {

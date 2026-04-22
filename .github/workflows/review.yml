@@ -91,7 +91,12 @@ on:
         description: 'npm version tag for @conclave-ai/cli. Pinned default; override to a specific semver for reproducible reviews.'
         required: false
         type: string
-        default: 0.7.4
+        default: 0.8.0
+      force-max-cycles:
+        description: 'v0.8 — override the configured autonomy.maxReworkCycles for this run (clamped to 5). Empty string uses config.'
+        required: false
+        type: string
+        default: ""
 
 jobs:
   review:
@@ -131,6 +136,21 @@ jobs:
             echo "SKIP_REVIEW=true" >> $GITHUB_ENV
           fi
 
+      # v0.8 — extract auto-rework cycle from HEAD commit message. Rework
+      # commits pushed by the Worker embed `[conclave-rework-cycle:N]` in
+      # their message; regular human commits do not. Absent marker → 0.
+      # The cycle is propagated to `conclave review --rework-cycle` below.
+      - name: Extract conclave-rework cycle from commit marker
+        run: |
+          set -euo pipefail
+          MSG=$(git log -1 --pretty=%B HEAD)
+          CYCLE=$(printf "%s" "$MSG" | grep -oE '\[conclave-rework-cycle:[0-9]+\]' | head -1 | grep -oE '[0-9]+' || true)
+          if [ -z "${CYCLE:-}" ]; then CYCLE=0; fi
+          # Hard-ceiling safety: clamp to 5 no matter what the commit said.
+          if [ "$CYCLE" -gt 5 ]; then CYCLE=5; fi
+          echo "CONCLAVE_CYCLE=$CYCLE" >> $GITHUB_ENV
+          echo "conclave-rework cycle on this commit: $CYCLE"
+
       # Secret-bearing step. Only runs for non-fork PRs authored by the
       # repo owner — anyone else's PR code should NOT see these secrets.
       # Fork PRs and external-contributor PRs hit the fallback step below.
@@ -148,15 +168,24 @@ jobs:
           # legacy `domain` input, kept for one release as a migration
           # shim — empty-string default is the new hands-off path).
           FORCE_DOMAIN: ${{ inputs.force-domain || inputs.domain }}
+          FORCE_MAX_CYCLES: ${{ inputs.force-max-cycles }}
         run: |
+          EXTRA_ARGS=""
+          if [ -n "${FORCE_MAX_CYCLES:-}" ]; then
+            EXTRA_ARGS="$EXTRA_ARGS --max-rework-cycles $FORCE_MAX_CYCLES"
+          fi
           if [ -n "$FORCE_DOMAIN" ]; then
             conclave review \
               --pr ${{ github.event.pull_request.number }} \
               --domain "$FORCE_DOMAIN" \
+              --rework-cycle ${CONCLAVE_CYCLE:-0} \
+              $EXTRA_ARGS \
               2>&1 | tee /tmp/conclave-result.txt || true
           else
             conclave review \
               --pr ${{ github.event.pull_request.number }} \
+              --rework-cycle ${CONCLAVE_CYCLE:-0} \
+              $EXTRA_ARGS \
               2>&1 | tee /tmp/conclave-result.txt || true
           fi
 

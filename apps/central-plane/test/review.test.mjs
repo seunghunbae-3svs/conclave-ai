@@ -188,11 +188,13 @@ test("POST /review/notify: valid token + 1 linked chat → 1 dispatch + ok body"
         "content-type": "application/json",
         authorization: `Bearer ${token}`,
       },
+      // v0.8 — omit `verdict` so this test exercises the LEGACY fallback
+      // (message pass-through + 3-button keyboard). Verdict-carrying
+      // requests are covered by review-notify-autonomy.test.mjs.
       body: JSON.stringify({
         repo_slug: "acme/app",
         message: "🏛️ review complete",
         pr_number: 42,
-        verdict: "approve",
         episodic_id: "ep-happy-1",
       }),
     },
@@ -207,7 +209,7 @@ test("POST /review/notify: valid token + 1 linked chat → 1 dispatch + ok body"
   assert.equal(payload.chat_id, 777);
   assert.equal(payload.text, "🏛️ review complete");
   assert.equal(payload.parse_mode, "HTML");
-  // episodic_id present → inline keyboard attached
+  // episodic_id present → legacy inline keyboard attached
   assert.ok(payload.reply_markup);
   const kb = payload.reply_markup.inline_keyboard;
   assert.ok(Array.isArray(kb) && Array.isArray(kb[0]) && kb[0].length === 3);

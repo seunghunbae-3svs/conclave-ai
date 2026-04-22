@@ -202,6 +202,30 @@ export const ConclaveConfigSchema = z.object({
       includeDesignReferences: z.boolean().default(true),
     })
     .optional(),
+  /**
+   * v0.8 — autonomous pipeline. Controls the auto-rework loop that fires
+   * on every `verdict: "rework"` until either the council approves or
+   * the cycle count hits the max. Final merge remains a user action
+   * (L2 autonomy preserved).
+   *
+   * Hard ceiling of 5 cycles is enforced in core regardless of this
+   * value; set to 0 / omit the section to opt out entirely (the notifier
+   * falls back to the v0.7 keyboard).
+   */
+  autonomy: z
+    .object({
+      /** Max auto-rework cycles before handing back to the user. */
+      maxReworkCycles: z.number().int().min(0).max(5).default(3),
+      /**
+       * When true, the max-cycles-reached state keeps the "Merge & Push
+       * (unsafe)" button. Set false to force explicit manual review via
+       * GitHub when autonomy gives up.
+       */
+      allowUnsafeMerge: z.boolean().default(true),
+      /** Merge strategy used by the Telegram Merge button. */
+      mergeStrategy: z.enum(["squash", "merge", "rebase"]).default("squash"),
+    })
+    .optional(),
 });
 
 export type ConclaveConfig = z.infer<typeof ConclaveConfigSchema>;

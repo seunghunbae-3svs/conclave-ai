@@ -1,6 +1,6 @@
 {
   "name": "@conclave-ai/central-plane",
-  "version": "0.7.2",
+  "version": "0.8.0",
   "private": true,
   "description": "Conclave AI central control plane — Cloudflare Worker + D1 backing the v0.4 install model.",
   "license": "MIT",
@@ -17,6 +17,7 @@
     "migrate:prod": "node scripts/preflight.mjs && wrangler d1 execute conclave-ai --remote --file=./migrations/0001_initial.sql"
   },
   "dependencies": {
+    "@conclave-ai/core": "workspace:*",
     "hono": "^4.6.14"
   },
   "devDependencies": {

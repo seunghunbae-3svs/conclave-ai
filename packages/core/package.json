@@ -1,6 +1,6 @@
 {
   "name": "@conclave-ai/core",
-  "version": "0.7.0",
+  "version": "0.8.0",
   "description": "Conclave AI core — Agent interface, council orchestration, self-evolve substrate, efficiency gate.",
   "license": "MIT",
   "type": "module",
@@ -22,6 +22,14 @@
     "./federated": {
       "types": "./dist/federated/index.d.ts",
       "import": "./dist/federated/index.js"
+    },
+    "./autonomy": {
+      "types": "./dist/autonomy.d.ts",
+      "import": "./dist/autonomy.js"
+    },
+    "./plain-summary": {
+      "types": "./dist/plain-summary.d.ts",
+      "import": "./dist/plain-summary.js"
     }
   },
   "files": [
