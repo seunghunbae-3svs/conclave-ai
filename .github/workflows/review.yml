@@ -80,15 +80,18 @@ on:
         # because a compromised or mis-tagged publish would be picked up
         # by every consumer on the next run.
         #
-        # v0.6.3 bump: the prior `0.4.3` default predated the v0.4.4
-        # central-plane routing, so consumer repos were getting a CLI
-        # without CONCLAVE_TOKEN handling and silently falling back to
-        # the direct-bot path. 0.6.2 is the first published CLI that
-        # carries the central-plane dual-path notifier end to end.
+        # v0.7.4 bump: 0.6.2 default pointed at a version that was never
+        # published to npm (0.6.2 was skipped — jumped 0.5.4 → 0.6.4).
+        # All consumer repos relying on the default failed with
+        # ERR_PNPM_NO_MATCHING_VERSION. 0.7.4 is the current latest
+        # stable and carries all fixes: central-plane dual-path notifier,
+        # this-binding fix on /review/notify, binary-file autofix
+        # handler, persistent credentials via `conclave config`, and the
+        # v0.7.1 `--json` / auto-spawn review pipeline.
         description: 'npm version tag for @conclave-ai/cli. Pinned default; override to a specific semver for reproducible reviews.'
         required: false
         type: string
-        default: 0.6.2
+        default: 0.7.4
 
 jobs:
   review:
