@@ -241,7 +241,10 @@ test("POST /review/notify: no linked chats → ok with delivered: 0 + reason", a
   assert.equal(res.status, 200);
   assert.equal(body.ok, true);
   assert.equal(body.delivered, 0);
-  assert.equal(body.reason, "no linked chat");
+  // v0.7.5 — reason is now a machine-readable snake_case token so the
+  // CLI / future dashboards can branch on it without string-matching.
+  assert.equal(body.reason, "no_linked_chat");
+  assert.ok(typeof body.hint === "string" && body.hint.length > 0);
   const sent = fetchMock.calls.find((c) => c.url.includes("/sendMessage"));
   assert.equal(sent, undefined);
 });

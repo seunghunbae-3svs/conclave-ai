@@ -1,6 +1,6 @@
 {
   "name": "@conclave-ai/central-plane",
-  "version": "0.8.0",
+  "version": "0.9.1",
   "private": true,
   "description": "Conclave AI central control plane — Cloudflare Worker + D1 backing the v0.4 install model.",
   "license": "MIT",

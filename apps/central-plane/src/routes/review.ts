@@ -171,11 +171,39 @@ export function createReviewRoutes(
 
     const telegram = new TelegramClient({ token: botToken, fetch: fetchImpl });
 
+    // ---- v0.7.5 idempotency — dedupe on (install_id, episodic_id, repo_slug)
+    // within a 5-minute window. CI retries on transient failures re-enter
+    // this endpoint for the same logical event; users saw 2–3 duplicate
+    // messages per PR before this check.
+    const DEDUPE_WINDOW_MS = 5 * 60 * 1000;
+    const episodicIdStr = typeof body.episodic_id === "string" ? body.episodic_id : "";
+    if (episodicIdStr.length > 0) {
+      try {
+        const existing = await c.env.DB.prepare(
+          "SELECT notified_at, delivered FROM review_notify_dedupe WHERE install_id = ? AND episodic_id = ? AND repo_slug = ?",
+        )
+          .bind(install.id, episodicIdStr, body.repo_slug)
+          .first<{ notified_at: string; delivered: number }>();
+        if (existing && existing.notified_at) {
+          const prevMs = Date.parse(existing.notified_at);
+          if (Number.isFinite(prevMs) && Date.now() - prevMs < DEDUPE_WINDOW_MS) {
+            console.log(
+              `review/notify dedupe hit: install=${install.id} episodic=${episodicIdStr} window=${Math.floor((Date.now() - prevMs) / 1000)}s`,
+            );
+            return c.json({
+              ok: true,
+              delivered: existing.delivered,
+              deduped: true,
+              reason: "duplicate_within_5min",
+            });
+          }
+        }
+      } catch (dedupeErr) {
+        console.warn("review/notify dedupe lookup failed (non-fatal):", dedupeErr);
+      }
+    }
+
     // ---- autonomy decision (v0.8) --------------------------------------
-    // The verdict drives state. Cycle + max decide between `reworking` vs
-    // `max-cycles-reached` on the rework branch. Approve/reject map
-    // directly. When verdict/episodic_id are absent (legacy caller), we
-    // fall back to the v0.7 keyboard for compatibility.
     const verdict = body.verdict as "approve" | "rework" | "reject" | undefined;
     const episodicId = typeof body.episodic_id === "string" ? body.episodic_id : undefined;
     const reworkCycle =
@@ -202,10 +230,6 @@ export function createReviewRoutes(
       : undefined;
 
     // ---- auto-dispatch rework on first rework verdict ---------------
-    // Fired EARLY (before Telegram fanout) so a flaky Telegram API
-    // doesn't starve the pipeline. A dispatch failure is logged but
-    // doesn't fail the response — the next scheduled review will
-    // recover the loop.
     let dispatchError: string | null = null;
     if (state === "reworking") {
       try {
@@ -247,7 +271,8 @@ export function createReviewRoutes(
       return c.json({
         ok: true,
         delivered: 0,
-        reason: "no linked chat",
+        reason: "no_linked_chat",
+        hint: "DM @conclave_ai_bot with /link <your CONCLAVE_TOKEN> to route notifications to this chat.",
         state: state ?? "legacy",
         dispatched: state === "reworking" && dispatchError === null,
         ...(dispatchError ? { dispatchError } : {}),
@@ -310,6 +335,25 @@ export function createReviewRoutes(
         delivered += 1;
       } catch (err) {
         console.warn(`sendMessage to chat ${chatId} failed:`, err);
+      }
+    }
+
+    // v0.7.5 idempotency — record the send so retries within the window
+    // are deduped. Best-effort.
+    if (episodicIdStr.length > 0) {
+      try {
+        await c.env.DB.prepare(
+          `INSERT INTO review_notify_dedupe (install_id, episodic_id, repo_slug, pr_number, notified_at, delivered)
+           VALUES (?, ?, ?, ?, ?, ?)
+           ON CONFLICT(install_id, episodic_id, repo_slug) DO UPDATE SET
+             pr_number = excluded.pr_number,
+             notified_at = excluded.notified_at,
+             delivered = excluded.delivered`,
+        )
+          .bind(install.id, episodicIdStr, body.repo_slug, prNumber, now, delivered)
+          .run();
+      } catch (dedupeWriteErr) {
+        console.warn("review/notify dedupe write failed (non-fatal):", dedupeWriteErr);
       }
     }
 

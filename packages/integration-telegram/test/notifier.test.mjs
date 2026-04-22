@@ -477,3 +477,113 @@ test("TelegramNotifier central: no diagnostic log emitted when falling back to d
     },
   );
 });
+
+// ---- v0.7.5 Bug B: empty-string CONCLAVE_CENTRAL_URL must not corrupt path decision ----
+//
+// GitHub Actions workflows render `${{ vars.CONCLAVE_CENTRAL_URL || '' }}`
+// as an EMPTY STRING env when the repo variable isn't set. The old code
+// used `??` to fall back to DEFAULT_CENTRAL_URL — but `??` does NOT
+// coalesce empty strings, so centralUrl became "". The constructor
+// still logged "attempting central plane path" (misleading), and then
+// `notifyReview` found `this.centralUrl` falsy, flipped to the direct
+// path, and threw "direct path selected but client/chatId not configured"
+// because the direct-branch fields were never populated.
+
+test("v0.7.5 Bug B: empty-string CONCLAVE_CENTRAL_URL falls back to DEFAULT_CENTRAL_URL (not '')", async () => {
+  await withEnvAsync(
+    { CONCLAVE_TOKEN: "c_tok_bugb", CONCLAVE_CENTRAL_URL: "" },
+    async () => {
+      const f = mockCentralFetch();
+      const n = new TelegramNotifier({ fetch: f });
+      await n.notifyReview(baseInput);
+      // Must hit the default central URL, not "/review/notify" against
+      // an empty host.
+      assert.equal(f.calls[0].url, `${DEFAULT_CENTRAL_URL}/review/notify`);
+    },
+  );
+});
+
+test("v0.7.5 Bug B: whitespace-only CONCLAVE_CENTRAL_URL also falls back to default", async () => {
+  await withEnvAsync(
+    { CONCLAVE_TOKEN: "c_tok_bugb2", CONCLAVE_CENTRAL_URL: "   \n\t " },
+    async () => {
+      const f = mockCentralFetch();
+      const n = new TelegramNotifier({ fetch: f });
+      await n.notifyReview(baseInput);
+      assert.equal(f.calls[0].url, `${DEFAULT_CENTRAL_URL}/review/notify`);
+    },
+  );
+});
+
+test("v0.7.5 Bug B: empty-string CONCLAVE_CENTRAL_URL with CONCLAVE_TOKEN set — no 'direct path selected' crash", async () => {
+  // This is the exact CI failure mode reported in Bug B.
+  await withEnvAsync(
+    {
+      CONCLAVE_TOKEN: "c_tok_bugb_regression",
+      CONCLAVE_CENTRAL_URL: "",
+      // Note: TELEGRAM_BOT_TOKEN / CHAT_ID intentionally NOT set — if
+      // the path flipped to direct, constructor would succeed (pre-fix)
+      // but notifyReview would throw with the tell-tale message.
+      TELEGRAM_BOT_TOKEN: undefined,
+      TELEGRAM_CHAT_ID: undefined,
+    },
+    async () => {
+      const f = mockCentralFetch();
+      const logs = [];
+      const n = new TelegramNotifier({ fetch: f, log: (m) => logs.push(m) });
+      // Must not throw "direct path selected but client/chatId not configured"
+      await n.notifyReview(baseInput);
+      // Must have taken the central path (empty-URL env normalised to default)
+      assert.ok(
+        logs.some((l) => l.includes("via central plane")),
+        `expected 'via central plane' log, got: ${logs.join(" | ")}`,
+      );
+      assert.ok(
+        !logs.some((l) => l.includes("via direct bot token")),
+        `must NOT take direct path, got: ${logs.join(" | ")}`,
+      );
+      assert.equal(f.calls[0].url, `${DEFAULT_CENTRAL_URL}/review/notify`);
+    },
+  );
+});
+
+test("v0.7.5 Bug B: diagnostic log now includes central URL for operator visibility", async () => {
+  await withEnvAsync({ CONCLAVE_TOKEN: "c_tok_url_log" }, async () => {
+    const f = mockCentralFetch();
+    const logs = [];
+    const n = new TelegramNotifier({ fetch: f, log: (m) => logs.push(m) });
+    await n.notifyReview(baseInput);
+    const init = logs.find((l) => l.includes("attempting central plane path"));
+    assert.ok(init, `expected init log, got: ${logs.join(" | ")}`);
+    assert.ok(
+      init.includes(DEFAULT_CENTRAL_URL),
+      `init log must include central URL for diagnosis, got: ${init}`,
+    );
+  });
+});
+
+test("v0.7.5 Bug B: central plane delivered=0 emits 'not linked' hint to logs", async () => {
+  await withEnvAsync({ CONCLAVE_TOKEN: "c_tok_d0" }, async () => {
+    const f = mockCentralFetch({ ok: true, delivered: 0, reason: "no_linked_chat" });
+    const logs = [];
+    const n = new TelegramNotifier({ fetch: f, log: (m) => logs.push(m) });
+    await n.notifyReview(baseInput);
+    const diag = logs.find((l) => l.includes("delivered=0"));
+    assert.ok(diag, `expected delivered=0 hint, got: ${logs.join(" | ")}`);
+    assert.ok(diag.includes("no_linked_chat"));
+    assert.ok(diag.includes("/link"));
+  });
+});
+
+test("v0.7.5 Bug B: central plane delivered>0 logs success count without hint", async () => {
+  await withEnvAsync({ CONCLAVE_TOKEN: "c_tok_d1" }, async () => {
+    const f = mockCentralFetch({ ok: true, delivered: 3 });
+    const logs = [];
+    const n = new TelegramNotifier({ fetch: f, log: (m) => logs.push(m) });
+    await n.notifyReview(baseInput);
+    assert.ok(
+      logs.some((l) => l.includes("delivered to 3 chat")),
+      `expected delivered count log, got: ${logs.join(" | ")}`,
+    );
+  });
+});

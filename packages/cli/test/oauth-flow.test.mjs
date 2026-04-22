@@ -240,6 +240,38 @@ test("CentralClient: uses CONCLAVE_CENTRAL_URL env when no baseUrl passed", () =
   }
 });
 
+test("v0.7.5 Bug B: CentralClient — empty-string CONCLAVE_CENTRAL_URL falls back to DEFAULT_CENTRAL_URL", () => {
+  // GitHub Actions renders `${{ vars.CONCLAVE_CENTRAL_URL || '' }}` as
+  // the literal empty string when the repo variable isn't set. The old
+  // `??` coalesce let empty string through and baseUrl became "", which
+  // broke every /oauth/* call with a relative-URL error.
+  const orig = process.env["CONCLAVE_CENTRAL_URL"];
+  try {
+    process.env["CONCLAVE_CENTRAL_URL"] = "";
+    const c = new CentralClient({
+      fetch: async () => ({ ok: true, status: 200, json: async () => ({}), text: async () => "" }),
+    });
+    assert.equal(c.baseUrl, DEFAULT_CENTRAL_URL);
+  } finally {
+    if (orig === undefined) delete process.env["CONCLAVE_CENTRAL_URL"];
+    else process.env["CONCLAVE_CENTRAL_URL"] = orig;
+  }
+});
+
+test("v0.7.5 Bug B: CentralClient — whitespace-only CONCLAVE_CENTRAL_URL falls back to DEFAULT_CENTRAL_URL", () => {
+  const orig = process.env["CONCLAVE_CENTRAL_URL"];
+  try {
+    process.env["CONCLAVE_CENTRAL_URL"] = "   \n\t ";
+    const c = new CentralClient({
+      fetch: async () => ({ ok: true, status: 200, json: async () => ({}), text: async () => "" }),
+    });
+    assert.equal(c.baseUrl, DEFAULT_CENTRAL_URL);
+  } finally {
+    if (orig === undefined) delete process.env["CONCLAVE_CENTRAL_URL"];
+    else process.env["CONCLAVE_CENTRAL_URL"] = orig;
+  }
+});
+
 test("CentralClient: explicit baseUrl wins over env", () => {
   const orig = process.env["CONCLAVE_CENTRAL_URL"];
   try {
