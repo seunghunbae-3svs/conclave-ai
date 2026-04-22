@@ -49,6 +49,8 @@ import { ClaudeHaikuPlainSummaryLlm } from "../lib/plain-summary-llm.js";
 import { resolveTierIds } from "../lib/tier-resolver.js";
 import { buildReviewJson, serializeReviewJson } from "../lib/review-json-output.js";
 import { resolveKey } from "../lib/credentials.js";
+import { runVisualCapture, type VisualCaptureResult } from "../lib/visual-capture.js";
+import type { ViewportSpec } from "@conclave-ai/visual-review";
 
 type ReviewDomainInput = "code" | "design";
 interface ReviewArgs {
@@ -73,6 +75,10 @@ interface ReviewArgs {
   reworkCycle?: number;
   /** v0.8 — override the configured `autonomy.maxReworkCycles`. */
   maxReworkCycles?: number;
+  /** v0.9.0 — comma-separated route overrides for multi-modal capture. */
+  visualRoutes?: string[];
+  /** v0.9.0 — bypass the deploy-status=success gate (local dev). */
+  skipDeployWait: boolean;
 }
 export function parseArgv(argv: string[]): ReviewArgs {
   const out: ReviewArgs = {
@@ -82,6 +88,7 @@ export function parseArgv(argv: string[]): ReviewArgs {
     noPlainSummary: false,
     plainSummaryOnly: false,
     json: false,
+    skipDeployWait: false,
   };
   for (let i = 0; i < argv.length; i += 1) {
     const a = argv[i];
@@ -91,7 +98,14 @@ export function parseArgv(argv: string[]): ReviewArgs {
     else if (a === "--no-plain-summary") out.noPlainSummary = true;
     else if (a === "--plain-summary-only") out.plainSummaryOnly = true;
     else if (a === "--json") out.json = true;
-    else if (a === "--plain-summary-locale" && argv[i + 1]) {
+    else if (a === "--skip-deploy-wait") out.skipDeployWait = true;
+    else if (a === "--visual-routes" && argv[i + 1]) {
+      out.visualRoutes = argv[i + 1]!
+        .split(",")
+        .map((r) => r.trim())
+        .filter((r) => r.length > 0);
+      i += 1;
+    } else if (a === "--plain-summary-locale" && argv[i + 1]) {
       const v = argv[i + 1];
       if (v === "en" || v === "ko") out.plainSummaryLocale = v;
       i += 1;
@@ -134,8 +148,12 @@ Options:
   --domain       "code" or "design" — explicit override. Omit to let Conclave
                  auto-detect from the diff (v0.5.3+). UI-signal files flip the
                  run to "mixed" (code agents + Design agent).
-  --visual       Force-enable before/after visual diff (needs platform tokens + playwright).
-  --no-visual    Force-disable visual diff for this run (overrides .conclaverc.json).
+  --visual       Force-enable multi-modal visual review (needs platform tokens + playwright).
+  --no-visual    Force-disable visual diff + capture for this run (overrides config).
+  --visual-routes <list>  v0.9.0 — comma-separated route overrides for multi-modal capture
+                 (e.g. "/,/login,/dashboard"). Bypasses auto-detection.
+  --skip-deploy-wait  v0.9.0 — capture screenshots even if deploy-status isn't "success".
+                 Useful during local dev when no deploy system is wired up.
   --no-plain-summary  Disable the plain-language (non-dev) summary for this run.
   --plain-summary-locale <en|ko>  Override the summary locale (default from .conclaverc.json).
   --plain-summary-only  Post ONLY the plain summary to the PR comment, skip the technical block.
@@ -158,6 +176,12 @@ Environment:
 Visual review reads platform tokens from env: VERCEL_TOKEN, NETLIFY_TOKEN,
 CLOUDFLARE_API_TOKEN + account/project, or falls back to gh CLI via the
 deployment-status adapter.
+
+v0.9.0 multi-modal: when --visual is on and the resolved domain is "design" or
+"mixed", Conclave captures one Playwright screenshot per (route × viewport)
+against BOTH the base and head SHA previews, then feeds the before/after pairs
+to DesignAgent's Mode A (vision) for visual-quality judgment — logo slop,
+brand drift, layout regressions the text-only reviewers can't catch.
 `;
 
 export async function review(argv: string[]): Promise<void> {
@@ -491,6 +515,91 @@ export async function review(argv: string[]): Promise<void> {
     reviewCtx.designReferences = designCtxLoaded.designReferences;
   }
 
+  // 4b. v0.9.0 — multi-modal visual capture. Runs BEFORE the council so
+  //     DesignAgent's Mode A (vision) gets real screenshots. Only when:
+  //       (a) domain is design or mixed (text-only code PRs skip entirely)
+  //       (b) --visual or config visual.enabled
+  //       (c) deploy-status=success (unless --skip-deploy-wait)
+  //       (d) we have a base SHA to compare against (prevSha)
+  //     Failures here NEVER kill the review — DesignAgent falls back to
+  //     Mode B (text-UI) when artifacts are empty. Cost: only paid when
+  //     visual is explicitly opted in; vision calls ~4x text cost.
+  const visualFromConfig = config.visual?.enabled ?? false;
+  const visualEnabled = args.noVisual ? false : args.visual || visualFromConfig;
+  const domainWantsVisual = resolvedDomain === "design" || resolvedDomain === "mixed";
+  let visualCaptureResult: VisualCaptureResult | null = null;
+  if (visualEnabled && domainWantsVisual) {
+    if (!loaded.prevSha) {
+      process.stderr.write(
+        "conclave review: --visual set but no base SHA available (pullNumber=0 or git diff had no base) — skipping capture\n",
+      );
+    } else {
+      try {
+        const visualCfg = config.visual;
+        const platformIds: PlatformId[] =
+          visualCfg?.platforms ?? ["vercel", "netlify", "cloudflare", "railway", "render", "deployment-status"];
+        const { platforms, skipped: platformsSkipped } = await buildPlatforms(platformIds);
+        for (const sk of platformsSkipped) {
+          process.stderr.write(`conclave review: visual platform "${sk.id}" skipped — ${sk.reason}\n`);
+        }
+        if (platforms.length === 0) {
+          process.stderr.write(
+            "conclave review: visual enabled but no platforms available — skipping capture (DesignAgent will use text-UI mode)\n",
+          );
+        } else {
+          // Scale the per-PR budget for multi-modal runs (vision ~4x text).
+          const multiplier = visualCfg?.budgetMultiplier ?? 1.5;
+          if (multiplier > 1) {
+            budget.raiseCap(config.budget.perPrUsd * multiplier);
+            infoOut(
+              `conclave review: budget raised to $${(config.budget.perPrUsd * multiplier).toFixed(2)} for multi-modal run (${multiplier}x)\n`,
+            );
+          }
+          const routes = args.visualRoutes ?? visualCfg?.routes ?? [];
+          const viewports: ViewportSpec[] = buildViewports(visualCfg?.viewport);
+          infoOut(
+            `conclave review: visual capture starting (routes=${routes.length > 0 ? routes.join(",") : "auto-detect"}, viewports=[${viewports.map((v) => v.label).join(",")}])\n`,
+          );
+          visualCaptureResult = await runVisualCapture({
+            repo: loaded.repo,
+            beforeSha: loaded.prevSha,
+            afterSha: loaded.newSha,
+            platforms,
+            configDir,
+            deployStatus,
+            ...(routes.length > 0 ? { routes } : {}),
+            viewports,
+            maxRoutes: visualCfg?.maxRoutes ?? 8,
+            waitSeconds: visualCfg?.waitSeconds ?? 60,
+            skipDeployWait: args.skipDeployWait,
+          });
+          if (visualCaptureResult.artifacts.length > 0) {
+            reviewCtx.visualArtifacts = visualCaptureResult.artifacts;
+            infoOut(
+              `conclave review: visual capture done — ${visualCaptureResult.artifacts.length} before/after pair(s), ${visualCaptureResult.totalMs}ms\n`,
+            );
+          } else {
+            process.stderr.write(
+              `conclave review: visual capture produced no artifacts — ${visualCaptureResult.reason}\n`,
+            );
+          }
+          for (const w of visualCaptureResult.warnings) {
+            process.stderr.write(`conclave review: visual warning — ${w}\n`);
+          }
+          for (const sk of visualCaptureResult.skipped) {
+            process.stderr.write(
+              `conclave review: visual skipped ${sk.route}@${sk.viewport} — ${sk.reason}\n`,
+            );
+          }
+        }
+      } catch (err) {
+        process.stderr.write(
+          `conclave review: visual capture failed — ${(err as Error).message} (proceeding with text-UI mode)\n`,
+        );
+      }
+    }
+  }
+
   const outcome = await council.deliberate(reviewCtx);
 
   // 6. Persist the episodic entry (outcome: "pending") so `conclave
@@ -799,84 +908,62 @@ export async function review(argv: string[]): Promise<void> {
     );
   }
 
-  // 9. Optional visual diff (before/after preview screenshots). CLI flag
-  //    overrides config. Failures are logged but never fail the review —
-  //    code review verdict always wins.
-  const visualFromConfig = config.visual?.enabled ?? false;
-  const visualEnabled = args.noVisual ? false : args.visual || visualFromConfig;
-  if (visualEnabled) {
-    if (!loaded.prevSha) {
-      process.stderr.write(
-        "conclave review: --visual set but no base SHA available (pullNumber=0 or git diff had no base) — skipping\n",
-      );
-    } else {
-      try {
-        const platformIds: PlatformId[] =
-          config.visual?.platforms ?? ["vercel", "netlify", "cloudflare", "railway", "render", "deployment-status"];
-        const { platforms, skipped } = await buildPlatforms(platformIds);
-        for (const sk of skipped) {
-          process.stderr.write(`conclave review: visual platform "${sk.id}" skipped — ${sk.reason}\n`);
-        }
-        if (platforms.length === 0) {
-          process.stderr.write("conclave review: visual enabled but no platforms available — skipping\n");
-        } else {
-          const visualMod = await import("@conclave-ai/visual-review");
-          const { runVisualReview } = visualMod;
-          const visualInput: Parameters<typeof runVisualReview>[0] = {
-            repo: loaded.repo,
-            beforeSha: loaded.prevSha,
-            afterSha: loaded.newSha,
-            platforms,
-            captureOptions: {
-              width: config.visual?.width ?? 1280,
-              height: config.visual?.height ?? 800,
-              fullPage: config.visual?.fullPage ?? true,
-            },
-            diffOptions: { threshold: config.visual?.diffThreshold ?? 0.1 },
-            waitSeconds: config.visual?.waitSeconds ?? 60,
-          };
-          // Vision judge (semantic "regression vs intentional") auto-runs
-          // when ANTHROPIC_API_KEY is available. Uses Claude vision.
-          if (process.env["ANTHROPIC_API_KEY"]) {
-            visualInput.judge = new visualMod.ClaudeVisionJudge();
-            visualInput.judgeContext = {
-              codeReviewContext: {
-                repo: loaded.repo,
-                pullNumber: loaded.pullNumber,
-                diff: loaded.diff,
-              },
-            };
-          }
-          const vResult = await runVisualReview(visualInput);
-          infoOut(
-            `\n── visual review ──\n` +
-              `  severity:   ${vResult.severity}\n` +
-              `  diff ratio: ${(vResult.diff.diffRatio * 100).toFixed(2)}% ` +
-              `(${vResult.diff.diffPixels.toLocaleString()} / ${vResult.diff.totalPixels.toLocaleString()} px)\n` +
-              `  before url: ${vResult.before.url} (${vResult.before.provider})\n` +
-              `  after url:  ${vResult.after.url} (${vResult.after.provider})\n` +
-              `  paths:\n` +
-              `    before:   ${vResult.paths.before}\n` +
-              `    after:    ${vResult.paths.after}\n` +
-              `    diff:     ${vResult.paths.diff}\n`,
-          );
-          if (vResult.judgment) {
-            const j = vResult.judgment;
-            infoOut(
-              `  judgment:   ${j.category} (conf ${(j.confidence * 100).toFixed(0)}%)\n` +
-                `    ${j.summary}\n`,
-            );
-            if (j.concerns.length > 0) {
-              infoOut(`  concerns:\n`);
-              for (const c of j.concerns) {
-                infoOut(`    [${c.severity.toUpperCase()}] (${c.kind}) ${c.message}\n`);
-              }
-            }
-          }
-        }
-      } catch (err) {
-        process.stderr.write(`conclave review: visual diff failed — ${(err as Error).message}\n`);
+  // 9. Pixel-diff report (v0.9.0). When we captured artifacts earlier
+  //    for DesignAgent Mode A (vision), compute a pixel-diff severity
+  //    summary here so the reviewer sees "how much changed" alongside
+  //    DesignAgent's "whether it's good". No extra Playwright run.
+  if (visualCaptureResult && visualCaptureResult.artifacts.length > 0) {
+    try {
+      const visualMod = await import("@conclave-ai/visual-review");
+      const { PixelmatchDiff, classifyDiffRatio } = visualMod;
+      const diffEngine = new PixelmatchDiff();
+      infoOut(`\n── visual pixel-diff ──\n`);
+      if (visualCaptureResult.before) {
+        infoOut(
+          `  before url: ${visualCaptureResult.before.url} (${visualCaptureResult.before.provider})\n`,
+        );
       }
+      if (visualCaptureResult.after) {
+        infoOut(
+          `  after url:  ${visualCaptureResult.after.url} (${visualCaptureResult.after.provider})\n`,
+        );
+      }
+      const outDir = path.join(configDir, ".conclave", "visual", loaded.newSha);
+      const { promises: fsp } = await import("node:fs");
+      await fsp.mkdir(outDir, { recursive: true });
+      for (const art of visualCaptureResult.artifacts) {
+        try {
+          const beforeBuf = Buffer.isBuffer(art.before)
+            ? new Uint8Array(art.before)
+            : art.before;
+          const afterBuf = Buffer.isBuffer(art.after)
+            ? new Uint8Array(art.after)
+            : art.after;
+          const dres = await diffEngine.diff(
+            beforeBuf as Uint8Array,
+            afterBuf as Uint8Array,
+            { threshold: config.visual?.diffThreshold ?? 0.1 },
+          );
+          const safe = art.route.replace(/[\/:@]/g, "_").replace(/^_/, "");
+          const baseName = safe || "root";
+          await fsp.writeFile(path.join(outDir, `${baseName}-before.png`), beforeBuf);
+          await fsp.writeFile(path.join(outDir, `${baseName}-after.png`), afterBuf);
+          await fsp.writeFile(path.join(outDir, `${baseName}-diff.png`), dres.diffPng);
+          infoOut(
+            `  ${art.route}: ${classifyDiffRatio(dres.diffRatio)} ` +
+              `(${(dres.diffRatio * 100).toFixed(2)}% / ${dres.diffPixels.toLocaleString()} px)\n`,
+          );
+        } catch (err) {
+          process.stderr.write(
+            `conclave review: pixel-diff for ${art.route} failed — ${(err as Error).message}\n`,
+          );
+        }
+      }
+      infoOut(`  pngs saved: ${outDir}\n`);
+    } catch (err) {
+      process.stderr.write(
+        `conclave review: pixel-diff report failed — ${(err as Error).message}\n`,
+      );
     }
   }
 
@@ -885,6 +972,29 @@ export async function review(argv: string[]): Promise<void> {
   }
 
   process.exit(verdictToExitCode(outcome.verdict));
+}
+
+/**
+ * v0.9.0 — map config.visual.viewport tuples into ViewportSpec[].
+ * Desktop always comes first (it's the primary surface); mobile second
+ * when present. An empty config falls back to a single desktop viewport.
+ * Exported for unit testing without invoking the full review command.
+ */
+export function buildViewports(
+  viewportCfg:
+    | { desktop?: readonly [number, number]; mobile?: readonly [number, number] }
+    | undefined,
+): ViewportSpec[] {
+  const out: ViewportSpec[] = [];
+  if (viewportCfg?.desktop) {
+    out.push({ label: "desktop", width: viewportCfg.desktop[0], height: viewportCfg.desktop[1] });
+  } else {
+    out.push({ label: "desktop", width: 1280, height: 800 });
+  }
+  if (viewportCfg?.mobile) {
+    out.push({ label: "mobile", width: viewportCfg.mobile[0], height: viewportCfg.mobile[1] });
+  }
+  return out;
 }
 
 /**

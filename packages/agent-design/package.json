@@ -1,6 +1,6 @@
 {
   "name": "@conclave-ai/agent-design",
-  "version": "0.6.4",
+  "version": "0.9.0",
   "description": "Conclave AI design-specialist agent — vision-based review over before/after screenshots.",
   "license": "MIT",
   "type": "module",

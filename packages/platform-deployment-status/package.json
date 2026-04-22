@@ -1,6 +1,6 @@
 {
   "name": "@conclave-ai/platform-deployment-status",
-  "version": "0.4.0",
+  "version": "0.9.0",
   "description": "Conclave AI generic platform adapter — resolves preview URL via GitHub Deployments API, works with any host that reports back.",
   "license": "MIT",
   "type": "module",

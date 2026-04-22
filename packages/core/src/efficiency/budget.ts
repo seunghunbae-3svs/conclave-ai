@@ -26,7 +26,7 @@ export class BudgetExceededError extends Error {
 export const DEFAULT_PER_PR_BUDGET_USD = 0.5;
 
 export class BudgetTracker {
-  private readonly capUsd: number;
+  private capUsd: number;
   private readonly warnAt: number;
   private spent = 0;
   private warned = false;
@@ -39,6 +39,20 @@ export class BudgetTracker {
     if (this.warnAt < 0 || this.warnAt > 1) {
       throw new Error("budget: warnAt must be in [0, 1]");
     }
+  }
+
+  /**
+   * v0.9.0 — raise the budget cap for multi-modal runs (vision ~4x text).
+   * Only raises; never lowers (once budget is raised mid-run, it would be
+   * unsafe to lower without first accounting for pending reservations).
+   * Resets the one-shot warn flag so the user can be warned again if the
+   * new cap is crossed.
+   */
+  raiseCap(newCapUsd: number): void {
+    if (newCapUsd <= 0) throw new Error("budget: cap must be > 0");
+    if (newCapUsd <= this.capUsd) return; // no-op on a lower or equal cap
+    this.capUsd = newCapUsd;
+    this.warned = false;
   }
 
   /** Attach a one-shot warning callback that fires when spending crosses the warn threshold. */

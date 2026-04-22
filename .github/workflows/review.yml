@@ -88,15 +88,22 @@ on:
         # this-binding fix on /review/notify, binary-file autofix
         # handler, persistent credentials via `conclave config`, and the
         # v0.7.1 `--json` / auto-spawn review pipeline.
+        # v0.9.0 bump: multi-modal visual review (Playwright + DesignAgent
+        # Mode A) wired into `conclave review --visual`.
         description: 'npm version tag for @conclave-ai/cli. Pinned default; override to a specific semver for reproducible reviews.'
         required: false
         type: string
-        default: 0.8.0
+        default: 0.9.0
       force-max-cycles:
         description: 'v0.8 — override the configured autonomy.maxReworkCycles for this run (clamped to 5). Empty string uses config.'
         required: false
         type: string
         default: ""
+      visual:
+        description: 'v0.9.0 — enable multi-modal visual review. Ignored for code-only PRs. When true, installs Playwright chromium on the runner.'
+        required: false
+        type: boolean
+        default: false
 
 jobs:
   review:
@@ -107,7 +114,11 @@ jobs:
     concurrency:
       group: conclave-${{ github.event.pull_request.number || github.run_id }}
       cancel-in-progress: true
-    timeout-minutes: 15
+    # v0.9.0: bumped from 15→20min. Multi-modal runs add up to 8min of
+    # Playwright capture (capped by CLI-side totalBudgetMs). Keep the
+    # headroom even when visual is off — auto-detect may flip a PR into
+    # mixed domain and the author didn't expect it.
+    timeout-minutes: 20
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -126,6 +137,33 @@ jobs:
 
       - name: Install @conclave-ai/cli
         run: pnpm add -g "@conclave-ai/cli@${{ inputs.cli-version }}"
+
+      # v0.9.0: install Playwright browsers only when visual review is
+      # enabled. Skipped on code-only PRs to keep the ~90% of reviews
+      # that don't need visual fast. DesignAgent still runs text-UI
+      # (Mode B) without Playwright — the binaries are only needed for
+      # Mode A (vision with screenshots).
+      - name: Auto-detect domain (for Playwright gate)
+        id: auto-detect-domain
+        if: inputs.visual == true
+        run: |
+          git fetch origin ${{ github.base_ref }}:${{ github.base_ref }} --depth=50 2>/dev/null || true
+          # UI-signal heuristic mirrors packages/cli/src/lib/domain-detect.ts
+          # DEFAULT_UI_SIGNALS. We only install Playwright if at least one
+          # match is found in the diff; otherwise domain is pure code.
+          if git diff --name-only origin/${{ github.base_ref }}...HEAD | \
+            grep -E '\.(tsx|jsx|vue|svelte|astro|css|scss|sass|less|styl|pcss|html?|svg|png|webp|avif)$' \
+            > /dev/null 2>&1; then
+            echo "ui_present=true" >> $GITHUB_OUTPUT
+          else
+            echo "ui_present=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Install Playwright (chromium only)
+        if: inputs.visual == true && steps.auto-detect-domain.outputs.ui_present == 'true'
+        run: |
+          pnpm add -g playwright
+          npx playwright install chromium --with-deps
 
       - name: Fetch base + compute diff size
         run: |
@@ -169,6 +207,7 @@ jobs:
           # shim — empty-string default is the new hands-off path).
           FORCE_DOMAIN: ${{ inputs.force-domain || inputs.domain }}
           FORCE_MAX_CYCLES: ${{ inputs.force-max-cycles }}
+          VISUAL_FLAG: ${{ (inputs.visual == true && steps.auto-detect-domain.outputs.ui_present == 'true') && '--visual' || '' }}
         run: |
           EXTRA_ARGS=""
           if [ -n "${FORCE_MAX_CYCLES:-}" ]; then
@@ -180,12 +219,14 @@ jobs:
               --domain "$FORCE_DOMAIN" \
               --rework-cycle ${CONCLAVE_CYCLE:-0} \
               $EXTRA_ARGS \
+              $VISUAL_FLAG \
               2>&1 | tee /tmp/conclave-result.txt || true
           else
             conclave review \
               --pr ${{ github.event.pull_request.number }} \
               --rework-cycle ${CONCLAVE_CYCLE:-0} \
               $EXTRA_ARGS \
+              $VISUAL_FLAG \
               2>&1 | tee /tmp/conclave-result.txt || true
           fi
 
