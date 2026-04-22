@@ -109,8 +109,22 @@ export class TelegramNotifier implements Notifier {
         );
       }
       this.centralToken = conclaveToken;
+      // v0.7.5 fix for Bug B: GitHub Actions emits
+      // `CONCLAVE_CENTRAL_URL: ${{ vars.CONCLAVE_CENTRAL_URL || '' }}`,
+      // which renders as an EMPTY STRING env when the repo variable is
+      // unset. `??` only coalesces null/undefined, so the old code fell
+      // through to `centralUrl = ""` — then `notifyReview`'s truthiness
+      // check on `this.centralUrl` flipped to direct path and the
+      // constructor's direct-branch fields were never populated. Result:
+      // "direct path selected but client/chatId not configured" despite
+      // the constructor logging a healthy central-path init. Normalise
+      // any falsy override (empty string, whitespace-only) to the
+      // default URL here so the path decision can never silently flip.
+      const rawCentralUrl =
+        opts.centralUrl ?? process.env["CONCLAVE_CENTRAL_URL"] ?? "";
+      const trimmedCentralUrl = rawCentralUrl.trim();
       this.centralUrl = (
-        opts.centralUrl ?? process.env["CONCLAVE_CENTRAL_URL"] ?? DEFAULT_CENTRAL_URL
+        trimmedCentralUrl.length > 0 ? trimmedCentralUrl : DEFAULT_CENTRAL_URL
       ).replace(/\/$/, "");
       this.centralFetch = opts.fetch ?? null;
       this.repoSlug = opts.repoSlug ?? process.env["GITHUB_REPOSITORY"] ?? "unknown/unknown";
@@ -120,7 +134,7 @@ export class TelegramNotifier implements Notifier {
       // Helps consumer-repo operators see at a glance whether their
       // `CONCLAVE_TOKEN` secret actually reached the review step.
       this.log(
-        `conclave review: CONCLAVE_TOKEN is set (length: ${conclaveToken.length}) — attempting central plane path`,
+        `conclave review: CONCLAVE_TOKEN is set (length: ${conclaveToken.length}) — attempting central plane path (url: ${this.centralUrl})`,
       );
       return;
     }
@@ -154,12 +168,30 @@ export class TelegramNotifier implements Notifier {
   }
 
   async notifyReview(input: NotifyReviewInput): Promise<void> {
+    // v0.7.5 — explicit, structured logging for the dual-path decision.
+    // The pre-fix version silently flipped to direct path when
+    // `centralUrl` was falsy (e.g. empty-string env override), producing
+    // the confusing "direct path selected but client/chatId not
+    // configured" error. Now every fall-through states the reason.
     if (this.centralToken && this.centralUrl) {
       this.log("conclave review: telegram via central plane");
       await this.notifyViaCentral(input);
       return;
     }
-    this.log("conclave review: telegram via direct bot token");
+    if (this.centralToken && !this.centralUrl) {
+      // Defence-in-depth — constructor's fallback should prevent this,
+      // but if it ever regresses we want a clear signal instead of the
+      // downstream "direct path selected" mystery.
+      this.log(
+        "conclave review: centralToken set but centralUrl empty — constructor fallback failed; falling through to direct path",
+      );
+    } else if (this.client && this.chatId !== null) {
+      this.log("conclave review: telegram via direct bot token");
+    } else {
+      this.log(
+        "conclave review: telegram — no central path (CONCLAVE_TOKEN absent) and no direct path (TELEGRAM_BOT_TOKEN/CHAT_ID absent); will error",
+      );
+    }
     await this.notifyViaDirect(input);
   }
 
@@ -230,10 +262,29 @@ export class TelegramNotifier implements Notifier {
         `TelegramNotifier (central): /review/notify returned HTTP ${resp.status} — ${msg.slice(0, 300)}`,
       );
     }
-    // Drain body so sockets close promptly. Do not parse strictly — the
-    // central plane contract is `{ ok: true, delivered: number }` but we
-    // don't gate on it from the CLI side.
-    await resp.json().catch(() => null);
+    // Drain body and surface the `delivered` count on stderr — helps
+    // operators distinguish "central accepted but nothing was sent"
+    // (delivered=0, e.g. no linked chat) from "delivered to N chats".
+    // The central plane's contract is `{ ok: boolean, delivered: number,
+    // reason?: string }`; we read it best-effort.
+    const parsed = (await resp.json().catch(() => null)) as
+      | { ok?: unknown; delivered?: unknown; reason?: unknown }
+      | null;
+    const delivered =
+      parsed && typeof parsed.delivered === "number" ? parsed.delivered : null;
+    const reason =
+      parsed && typeof parsed.reason === "string" ? parsed.reason : null;
+    if (delivered !== null) {
+      if (delivered === 0) {
+        this.log(
+          `conclave review: central plane accepted but delivered=0${reason ? ` (reason: ${reason})` : ""} — chat likely not linked. DM the bot with /link ${this.centralToken ? "<YOUR_CONCLAVE_TOKEN>" : "<token>"} to route notifications here.`,
+        );
+      } else {
+        this.log(
+          `conclave review: central plane delivered to ${delivered} chat(s)`,
+        );
+      }
+    }
   }
 
   private async notifyViaDirect(input: NotifyReviewInput): Promise<void> {

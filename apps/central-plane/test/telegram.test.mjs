@@ -254,13 +254,14 @@ test("POST /telegram/webhook: /link <bogus-token> rejects politely", async () =>
 
 // ---- webhook: callback_query (button click) ------------------------------
 
-test("POST /telegram/webhook: 🔧 click with linked chat fires repository_dispatch + acks", async () => {
+test("POST /telegram/webhook: 🔧 click with linked chat fires repository_dispatch + acks + follow-up message (v0.7.5)", async () => {
   const fetchMock = makeFetch([
     {
       match: (u) => u.endsWith("/dispatches"),
       respond: () => json(200, {}),
     },
     { match: (u) => u.includes("/answerCallbackQuery"), respond: () => json(200, { ok: true }) },
+    { match: (u) => u.includes("/sendMessage"), respond: () => json(200, { ok: true, result: { message_id: 99 } }) },
   ]);
   const app = createApp({ fetch: fetchMock });
   const { env, installId } = makeEnvWithInstall();
@@ -301,6 +302,91 @@ test("POST /telegram/webhook: 🔧 click with linked chat fires repository_dispa
   const ackBody = JSON.parse(ackCall.body);
   assert.equal(ackBody.callback_query_id, "cq-123");
   assert.ok(ackBody.text.includes("conclave-rework dispatched"));
+
+  // v0.7.5 Bug A fix — also send a visible chat message so the user has
+  // a permanent, scrollable record of the action. The ephemeral toast
+  // alone was frequently missed on mobile.
+  const sendCall = fetchMock.calls.find((c) => c.url.includes("/sendMessage"));
+  assert.ok(sendCall, "follow-up sendMessage not called");
+  const sendBody = JSON.parse(sendCall.body);
+  assert.equal(sendBody.chat_id, 500);
+  assert.ok(
+    sendBody.text.includes("Rework requested"),
+    `expected 'Rework requested' label, got: ${sendBody.text}`,
+  );
+  assert.ok(sendBody.text.includes("acme/service"), "repo slug missing from follow-up");
+  assert.ok(sendBody.text.includes("bae"), "triggeredBy user missing from follow-up");
+  assert.equal(sendBody.parse_mode, "HTML");
+});
+
+test("v0.7.5 Bug A: ✅ click sends 'Merge queued' follow-up chat message", async () => {
+  const fetchMock = makeFetch([
+    { match: (u) => u.endsWith("/dispatches"), respond: () => json(200, {}) },
+    { match: (u) => u.includes("/answerCallbackQuery"), respond: () => json(200, { ok: true }) },
+    { match: (u) => u.includes("/sendMessage"), respond: () => json(200, { ok: true, result: { message_id: 99 } }) },
+  ]);
+  const app = createApp({ fetch: fetchMock });
+  const { env, installId } = makeEnvWithInstall();
+  env.DB.state.links.set(600, { chatId: 600, installId, linkedAt: "t", userLabel: null });
+  await fetchApp(app, "/telegram/webhook", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      update_id: 30,
+      callback_query: {
+        id: "cq-merge-v075",
+        data: "ep:ep-mv1:merged",
+        from: { first_name: "Alice" },
+        message: { chat: { id: 600 } },
+      },
+    }),
+  }, env);
+  const sendCall = fetchMock.calls.find((c) => c.url.includes("/sendMessage"));
+  assert.ok(sendCall, "follow-up message required");
+  const sendBody = JSON.parse(sendCall.body);
+  assert.ok(sendBody.text.includes("Merge queued"));
+  assert.ok(sendBody.text.includes("Alice"));
+});
+
+test("v0.7.5 Bug A: dispatch failure still sends visible follow-up error message", async () => {
+  const fetchMock = makeFetch([
+    {
+      match: (u) => u.endsWith("/dispatches"),
+      respond: () => json(500, { message: "github down" }),
+    },
+    { match: (u) => u.includes("/answerCallbackQuery"), respond: () => json(200, { ok: true }) },
+    { match: (u) => u.includes("/sendMessage"), respond: () => json(200, { ok: true, result: {} }) },
+  ]);
+  const app = createApp({ fetch: fetchMock });
+  const { env, installId } = makeEnvWithInstall();
+  env.DB.state.links.set(700, { chatId: 700, installId, linkedAt: "t", userLabel: null });
+  const { res } = await fetchApp(app, "/telegram/webhook", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      update_id: 31,
+      callback_query: {
+        id: "cq-fail",
+        data: "ep:ep-fail:rejected",
+        from: { username: "bob" },
+        message: { chat: { id: 700 } },
+      },
+    }),
+  }, env);
+  // Webhook still returns 200 (we don't want Telegram to retry on our end)
+  assert.equal(res.status, 200);
+  // answerCallbackQuery still fired
+  const ack = fetchMock.calls.find((c) => c.url.includes("/answerCallbackQuery"));
+  assert.ok(ack);
+  const ackBody = JSON.parse(ack.body);
+  assert.ok(ackBody.text.includes("dispatch failed"));
+  assert.equal(ackBody.show_alert, true);
+  // AND a visible failure message in the chat
+  const send = fetchMock.calls.find((c) => c.url.includes("/sendMessage"));
+  assert.ok(send, "failure follow-up message required");
+  const sendBody = JSON.parse(send.body);
+  assert.ok(sendBody.text.includes("dispatch failed"));
+  assert.ok(sendBody.text.includes("acme/service"));
 });
 
 test("POST /telegram/webhook: ✅ click maps to conclave-merge event", async () => {

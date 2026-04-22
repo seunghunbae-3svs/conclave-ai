@@ -39,7 +39,20 @@ export class CentralClient {
   private readonly fetchImpl: FetchLike;
 
   constructor(opts: CentralClientOptions = {}) {
-    this.baseUrl = (opts.baseUrl ?? process.env["CONCLAVE_CENTRAL_URL"] ?? DEFAULT_CENTRAL_URL).replace(/\/$/, "");
+    // v0.7.5 — `CONCLAVE_CENTRAL_URL` can be rendered as an EMPTY STRING
+    // when GitHub Actions workflows use `${{ vars.FOO || '' }}` and the
+    // repo variable isn't set. `??` does not coalesce empty strings, so
+    // the old code silently wrote `baseUrl = ""` — then every /oauth/*
+    // call resolved to `/oauth/device/start` (no host) and the device
+    // flow died with a relative-URL error on Node. Normalise to the
+    // default URL when the override is falsy / whitespace.
+    const rawBaseUrl =
+      opts.baseUrl ?? process.env["CONCLAVE_CENTRAL_URL"] ?? "";
+    const trimmed = rawBaseUrl.trim();
+    this.baseUrl = (trimmed.length > 0 ? trimmed : DEFAULT_CENTRAL_URL).replace(
+      /\/$/,
+      "",
+    );
     const f = opts.fetch ?? (globalThis as unknown as { fetch?: FetchLike }).fetch;
     if (!f) {
       throw new Error(

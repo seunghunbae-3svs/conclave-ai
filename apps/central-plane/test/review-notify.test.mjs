@@ -19,10 +19,12 @@ import { createApp } from "../dist/router.js";
 
 // ---- mock D1 (installs + telegram_links) --------------------------------
 
-function makeMockDb({ installs = new Map(), links = [] } = {}) {
+function makeMockDb({ installs = new Map(), links = [], dedupe = [] } = {}) {
   const state = {
     installs: new Map(installs),
     links: [...links],
+    // v0.7.5 — review_notify_dedupe mock. Key: `${install_id}|${episodic_id}|${repo_slug}`.
+    dedupe: new Map(dedupe.map((d) => [`${d.installId}|${d.episodicId}|${d.repoSlug}`, d])),
   };
   return {
     state,
@@ -49,6 +51,13 @@ function makeMockDb({ installs = new Map(), links = [] } = {}) {
             }
             return null;
           }
+          if (/SELECT notified_at, delivered FROM review_notify_dedupe/.test(sql)) {
+            const [installId, episodicId, repoSlug] = bound;
+            const row = state.dedupe.get(`${installId}|${episodicId}|${repoSlug}`);
+            return row
+              ? { notified_at: row.notifiedAt, delivered: row.delivered }
+              : null;
+          }
           return null;
         },
         async all() {
@@ -67,6 +76,16 @@ function makeMockDb({ installs = new Map(), links = [] } = {}) {
             for (const v of state.installs.values()) {
               if (v.id === id) v.lastSeenAt = lastSeenAt;
             }
+          } else if (/INSERT INTO review_notify_dedupe/.test(sql)) {
+            const [installId, episodicId, repoSlug, prNumber, notifiedAt, delivered] = bound;
+            state.dedupe.set(`${installId}|${episodicId}|${repoSlug}`, {
+              installId,
+              episodicId,
+              repoSlug,
+              prNumber,
+              notifiedAt,
+              delivered,
+            });
           }
           return { success: true };
         },
@@ -415,6 +434,137 @@ test("LIVE: /review/notify with episodic_id attaches inline keyboard (live path)
     assert.ok(cbs.includes("ep:ep-kb-1:reworked"));
     assert.ok(cbs.includes("ep:ep-kb-1:merged"));
     assert.ok(cbs.includes("ep:ep-kb-1:rejected"));
+  } finally {
+    unpatch();
+    await stand.close();
+  }
+});
+
+// ---- v0.7.5: /review/notify idempotency --------------------------------
+//
+// CI workflows retry review steps on transient failures. Each retry
+// re-enters /review/notify, which used to fire duplicate Telegram
+// messages. The dedupe table drops repeats inside a 5-minute window.
+
+test("v0.7.5 dedupe: duplicate (install, episodic, repo) within 5min → delivered: 0 deduped:true, no send", async () => {
+  const stand = await startLocalTelegram();
+  const unpatch = patchTelegramHost(stand.base);
+  try {
+    const app = createApp();
+    const { env, token } = makeEnv({ chatIds: [555] });
+    // First call — normal send.
+    const first = await fetchApp(app, "/review/notify", {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
+      body: JSON.stringify({
+        repo_slug: "acme/app",
+        message: "first",
+        episodic_id: "ep-dedupe-1",
+        pr_number: 42,
+      }),
+    }, env);
+    assert.equal(first.res.status, 200);
+    assert.equal(first.body.delivered, 1);
+    assert.equal(first.body.deduped, undefined);
+    assert.equal(stand.requests.length, 1);
+
+    // Second call with identical key — should dedupe, not send.
+    const second = await fetchApp(app, "/review/notify", {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
+      body: JSON.stringify({
+        repo_slug: "acme/app",
+        message: "DIFFERENT TEXT — should still dedupe on key",
+        episodic_id: "ep-dedupe-1",
+        pr_number: 42,
+      }),
+    }, env);
+    assert.equal(second.res.status, 200);
+    assert.equal(second.body.ok, true);
+    assert.equal(second.body.deduped, true);
+    assert.equal(second.body.reason, "duplicate_within_5min");
+    // Return the last known delivered count so CLI keeps seeing parity.
+    assert.equal(second.body.delivered, 1);
+    // And — critically — NO second Telegram send.
+    assert.equal(stand.requests.length, 1, "dedupe must prevent duplicate send");
+  } finally {
+    unpatch();
+    await stand.close();
+  }
+});
+
+test("v0.7.5 dedupe: different episodic_id bypasses dedupe (two distinct events send twice)", async () => {
+  const stand = await startLocalTelegram();
+  const unpatch = patchTelegramHost(stand.base);
+  try {
+    const app = createApp();
+    const { env, token } = makeEnv({ chatIds: [555] });
+    await fetchApp(app, "/review/notify", {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
+      body: JSON.stringify({
+        repo_slug: "acme/app",
+        message: "first",
+        episodic_id: "ep-aaa",
+      }),
+    }, env);
+    await fetchApp(app, "/review/notify", {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
+      body: JSON.stringify({
+        repo_slug: "acme/app",
+        message: "second",
+        episodic_id: "ep-bbb",
+      }),
+    }, env);
+    assert.equal(stand.requests.length, 2);
+  } finally {
+    unpatch();
+    await stand.close();
+  }
+});
+
+test("v0.7.5 dedupe: missing episodic_id → no dedupe (best-effort, doesn't gate send)", async () => {
+  const stand = await startLocalTelegram();
+  const unpatch = patchTelegramHost(stand.base);
+  try {
+    const app = createApp();
+    const { env, token } = makeEnv({ chatIds: [555] });
+    await fetchApp(app, "/review/notify", {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
+      body: JSON.stringify({ repo_slug: "acme/app", message: "no-episodic-1" }),
+    }, env);
+    await fetchApp(app, "/review/notify", {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
+      body: JSON.stringify({ repo_slug: "acme/app", message: "no-episodic-2" }),
+    }, env);
+    assert.equal(stand.requests.length, 2, "no-episodic-id events must never dedupe");
+  } finally {
+    unpatch();
+    await stand.close();
+  }
+});
+
+test("v0.7.5 no-linked-chat reason is machine-readable snake_case", async () => {
+  const stand = await startLocalTelegram();
+  const unpatch = patchTelegramHost(stand.base);
+  try {
+    const app = createApp();
+    const { env, token } = makeEnv({ chatIds: [] });
+    const { res, body } = await fetchApp(app, "/review/notify", {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
+      body: JSON.stringify({ repo_slug: "acme/app", message: "x" }),
+    }, env);
+    assert.equal(res.status, 200);
+    assert.equal(body.ok, true);
+    assert.equal(body.delivered, 0);
+    assert.equal(body.reason, "no_linked_chat");
+    assert.ok(body.hint && body.hint.includes("/link"));
+    // Must not have hit Telegram
+    assert.equal(stand.requests.length, 0);
   } finally {
     unpatch();
     await stand.close();

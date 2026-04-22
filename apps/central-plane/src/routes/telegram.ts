@@ -13,6 +13,9 @@ import {
   TelegramClient,
   classifyOutcome,
   dispatchRepositoryEvent,
+  escapeHtml,
+  eventTypeFor,
+  labelForOutcome,
   parseCallbackData,
 } from "../telegram.js";
 
@@ -240,9 +243,27 @@ export function createTelegramRoutes(
             console.error("token lazy-encrypt upgrade failed:", upgradeErr);
           }
         }
+        // v0.7.5 Bug A fix — answerCallbackQuery shows only a brief
+        // ephemeral toast, which users on mobile often miss. Pair it
+        // with a visible chat message so the user has a permanent
+        // record the action was received and routed to GitHub.
         await telegram.answerCallbackQuery({
           id: cq.id!,
-          text: `✓ ${eventType} dispatched on ${install.repoSlug}`,
+          text: `✓ ${eventType} dispatched`,
+        });
+        const actionLabel = labelForOutcome(parsed.outcome);
+        await telegram.sendMessage({
+          chatId,
+          text: [
+            `${actionLabel} on <b>${escapeHtml(install.repoSlug)}</b>`,
+            `<i>triggered by ${escapeHtml(user ?? "telegram")} · event: ${eventType}</i>`,
+          ].join("\n"),
+          parseMode: "HTML",
+        }).catch((sendErr) => {
+          // Don't fail the whole webhook if the follow-up message can't
+          // be sent — the dispatch already landed and the toast already
+          // acknowledged the click. Just log.
+          console.warn("followup sendMessage failed:", sendErr);
         });
       } catch (err) {
         console.error("dispatch failed:", err);
@@ -250,6 +271,16 @@ export function createTelegramRoutes(
           id: cq.id!,
           text: "⚠ dispatch failed — see central plane logs",
           showAlert: true,
+        });
+        // Also send a visible failure message — matches the success path
+        // so users always see a chat record of what they clicked, even
+        // when the toast has disappeared.
+        await telegram.sendMessage({
+          chatId,
+          text: `⚠ <b>${eventType}</b> dispatch failed on <b>${escapeHtml(install.repoSlug)}</b>. Check the central plane logs or retry.`,
+          parseMode: "HTML",
+        }).catch((sendErr) => {
+          console.warn("followup failure sendMessage failed:", sendErr);
         });
       }
       return c.json({ ok: true });

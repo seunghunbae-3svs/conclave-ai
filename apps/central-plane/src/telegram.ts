@@ -189,3 +189,41 @@ export function eventTypeFor(outcome: CallbackOutcome): string {
   }
   return c.eventType;
 }
+
+/**
+ * Human-readable label for the follow-up chat message after a button
+ * click. Separated from `eventTypeFor` because the workflow event name
+ * (`conclave-merge`) and the conversational label ("✅ Merge queued") are
+ * different audiences.
+ */
+export function labelForOutcome(outcome: CallbackOutcome): string {
+  switch (outcome) {
+    case "merged":
+    case "merge":
+    case "merge-confirmed":
+      return "✅ Merge queued";
+    case "reworked":
+      return "🔧 Rework requested";
+    case "rejected":
+    case "reject":
+      return "❌ Rejected";
+    case "merge-unsafe":
+      return "⚠️ Unsafe merge requested";
+    case "cancel":
+      return "↩️ Cancelled";
+  }
+}
+
+/**
+ * Minimal HTML escaper for Telegram `parse_mode: HTML`. Covers the four
+ * special chars Telegram's HTML parser reacts to (`<`, `>`, `&`, `"`).
+ * Deliberately local — we don't pull a full HTML-escape dep for a handful
+ * of interpolations.
+ */
+export function escapeHtml(s: string): string {
+  return s
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
