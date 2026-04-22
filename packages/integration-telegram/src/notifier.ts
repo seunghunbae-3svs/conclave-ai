@@ -184,19 +184,18 @@ export class TelegramNotifier implements Notifier {
         nextAction: string;
         locale: "en" | "ko";
       };
+      rework_cycle?: number;
+      max_rework_cycles?: number;
+      allow_unsafe_merge?: boolean;
+      blocker_count?: number;
+      pr_url?: string;
     } = {
       repo_slug: repoSlug,
       message: text,
     };
     if (typeof input.ctx?.pullNumber === "number") body.pr_number = input.ctx.pullNumber;
     if (input.outcome?.verdict) body.verdict = input.outcome.verdict;
-    // Only include episodic_id when the consumer wanted action buttons —
-    // keeps parity with the direct path where includeActionButtons
-    // controls button rendering, and with central /review/notify which
-    // attaches buttons iff episodic_id is present.
     if (this.includeActionButtons && input.episodicId) body.episodic_id = input.episodicId;
-    // Forward the structured plain summary so the central plane can
-    // re-render if needed (localization overrides, future surfaces).
     if (input.plainSummary) {
       body.plain_summary = {
         whatChanged: input.plainSummary.whatChanged,
@@ -205,6 +204,12 @@ export class TelegramNotifier implements Notifier {
         locale: input.plainSummary.locale,
       };
     }
+    // v0.8 — autonomy fields. Only sent when the caller provided them.
+    if (typeof input.reworkCycle === "number") body.rework_cycle = input.reworkCycle;
+    if (typeof input.maxReworkCycles === "number") body.max_rework_cycles = input.maxReworkCycles;
+    if (typeof input.allowUnsafeMerge === "boolean") body.allow_unsafe_merge = input.allowUnsafeMerge;
+    if (typeof input.blockerCount === "number") body.blocker_count = input.blockerCount;
+    if (input.prUrl) body.pr_url = input.prUrl;
 
     const fetchFn: HttpFetch | typeof fetch =
       this.centralFetch ??

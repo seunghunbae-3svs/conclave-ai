@@ -11,8 +11,8 @@ import {
 import { sha256Hex } from "../util.js";
 import {
   TelegramClient,
+  classifyOutcome,
   dispatchRepositoryEvent,
-  eventTypeFor,
   parseCallbackData,
 } from "../telegram.js";
 
@@ -151,6 +151,63 @@ export function createTelegramRoutes(
         return c.json({ ok: true });
       }
 
+      const classified = classifyOutcome(parsed.outcome);
+
+      // v0.8 — "cancel" is a no-op: the user backed out of the unsafe
+      // merge confirmation. Just ack the query so the spinner stops.
+      if (classified.kind === "cancel") {
+        await telegram.answerCallbackQuery({
+          id: cq.id!,
+          text: "Cancelled",
+        });
+        return c.json({ ok: true });
+      }
+
+      // v0.8 — "merge-unsafe" is a two-step action: show a warning
+      // message with [Yes, accept risk] + [Cancel] buttons. The
+      // dispatch itself fires from the follow-up "merge-confirmed"
+      // callback (which classifies as a regular dispatch).
+      if (classified.kind === "confirm-unsafe") {
+        try {
+          await telegram.sendMessage({
+            chatId,
+            text: [
+              "<b>⚠️ Unresolved issues on this PR</b>",
+              "",
+              "Conclave's auto-fix loop hit its limit and this PR still flags blockers.",
+              "Proceed only if you have read the diff yourself.",
+            ].join("\n"),
+            parseMode: "HTML",
+            replyMarkup: {
+              inline_keyboard: [
+                [
+                  {
+                    text: "✅ Yes, merge anyway",
+                    callback_data: `ep:${parsed.episodicId}:merge-confirmed`,
+                  },
+                  {
+                    text: "❌ Cancel",
+                    callback_data: `ep:${parsed.episodicId}:cancel`,
+                  },
+                ],
+              ],
+            },
+          });
+          await telegram.answerCallbackQuery({
+            id: cq.id!,
+            text: "Confirm in the new message",
+          });
+        } catch (err) {
+          console.error("unsafe-merge prompt failed:", err);
+          await telegram.answerCallbackQuery({
+            id: cq.id!,
+            text: "⚠ prompt send failed",
+            showAlert: true,
+          });
+        }
+        return c.json({ ok: true });
+      }
+
       const install = await getInstallForDispatch(c.env, link.installId);
       if (!install || !install.githubAccessToken) {
         await telegram.answerCallbackQuery({
@@ -161,7 +218,7 @@ export function createTelegramRoutes(
         return c.json({ ok: true });
       }
 
-      const eventType = eventTypeFor(parsed.outcome);
+      const { eventType } = classified;
       const clientPayload = {
         episodic: parsed.episodicId,
         outcome: parsed.outcome,
@@ -176,12 +233,6 @@ export function createTelegramRoutes(
           eventType,
           clientPayload,
         );
-        // v0.5 H — lazy-upgrade the token field to encrypted storage if
-        // we just used a plaintext legacy row. Runs after the dispatch
-        // succeeds so a KEK mis-set (which would throw here) doesn't
-        // block the action the user wanted. We log the error instead of
-        // failing the request — the dispatch already succeeded and the
-        // user got their ack.
         if (install.needsLazyEncrypt) {
           try {
             await upgradeInstallTokenEncryption(c.env, install.id, install.githubAccessToken);

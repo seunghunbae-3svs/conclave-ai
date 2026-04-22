@@ -20,6 +20,9 @@ importers:
 
   apps/central-plane:
     dependencies:
+      '@conclave-ai/core':
+        specifier: workspace:*
+        version: link:../../packages/core
       hono:
         specifier: ^4.6.14
         version: 4.12.14

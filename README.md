@@ -41,27 +41,47 @@ majors / minors — no PR required. Budget-capped at $2 by default
 
 ## How it works
 
+**v0.8 — Autonomous Pipeline**: system auto-rewrites on blockers, you sign off.
+
 ```
 You push AI-generated code
   ↓
 Efficiency gate (cache / triage / budget / compact / route)
   ↓
-Council — up to 3 rounds of debate across N agents
-  Round 1: independent review
-  Round 2: each agent sees the others' blockers, can revise
-  Round 3: final vote; early-exit the moment all approve OR any reject
+Council deliberates (up to 3 rounds, early-exit on consensus)
   ↓
-rework? ──→  conclave autofix (v0.7) — autonomous fix loop
-              • ClaudeWorker generates per-blocker unified-diff patches
-              • secret-guard + deny-list + diff-budget checks
-              • build + tests must pass before commit
-              • meta-review → approve (L2: await Bae / L3: auto-merge)
+         ┌──────────────┼──────────────┐
+         ▼              ▼              ▼
+    approve         rework          reject
+         │              │              │
+         │       cycle < max?          │
+         │       ┌──────┴──────┐       │
+         │       ▼             ▼       │
+         │  auto-fix      max reached  │
+         │  (silent loop)     │        │
+         │   — pushes a       │        │
+         │   commit marked    │        │
+         │   cycle:N —        │        │
+         │   review runs      │        │
+         │   again, no user   │        │
+         │   click needed     │        │
+         ▼                    ▼        ▼
+   Telegram:            Telegram:   Telegram:
+   "Ready to merge"    "Limit hit, "Discard
+   [Merge] [Close]      review     recommended"
+                        needed"    [Close][Open]
+                        [Unsafe]
+                        [Close]
+                        [Open]
   ↓
-Merged  → success pattern → answer-keys 
+Merged  → success pattern → answer-keys
 Rejected → failure pattern → failure-catalog
   ↓
 Next review reads BOTH catalogs as RAG context → the council gets smarter
 ```
+
+Configurable: `autonomy.maxReworkCycles` (default 3, hard ceiling 5).
+See [docs/guides/autonomous-pipeline.md](docs/guides/autonomous-pipeline.md).
 
 Both signals are first-class. Most ML systems use one (positive OR
 negative); here `answer-keys ∥ failure-catalog` is the primitive — decision #17.

@@ -64,8 +64,17 @@ interface ReviewArgs {
   plainSummaryLocale?: PlainSummaryLocale;
   /** v0.7.1 — structured JSON output on stdout (for autofix + downstream tools). */
   json: boolean;
+  /**
+   * v0.8 — autonomous pipeline. `--rework-cycle N` advertises the current
+   * cycle to the notifier. The GitHub workflow extracts N from the
+   * HEAD commit's `[conclave-rework-cycle:N]` marker (rework commits
+   * carry it) or defaults to 0 on human-authored commits.
+   */
+  reworkCycle?: number;
+  /** v0.8 — override the configured `autonomy.maxReworkCycles`. */
+  maxReworkCycles?: number;
 }
-function parseArgv(argv: string[]): ReviewArgs {
+export function parseArgv(argv: string[]): ReviewArgs {
   const out: ReviewArgs = {
     help: false,
     visual: false,
@@ -100,6 +109,14 @@ function parseArgv(argv: string[]): ReviewArgs {
       const d = argv[i + 1];
       if (d === "code" || d === "design") out.domain = d;
       i += 1;
+    } else if (a === "--rework-cycle" && argv[i + 1]) {
+      const n = Number.parseInt(argv[i + 1]!, 10);
+      if (!Number.isNaN(n) && n >= 0) out.reworkCycle = n;
+      i += 1;
+    } else if (a === "--max-rework-cycles" && argv[i + 1]) {
+      const n = Number.parseInt(argv[i + 1]!, 10);
+      if (!Number.isNaN(n) && n >= 0) out.maxReworkCycles = n;
+      i += 1;
     }
   }
   return out;
@@ -126,6 +143,14 @@ Options:
                  of the ANSI-colored human block. Exit code is preserved
                  (0 approve / 1 rework / 2 reject). Use this to pipe into
                  'conclave autofix --verdict -' or downstream tools.
+  --rework-cycle N  v0.8 — advertise the current auto-rework cycle to the
+                 notifier. Used by the autonomous pipeline to decide
+                 whether to fire the next rework (cycle < max) or show
+                 the manual-review keyboard (cycle == max). Default 0.
+                 The GitHub workflow extracts this from the HEAD commit's
+                 [conclave-rework-cycle:N] marker automatically.
+  --max-rework-cycles N  v0.8 — override the config autonomy.maxReworkCycles
+                 for this run. Clamped to a hard ceiling of 5.
 
 Environment:
   ANTHROPIC_API_KEY   required — Claude review call.
@@ -735,6 +760,18 @@ export async function review(argv: string[]): Promise<void> {
     // Only pass plainSummary to notifiers if the "telegram" delivery is
     // enabled for plain summary (Telegram is our primary non-dev surface).
     const telegramDelivery = plainEnabled && deliveries.includes("telegram") && plainSummary;
+    // v0.8 — autonomy knobs. Cycle comes from --rework-cycle (defaults 0).
+    // Max comes from --max-rework-cycles override or config.autonomy.
+    // Blocker count is summed across agents for the Telegram prose.
+    const autonomyCfg = config.autonomy;
+    const effectiveMaxCycles =
+      args.maxReworkCycles !== undefined
+        ? args.maxReworkCycles
+        : (autonomyCfg?.maxReworkCycles ?? 3);
+    const blockerCount = outcome.results.reduce(
+      (sum, r) => sum + r.blockers.filter((b) => b.severity === "blocker" || b.severity === "major").length,
+      0,
+    );
     const notifyInput = {
       outcome,
       ctx: reviewCtx,
@@ -744,6 +781,12 @@ export async function review(argv: string[]): Promise<void> {
         ? { prUrl: `https://github.com/${loaded.repo}/pull/${loaded.pullNumber}` }
         : {}),
       ...(telegramDelivery ? { plainSummary } : {}),
+      reworkCycle: args.reworkCycle ?? 0,
+      maxReworkCycles: effectiveMaxCycles,
+      ...(autonomyCfg?.allowUnsafeMerge !== undefined
+        ? { allowUnsafeMerge: autonomyCfg.allowUnsafeMerge }
+        : {}),
+      blockerCount,
     };
     await Promise.all(
       notifiers.map(async (n) => {

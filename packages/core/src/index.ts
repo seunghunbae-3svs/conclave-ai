@@ -53,6 +53,27 @@ export type {
   GeneratePlainSummaryDeps,
 } from "./plain-summary.js";
 
+// Autonomous pipeline (v0.8) — deterministic Telegram message + button
+// renderer for the 4-state auto-rework loop. No LLM; pure data.
+export {
+  renderAutonomyMessage,
+  buttonsToInlineKeyboard,
+  decideAutonomyState,
+  clampMaxCycles,
+  autonomyCallbackData,
+  parseCycleFromCommitMessage,
+  formatCycleMarker,
+  AUTONOMY_HARD_CEILING_CYCLES,
+  AUTONOMY_DEFAULT_MAX_CYCLES,
+} from "./autonomy.js";
+export type {
+  AutonomyContext,
+  AutonomyState,
+  AutonomyButton,
+  AutonomyMergeStrategy,
+  RenderedAutonomyMessage,
+} from "./autonomy.js";
+
 // Memory substrate (decision #17: answer-keys + failure-catalog duality as core primitive).
 // Re-exported here for convenience; dedicated subpath at @conclave-ai/core/memory.
 export {

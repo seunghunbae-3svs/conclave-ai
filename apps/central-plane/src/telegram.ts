@@ -102,31 +102,90 @@ export async function dispatchRepositoryEvent(
 }
 
 /**
+ * v0.8 — callback_data vocabulary.
+ *
+ *   Legacy (v0.7):   merged / reworked / rejected
+ *   v0.8 autonomy:   merge / reject / merge-unsafe / merge-confirmed / cancel
+ *
+ * Both generations are accepted — v0.7 CLI notifiers still route through
+ * the central plane during the transition, so the parser is permissive.
+ * `eventTypeFor` maps each action to its GitHub repository_dispatch
+ * event_type (some actions have no dispatch; see `isSafeMerge`).
+ */
+export type CallbackOutcome =
+  | "merged"
+  | "reworked"
+  | "rejected"
+  | "merge"
+  | "reject"
+  | "merge-unsafe"
+  | "merge-confirmed"
+  | "cancel";
+
+const VALID_OUTCOMES: readonly CallbackOutcome[] = [
+  "merged",
+  "reworked",
+  "rejected",
+  "merge",
+  "reject",
+  "merge-unsafe",
+  "merge-confirmed",
+  "cancel",
+];
+
+/**
  * Parse the `ep:<id>:<outcome>` callback_data format emitted by the
- * integration-telegram notifier. Mirrors bot-runner's parser — but lives
- * here because the central bot IS the equivalent of that runner, not a
- * consumer of it.
+ * integration-telegram notifier AND the v0.8 autonomy renderer. Returns
+ * null for unknown outcomes so the webhook replies with "Unknown button"
+ * instead of dispatching something unintended.
  */
 export function parseCallbackData(
   data: string | undefined | null,
-): { episodicId: string; outcome: "merged" | "reworked" | "rejected" } | null {
+): { episodicId: string; outcome: CallbackOutcome } | null {
   if (!data || !data.startsWith("ep:")) return null;
   const lastColon = data.lastIndexOf(":");
   if (lastColon <= 3) return null;
   const episodicId = data.slice(3, lastColon);
-  const outcome = data.slice(lastColon + 1);
-  if (outcome !== "merged" && outcome !== "reworked" && outcome !== "rejected") return null;
+  const outcome = data.slice(lastColon + 1) as CallbackOutcome;
+  if (!VALID_OUTCOMES.includes(outcome)) return null;
   if (!episodicId) return null;
   return { episodicId, outcome };
 }
 
-export function eventTypeFor(outcome: "merged" | "reworked" | "rejected"): string {
+/**
+ * v0.8 — categorise a parsed outcome into the action the webhook should
+ * take:
+ *
+ *   - "dispatch"      → fire repository_dispatch with eventTypeFor(outcome)
+ *                        (legacy verbs + new reject/merge map cleanly)
+ *   - "confirm-unsafe"→ reply with a warning keyboard (no dispatch)
+ *   - "cancel"        → no-op ack
+ */
+export function classifyOutcome(outcome: CallbackOutcome):
+  | { kind: "dispatch"; eventType: string }
+  | { kind: "confirm-unsafe" }
+  | { kind: "cancel" } {
   switch (outcome) {
     case "merged":
-      return "conclave-merge";
+    case "merge":
+    case "merge-confirmed":
+      return { kind: "dispatch", eventType: "conclave-merge" };
     case "reworked":
-      return "conclave-rework";
+      return { kind: "dispatch", eventType: "conclave-rework" };
     case "rejected":
-      return "conclave-reject";
+    case "reject":
+      return { kind: "dispatch", eventType: "conclave-reject" };
+    case "merge-unsafe":
+      return { kind: "confirm-unsafe" };
+    case "cancel":
+      return { kind: "cancel" };
   }
+}
+
+export function eventTypeFor(outcome: CallbackOutcome): string {
+  const c = classifyOutcome(outcome);
+  if (c.kind !== "dispatch") {
+    throw new Error(`eventTypeFor: outcome "${outcome}" does not dispatch`);
+  }
+  return c.eventType;
 }
