@@ -31,3 +31,11 @@ export type {
   AnthropicVisionParams,
   AnthropicVisionResponse,
 } from "./judge.js";
+
+export { captureRoutes, normalizeBaseUrl, normalizeRoute } from "./capture-routes.js";
+export type {
+  CaptureRoutesInput,
+  CaptureRoutesResult,
+  RouteCapture,
+  ViewportSpec,
+} from "./capture-routes.js";

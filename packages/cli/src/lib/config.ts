@@ -138,6 +138,28 @@ export const ConclaveConfigSchema = z.object({
       fullPage: z.boolean().default(true),
       waitSeconds: z.number().int().nonnegative().default(60),
       diffThreshold: z.number().min(0).max(1).default(0.1),
+      /**
+       * v0.9.0 — multi-modal review config. `routes` / `viewport` /
+       * `maxRoutes` / `budgetMultiplier` drive the DesignAgent Mode A
+       * (vision) capture pipeline. When `routes` is empty, auto-detect
+       * from `.conclave/visual-routes.json` → filesystem heuristic → "/".
+       *
+       * `viewport.desktop` / `viewport.mobile` are [width, height] tuples.
+       * Pass both to capture each route twice (once per viewport).
+       *
+       * `budgetMultiplier` scales `budget.perPrUsd` when the run is
+       * multi-modal — vision calls cost ~4x text; 1.5x is a conservative
+       * starting point (users override per project).
+       */
+      routes: z.array(z.string()).default([]),
+      viewport: z
+        .object({
+          desktop: z.tuple([z.number().int().positive(), z.number().int().positive()]).optional(),
+          mobile: z.tuple([z.number().int().positive(), z.number().int().positive()]).optional(),
+        })
+        .default({ desktop: [1280, 800], mobile: [375, 667] }),
+      maxRoutes: z.number().int().min(1).max(32).default(8),
+      budgetMultiplier: z.number().min(1).max(10).default(1.5),
     })
     .optional(),
   /**

@@ -131,6 +131,32 @@ Rules:
   comes from the visual-review pipeline — reference images are the
   "target", not the comparison baseline.
 
+### v0.9.0 note — baseline PNGs matter more now
+
+With multi-modal review wired up (see `docs/guides/visual-review.md`),
+DesignAgent's Mode A call now receives BOTH the captured PR
+before/after pair AND your `.conclave/design-reference/*.png` baseline
+in the same vision prompt. That makes brand regressions — "logo fell
+back to generic marker", "icon rendered as AI-slop approximation",
+"nav bar dropped the wordmark" — much easier to catch, because the
+model is comparing "what it should look like" (your reference PNGs)
+against "what the PR actually renders" (captured screenshots) in the
+same call.
+
+Recommended baseline set for a product site:
+
+```
+.conclave/design-reference/
+├── 01-logo-lockup.png        # the canonical brand logo, cropped tight
+├── 02-homepage-hero.png      # hero as it ships on main
+├── 03-key-icon-set.png       # map marker, navigation icons, buttons
+└── 04-color-palette.png      # brand colors labeled
+```
+
+Keep them fresh — if the brand evolves, update the references.
+Otherwise DesignAgent gets stricter about "regressions" that are
+actually intentional redesigns.
+
 ## Config knobs
 
 Everything is optional. Defaults preserve pre-v0.6.4 behavior (nothing
