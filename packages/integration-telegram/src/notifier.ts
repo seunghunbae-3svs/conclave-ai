@@ -88,7 +88,12 @@ export class TelegramNotifier implements Notifier {
   private readonly centralFetch: HttpFetch | null;
   private readonly repoSlug: string;
 
-  // path B (direct bot) — populated when useCentralPlane is off
+  // path B (direct bot) — populated when useCentralPlane is off OR when
+  // central-mode also has TELEGRAM_BOT_TOKEN + TELEGRAM_CHAT_ID present
+  // (v0.11 — kept around so progress streaming can fall back to the Bot
+  // API directly when the central plane returns 404 / 5xx for
+  // /review/notify-progress, e.g. the Worker hasn't been re-deployed
+  // since the route was added).
   private readonly chatId: number | string | null;
   private readonly client: TelegramClient | null;
 
@@ -149,13 +154,37 @@ export class TelegramNotifier implements Notifier {
       ).replace(/\/$/, "");
       this.centralFetch = opts.fetch ?? null;
       this.repoSlug = opts.repoSlug ?? process.env["GITHUB_REPOSITORY"] ?? "unknown/unknown";
-      this.chatId = null;
-      this.client = null;
+      // v0.11 — opportunistic dual-init: when running in central mode
+      // AND the legacy direct-path env creds are also present, build
+      // the direct client too so notifyProgress can fall back to it
+      // when the central plane's /review/notify-progress route is
+      // missing (e.g. consumer Worker hasn't been re-deployed since
+      // v0.11). Pre-v0.11 behaviour (direct fields = null in central
+      // mode) is preserved when only central creds are set.
+      const fbToken = opts.token ?? process.env["TELEGRAM_BOT_TOKEN"] ?? "";
+      const fbChatRaw = opts.chatId ?? process.env["TELEGRAM_CHAT_ID"] ?? "";
+      if (fbToken && fbChatRaw) {
+        this.chatId =
+          typeof fbChatRaw === "string" && /^-?\d+$/.test(fbChatRaw)
+            ? Number(fbChatRaw)
+            : fbChatRaw;
+        if (opts.client) {
+          this.client = opts.client;
+        } else {
+          const clientOpts: ConstructorParameters<typeof TelegramClient>[0] = { token: fbToken };
+          if (opts.fetch) clientOpts.fetch = opts.fetch;
+          if (opts.baseUrl) clientOpts.baseUrl = opts.baseUrl;
+          this.client = new TelegramClient(clientOpts);
+        }
+      } else {
+        this.chatId = null;
+        this.client = null;
+      }
       // Diagnostic log — never logs the actual token value. Length only.
       // Helps consumer-repo operators see at a glance whether their
       // `CONCLAVE_TOKEN` secret actually reached the review step.
       this.log(
-        `conclave review: CONCLAVE_TOKEN is set (length: ${conclaveToken.length}) — attempting central plane path (url: ${this.centralUrl})`,
+        `conclave review: CONCLAVE_TOKEN is set (length: ${conclaveToken.length}) — attempting central plane path (url: ${this.centralUrl}${this.client ? "; direct fallback armed for progress" : ""})`,
       );
       return;
     }
@@ -345,8 +374,32 @@ export class TelegramNotifier implements Notifier {
     if (this.centralToken && this.centralUrl) {
       try {
         await this.notifyProgressViaCentral(input);
+        return;
       } catch (err) {
-        this.log(`conclave progress: central emit failed — ${(err as Error).message}`);
+        const msg = (err as Error).message;
+        // v0.11 — central plane returns HTTP 404 when the Worker
+        // hasn't been re-deployed since the /review/notify-progress
+        // route landed. Fall back to direct path if it's available;
+        // otherwise log + drop. This keeps progress streaming working
+        // for users who upgrade their CLI before bouncing the Worker
+        // (matches the dual-path flexibility of notifyReview minus the
+        // verdict semantics, which DO require central for now).
+        const looksLikeMissingRoute =
+          /HTTP 404/.test(msg) || /\bnot found\b/i.test(msg);
+        if (looksLikeMissingRoute && this.client && this.chatId !== null) {
+          this.log(
+            `conclave progress: central /review/notify-progress missing — falling back to direct Bot API for this stage (deploy central-plane to remove this fallback)`,
+          );
+          try {
+            await this.notifyProgressViaDirect(input);
+          } catch (fbErr) {
+            this.log(
+              `conclave progress: direct fallback also failed — ${(fbErr as Error).message}`,
+            );
+          }
+          return;
+        }
+        this.log(`conclave progress: central emit failed — ${msg}`);
       }
       return;
     }

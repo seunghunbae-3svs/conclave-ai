@@ -206,6 +206,57 @@ test("notifyProgress (central): POSTs /review/notify-progress with bearer + body
   });
 });
 
+test("notifyProgress: central 404 + direct creds present → falls back to Bot API", async () => {
+  await withEnv(
+    {
+      CONCLAVE_TOKEN: "ct-central",
+      TELEGRAM_BOT_TOKEN: "tok-direct",
+      TELEGRAM_CHAT_ID: "9999",
+    },
+    async () => {
+      const central404 = async () => ({
+        ok: false,
+        status: 404,
+        json: async () => ({ error: "not found", path: "/review/notify-progress" }),
+        text: async () =>
+          JSON.stringify({ error: "not found", path: "/review/notify-progress" }),
+      });
+      // Direct path uses the same `fetch` opt as central in the
+      // notifier's plumbing — but it routes to api.telegram.org.
+      // Compose: respond 404 for the central URL, 200 for Telegram.
+      const calls = [];
+      const composedFetch = async (url, init) => {
+        calls.push({ url, body: init.body ? JSON.parse(init.body) : null });
+        if (url.includes("/review/notify-progress")) return central404();
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ ok: true, result: { message_id: 42, chat: { id: 9999 } } }),
+          text: async () => "{}",
+        };
+      };
+      let logged = "";
+      const n = new TelegramNotifier({
+        centralUrl: "https://cp.example.test",
+        fetch: composedFetch,
+        log: (m) => {
+          logged += m;
+        },
+      });
+      await n.notifyProgress({
+        episodicId: "ep-fallback",
+        stage: "review-started",
+        payload: { repo: "acme/app", pullNumber: 1 },
+      });
+      // Central was tried first (404), then direct sendMessage fired.
+      assert.equal(calls.length, 2);
+      assert.match(calls[0].url, /\/review\/notify-progress$/);
+      assert.match(calls[1].url, /api\.telegram\.org\/bot.*\/sendMessage$/);
+      assert.match(logged, /falling back to direct Bot API/);
+    },
+  );
+});
+
 test("notifyProgress (central): network failure logged but never throws", async () => {
   await withEnv({ CONCLAVE_TOKEN: "ct-12345", TELEGRAM_BOT_TOKEN: undefined, TELEGRAM_CHAT_ID: undefined }, async () => {
     const central = async () => ({
