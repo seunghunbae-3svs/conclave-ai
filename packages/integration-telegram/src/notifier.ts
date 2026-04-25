@@ -1,6 +1,16 @@
-import type { Notifier, NotifyReviewInput } from "@conclave-ai/core";
-import { TelegramClient, type HttpFetch, type TelegramInlineKeyboard } from "./client.js";
+import type {
+  Notifier,
+  NotifyReviewInput,
+  NotifyProgressInput,
+} from "@conclave-ai/core";
+import {
+  TelegramClient,
+  type HttpFetch,
+  type TelegramInlineKeyboard,
+  type TelegramMessage,
+} from "./client.js";
 import { formatReviewForTelegram, formatPlainSummaryForTelegram } from "./format.js";
+import { renderProgressLine, renderProgressMessage, type ProgressLine } from "./progress-format.js";
 
 /**
  * Default Conclave central plane URL. Duplicated from
@@ -84,6 +94,17 @@ export class TelegramNotifier implements Notifier {
 
   private readonly includeActionButtons: boolean;
   private readonly log: (msg: string) => void;
+
+  /**
+   * v0.11 — in-process progress chains. Keyed by (episodicId, pullNumber)
+   * so the same review's stage emissions accumulate onto one message.
+   * Direct path only — central path persists in D1 because the notifier
+   * instance per CLI invocation is short-lived.
+   */
+  private readonly progressChains = new Map<
+    string,
+    { messageId: number; lines: ProgressLine[]; lastText: string; chatId: number | string }
+  >();
 
   constructor(opts: TelegramNotifierOptions = {}) {
     this.includeActionButtons = opts.includeActionButtons ?? true;
@@ -304,6 +325,125 @@ export class TelegramNotifier implements Notifier {
       sendParams.reply_markup = buildActionKeyboard(input);
     }
     await this.client.sendMessage(sendParams);
+  }
+
+  /**
+   * v0.11 — emit a progress stage. First call per (episodicId, pullNumber)
+   * sends a fresh message; subsequent calls append a line and edit the
+   * same message in place. Failures here are logged and swallowed —
+   * progress is telemetry, not the verdict, and a 429 / network blip
+   * must not break the review flow.
+   *
+   * Central path: route through `/review/notify-progress` (one-shot
+   * stage emission; the central plane owns the message_id persistence).
+   *
+   * Direct path: keep the chain in-process. Single CLI invocation =
+   * single notifier instance = single chain — autofix runs in a separate
+   * process and starts its own chain by design.
+   */
+  async notifyProgress(input: NotifyProgressInput): Promise<void> {
+    if (this.centralToken && this.centralUrl) {
+      try {
+        await this.notifyProgressViaCentral(input);
+      } catch (err) {
+        this.log(`conclave progress: central emit failed — ${(err as Error).message}`);
+      }
+      return;
+    }
+    if (!this.client || this.chatId === null) {
+      // No surface to render to. Skip silently — progress is opt-in.
+      return;
+    }
+    try {
+      await this.notifyProgressViaDirect(input);
+    } catch (err) {
+      this.log(`conclave progress: direct emit failed — ${(err as Error).message}`);
+    }
+  }
+
+  private async notifyProgressViaCentral(input: NotifyProgressInput): Promise<void> {
+    const fetchFn: HttpFetch | typeof fetch =
+      this.centralFetch ??
+      ((...args: Parameters<typeof fetch>) =>
+        fetch(...args) as unknown as ReturnType<HttpFetch>);
+    const body = {
+      repo_slug: input.payload?.repo ?? this.repoSlug,
+      episodic_id: input.episodicId,
+      stage: input.stage,
+      ...(input.payload ? { payload: input.payload } : {}),
+    };
+    const resp = await (fetchFn as HttpFetch)(`${this.centralUrl}/review/notify-progress`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: `Bearer ${this.centralToken ?? ""}`,
+      },
+      body: JSON.stringify(body),
+    });
+    if (!resp.ok) {
+      const msg = await resp.text().catch(() => "");
+      throw new Error(
+        `/review/notify-progress returned HTTP ${resp.status} — ${msg.slice(0, 300)}`,
+      );
+    }
+  }
+
+  private async notifyProgressViaDirect(input: NotifyProgressInput): Promise<void> {
+    if (!this.client || this.chatId === null) return;
+    const pr = input.payload?.pullNumber;
+    const key = `${input.episodicId}::${pr ?? ""}`;
+    const line = renderProgressLine(input);
+    const existing = this.progressChains.get(key);
+    if (!existing) {
+      const lines = [line];
+      const text = renderProgressMessage(lines, {
+        episodicId: input.episodicId,
+        ...(input.payload?.repo !== undefined ? { repo: input.payload.repo } : {}),
+        ...(typeof pr === "number" ? { pullNumber: pr } : {}),
+      });
+      const resp = await this.client.sendMessage({
+        chat_id: this.chatId,
+        text,
+        parse_mode: "HTML",
+        disable_web_page_preview: true,
+      });
+      const msg = resp.result;
+      const messageId =
+        msg && typeof (msg as TelegramMessage).message_id === "number"
+          ? (msg as TelegramMessage).message_id
+          : null;
+      if (messageId === null) {
+        // No message_id back — without it we can't edit. Treat as
+        // single-shot fire and skip future edits for this chain.
+        return;
+      }
+      this.progressChains.set(key, {
+        messageId,
+        lines,
+        lastText: text,
+        chatId: this.chatId,
+      });
+      return;
+    }
+    existing.lines.push(line);
+    const text = renderProgressMessage(existing.lines, {
+      episodicId: input.episodicId,
+      ...(input.payload?.repo !== undefined ? { repo: input.payload.repo } : {}),
+      ...(typeof pr === "number" ? { pullNumber: pr } : {}),
+    });
+    if (text === existing.lastText) {
+      // Telegram returns 400 "message is not modified" if we edit with
+      // identical text. Guard locally so the error doesn't bubble.
+      return;
+    }
+    await this.client.editMessageText({
+      chat_id: existing.chatId,
+      message_id: existing.messageId,
+      text,
+      parse_mode: "HTML",
+      disable_web_page_preview: true,
+    });
+    existing.lastText = text;
   }
 }
 

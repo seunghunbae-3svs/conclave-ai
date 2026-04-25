@@ -1,6 +1,84 @@
 # Changelog
 
-## Unreleased
+## v0.11.0 — 2026-04-26
+
+### Added
+- **Telegram progress streaming (v0.11.0).** Reviews are no longer silent
+  for 3 minutes — the council's progress is reported live as a single
+  Telegram message that updates in place via `editMessageText`. Eight
+  phase boundaries are emitted: `review-started` → `visual-capture-
+  started/done` (when applicable) → `tier1-done` → `escalating-to-tier2`
+  → `tier2-done` → `autofix-iter-started/done` (per autofix iteration).
+  - **Core:** new `Notifier.notifyProgress(input)` optional method,
+    `ProgressStage` / `ProgressPayload` / `NotifyProgressInput` types
+    on the public surface. `Notifier` consumers without the method
+    silently no-op (forward-compat for Discord/Slack/Email).
+  - **integration-telegram:** `TelegramNotifier.notifyProgress` keeps
+    an in-process chain map keyed by `(episodicId, pullNumber)`. First
+    emit → `sendMessage` (captures `message_id`); subsequent emits →
+    `editMessageText` of the same message. Identical re-renders are
+    short-circuited locally to dodge Telegram's "message is not
+    modified" 400. New `TelegramClient.editMessageText`. New
+    `renderProgressLine` / `renderProgressMessage` exports.
+  - **central-plane:** `POST /review/notify-progress` (Bearer-auth'd
+    twin of `/review/notify`). Persists `(install_id, episodic_id,
+    chat_id) → message_id` in a new `progress_messages` D1 table
+    (migration `0006_progress_messages.sql`). Fans out per linked chat;
+    each chat owns its own message_id. The renderer is duplicated from
+    integration-telegram with a sync-by-policy comment — keeps Worker
+    bundle independent of the Node-only client. New
+    `apps/central-plane/src/db/progress.ts` + `progress-format.ts`.
+  - **CLI:** `commands/review.ts` and `commands/autofix.ts` emit
+    progress through a new `lib/progress-emit.ts` helper. The notifier
+    factory was extracted to `lib/notifier-factory.ts` so notifiers
+    can be built BEFORE deliberation (was: after) — that's what makes
+    `visual-capture-started` and `tier1-done` fire in real time.
+    Episodic id is now pre-generated via `newEpisodicId()` and threaded
+    through `OutcomeWriter.writeReview`, so the Telegram timeline
+    message and the on-disk episodic entry share the same id. Autofix
+    extracts the upstream review's `episodicId` from the verdict JSON
+    so iter-started/iter-done lines append onto the SAME message that
+    the review started — full council-to-autofix continuity in chat.
+  - **Tests:** 12 new `progress-streaming.test.mjs` cases (renderer
+    purity, edit-chain semantics, central path, no-modified guard,
+    HTML escaping); 6 new `review-notify-progress.test.mjs` cases
+    (route happy path, validation, healthz up/down); 5 new
+    `progress-emit.test.mjs` cases (no-throw policy, parallel fan-out,
+    legacy-notifier skip). Total: 47/47 turbo tasks green; central-
+    plane 121, telegram 63, cli 358 (+ 1 unrelated skip).
+  - **Live E2E:** `scripts/e2e-progress-stream.mjs` fires the full
+    timeline through the real Bot API. Verified against
+    `@BAE_DUAL_bot` → chat 394136249 — 1 sendMessage + 7
+    editMessageText, single chat message updated 8 times in place.
+- **`/healthz` endpoint (v0.11).** Adds the K8s/uptime-monitor
+  convention for monitoring central-plane. Pings D1 (`SELECT 1`) and
+  reports `db: up | down`; the worker still returns 200 on a DB-down
+  read so monitors can distinguish "edge runtime broken" from "DB
+  binding broken". `/health` (v0.4 path) preserved for any wired
+  monitoring.
+
+### Fixed
+- **`credentials.test.mjs` env-leak (v0.11).** Tests around
+  `resolveKey: trims whitespace from env values` now inject `stored:
+  {}` explicitly so dev machines with a populated
+  `~/.conclave/credentials.json` no longer leak the stored anthropic
+  key into the assertion path. CI was unaffected; this only ever bit
+  local dev.
+
+### Notes
+- `@conclave-ai/cli@0.11.0`, `@conclave-ai/core@0.11.0`,
+  `@conclave-ai/integration-telegram@0.11.0`,
+  `@conclave-ai/central-plane@0.11.0`. Other packages stay on 0.10.0
+  (no functional changes); the broader version-drift cleanup tracked
+  in the v0.14 polish line is unchanged.
+- After merge: deploy central-plane (`pnpm -C apps/central-plane
+  ship`) — without the deploy `/review/notify-progress` returns 404
+  and CLI v0.11 falls back to the direct path (no error, just no
+  central-plane fan-out).
+- Migration `0006_progress_messages.sql` runs through the standard
+  `wrangler d1 execute` pipeline.
+
+## v0.7.4 — `conclave config` (released as part of v0.10 train)
 
 ### Added
 - **`conclave config` — persistent per-user credential storage (v0.7.4).**

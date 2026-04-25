@@ -80,7 +80,8 @@ test("GET /health: returns service identity + version + env", async () => {
   const body = await res.json();
   assert.equal(body.ok, true);
   assert.equal(body.service, "conclave-central-plane");
-  assert.ok(body.version.startsWith("0.4"));
+  // v0.11 — version reports current major.minor (was hardcoded 0.4 in v0.4 era).
+  assert.match(body.version, /^\d+\.\d+/);
   assert.equal(body.environment, "test");
   assert.ok(body.time);
 });

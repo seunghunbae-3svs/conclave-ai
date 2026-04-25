@@ -13,8 +13,21 @@ import type { Env } from "../env.js";
 import type { FetchLike } from "../github.js";
 import { findInstallByTokenHash, touchInstall } from "../db/installs.js";
 import { getInstallForDispatch } from "../db/telegram.js";
+import {
+  findProgressMessage,
+  insertProgressMessage,
+  updateProgressMessage,
+} from "../db/progress.js";
 import { sha256Hex } from "../util.js";
 import { TelegramClient, dispatchRepositoryEvent } from "../telegram.js";
+import {
+  renderProgressLine,
+  renderProgressMessage,
+  TELEGRAM_TEXT_LIMIT_LINES,
+  type ProgressLine,
+  type ProgressPayload,
+  type ProgressStage,
+} from "../progress-format.js";
 
 /**
  * POST /review/notify — v0.8 autonomous pipeline dispatcher.
@@ -366,6 +379,202 @@ export function createReviewRoutes(
       dispatched: state === "reworking" && dispatchError === null,
       ...(dispatchError ? { dispatchError } : {}),
       _defaultMax: AUTONOMY_DEFAULT_MAX_CYCLES,
+    });
+  });
+
+  /**
+   * v0.11 — POST /review/notify-progress
+   *
+   * Fire-and-forget progress emission from the CLI. Each call carries
+   * one ProgressStage; the central plane:
+   *
+   *   1. Looks up `progress_messages` for (install, episodic, chat).
+   *   2. If no row exists → `sendMessage` and INSERT the message_id.
+   *   3. If a row exists  → render the accumulated timeline and
+   *      `editMessageText` the same message_id, then UPDATE the row.
+   *
+   * The route fans out per linked chat (a single install can be linked
+   * to multiple chats — DM + team group). Each chat owns its own
+   * message_id; an edit to chat A cannot reach chat B's message.
+   *
+   * Response shape:
+   *   { ok: true, delivered: number, sent: number, edited: number }
+   *
+   * `delivered` = sent + edited. The split is diagnostic. Consumers
+   * (CLI) treat any 2xx as success and don't retry — re-emitting a
+   * stage on transient failure would corrupt the timeline.
+   */
+  const VALID_STAGES: readonly ProgressStage[] = [
+    "review-started",
+    "visual-capture-started",
+    "visual-capture-done",
+    "tier1-done",
+    "escalating-to-tier2",
+    "tier2-done",
+    "autofix-iter-started",
+    "autofix-iter-done",
+  ];
+
+  app.post("/review/notify-progress", async (c) => {
+    const auth = c.req.header("authorization") ?? c.req.header("Authorization");
+    if (!auth || !/^Bearer\s+(.+)$/i.test(auth)) {
+      return c.json({ error: "missing or malformed Authorization: Bearer <token>" }, 401);
+    }
+    const token = auth.replace(/^Bearer\s+/i, "").trim();
+    if (!token) return c.json({ error: "empty bearer token" }, 401);
+
+    const body = (await c.req.json().catch(() => null)) as
+      | {
+          repo_slug?: unknown;
+          episodic_id?: unknown;
+          stage?: unknown;
+          payload?: unknown;
+        }
+      | null;
+    if (!body || typeof body !== "object") {
+      return c.json({ error: "invalid JSON body" }, 400);
+    }
+    if (typeof body.repo_slug !== "string" || body.repo_slug.length === 0) {
+      return c.json({ error: "repo_slug: expected non-empty string" }, 400);
+    }
+    if (typeof body.episodic_id !== "string" || body.episodic_id.length === 0) {
+      return c.json({ error: "episodic_id: expected non-empty string" }, 400);
+    }
+    const stageValue = body.stage;
+    if (typeof stageValue !== "string" || !VALID_STAGES.includes(stageValue as ProgressStage)) {
+      return c.json({ error: `stage: expected one of ${VALID_STAGES.join("|")}` }, 400);
+    }
+    const stage = stageValue as ProgressStage;
+    const payload: ProgressPayload =
+      body.payload && typeof body.payload === "object"
+        ? (body.payload as ProgressPayload)
+        : {};
+
+    const tokenHash = await sha256Hex(token);
+    const install = await findInstallByTokenHash(c.env, tokenHash);
+    if (!install) {
+      return c.json({ error: "unknown or revoked token" }, 401);
+    }
+
+    const now = new Date().toISOString();
+    await touchInstall(c.env, install.id, now).catch((err) => {
+      console.warn("touchInstall failed:", err);
+    });
+
+    const botToken = c.env.TELEGRAM_BOT_TOKEN;
+    if (!botToken || botToken.startsWith("REPLACE_WITH_")) {
+      return c.json(
+        { ok: false, delivered: 0, error: "TELEGRAM_BOT_TOKEN not configured on central plane" },
+        503,
+      );
+    }
+    const telegram = new TelegramClient({ token: botToken, fetch: fetchImpl });
+
+    const chatRows = await c.env.DB.prepare(
+      "SELECT chat_id FROM telegram_links WHERE install_id = ?",
+    )
+      .bind(install.id)
+      .all<{ chat_id: number }>();
+    const chatIds = (chatRows.results ?? []).map((r) => r.chat_id);
+    if (chatIds.length === 0) {
+      return c.json({
+        ok: true,
+        delivered: 0,
+        sent: 0,
+        edited: 0,
+        reason: "no_linked_chat",
+      });
+    }
+
+    const newLine = renderProgressLine(stage, payload);
+    const meta = {
+      episodicId: body.episodic_id,
+      repo: body.repo_slug,
+      ...(typeof payload.pullNumber === "number" ? { pullNumber: payload.pullNumber } : {}),
+    };
+    const prNumber = typeof payload.pullNumber === "number" ? payload.pullNumber : null;
+
+    let sent = 0;
+    let edited = 0;
+    for (const chatId of chatIds) {
+      try {
+        const existing = await findProgressMessage(c.env, install.id, body.episodic_id, chatId);
+        if (!existing) {
+          const lines: ProgressLine[] = [newLine];
+          const text = renderProgressMessage(lines, meta);
+          const result = await telegram.sendMessage({
+            chatId,
+            text,
+            parseMode: "HTML",
+          });
+          if (result && typeof result.messageId === "number") {
+            await insertProgressMessage(c.env, {
+              installId: install.id,
+              episodicId: body.episodic_id,
+              chatId,
+              messageId: result.messageId,
+              prNumber,
+              repoSlug: body.repo_slug,
+              lastLines: JSON.stringify(lines),
+              lastText: text,
+              now,
+            });
+            sent += 1;
+          }
+          continue;
+        }
+        // Existing chain — append the new line and editMessageText.
+        let priorLines: ProgressLine[];
+        try {
+          const parsed = JSON.parse(existing.lastLines) as unknown;
+          priorLines = Array.isArray(parsed) ? (parsed as ProgressLine[]) : [];
+        } catch {
+          priorLines = [];
+        }
+        const truncated = priorLines.slice(-Math.max(TELEGRAM_TEXT_LIMIT_LINES - 1, 1));
+        const lines = [...truncated, newLine];
+        const text = renderProgressMessage(lines, meta);
+        if (text === existing.lastText) {
+          // Identical render — Telegram returns 400 "message is not
+          // modified". Skip the API call and refresh updated_at so the
+          // pruner doesn't reap an active chain.
+          await updateProgressMessage(c.env, {
+            installId: install.id,
+            episodicId: body.episodic_id,
+            chatId,
+            lastLines: JSON.stringify(lines),
+            lastText: text,
+            now,
+          });
+          edited += 1;
+          continue;
+        }
+        await telegram.editMessageText({
+          chatId,
+          messageId: existing.messageId,
+          text,
+          parseMode: "HTML",
+        });
+        await updateProgressMessage(c.env, {
+          installId: install.id,
+          episodicId: body.episodic_id,
+          chatId,
+          lastLines: JSON.stringify(lines),
+          lastText: text,
+          now,
+        });
+        edited += 1;
+      } catch (err) {
+        console.warn(`progress emit chat=${chatId} stage=${stage} failed:`, err);
+      }
+    }
+
+    return c.json({
+      ok: true,
+      delivered: sent + edited,
+      sent,
+      edited,
+      stage,
     });
   });
 

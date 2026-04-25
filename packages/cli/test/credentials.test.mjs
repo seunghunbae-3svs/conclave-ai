@@ -313,13 +313,17 @@ test("saveCredentials: preserves createdAt across updates", () => {
 });
 
 test("resolveKey: trims whitespace from env values", () => {
+  // v0.11 — explicitly inject `stored: {}` so the test stays
+  // hermetic on dev machines that have ~/.conclave/credentials.json
+  // populated. Without this, safeLoad() reads the local store and the
+  // 'whitespace-only env is absent' branch leaks the stored value.
   assert.equal(
-    resolveKey("anthropic", { env: { ANTHROPIC_API_KEY: "  sk-x  " } }),
+    resolveKey("anthropic", { env: { ANTHROPIC_API_KEY: "  sk-x  " }, stored: {} }),
     "sk-x",
   );
   // Whitespace-only env is treated as absent.
   assert.equal(
-    resolveKey("anthropic", { env: { ANTHROPIC_API_KEY: "   " } }),
+    resolveKey("anthropic", { env: { ANTHROPIC_API_KEY: "   " }, stored: {} }),
     undefined,
   );
 });
