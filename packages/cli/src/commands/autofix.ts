@@ -46,12 +46,12 @@ import {
 
 const execFile = promisify(execFileCallback);
 
-const HELP = `conclave autofix — autonomous fix loop for council blockers (v0.7)
+const HELP = `conclave autofix — autonomous fix loop for council blockers (v0.7+)
 
 Usage:
   conclave autofix [--pr N] [--verdict <file|->] [--budget <usd>] [--max-iterations N]
                    [--build-cmd <cmd>] [--test-cmd <cmd>] [--autonomy l2|l3]
-                   [--cwd <dir>] [--dry-run]
+                   [--rework-cycle N] [--cwd <dir>] [--dry-run]
 
 Options:
   --pr N                Pull-request number (default: current branch's open PR).
@@ -66,6 +66,12 @@ Options:
   --test-cmd <cmd>      Explicit test command (default: auto-detect).
   --autonomy l2|l3      l2 (default) — commits fixes, awaits Bae approval.
                         l3 — auto-merges when final verdict is approve.
+  --rework-cycle N      v0.10 — current rework cycle number (0 = first attempt).
+                        autofix embeds [conclave-rework-cycle:N+1] in the
+                        commit it creates so review.yml's cycle extractor
+                        picks up the next iteration on the re-triggered run.
+                        Required when running inside the consumer-side
+                        rework workflow; safe to omit for local invocation.
   --cwd <dir>           Working directory — must be checked out to the PR branch. Default '.'.
   --dry-run             Show which patches would apply; do not touch the filesystem.
   --allow-secret <id>   Allow-list a secret-guard rule id (repeatable).
@@ -97,6 +103,16 @@ export interface AutofixArgs {
   help: boolean;
   allowSecrets: string[];
   skipSecretGuard: boolean;
+  /**
+   * v0.10 — the rework cycle this autofix run is closing. autofix
+   * embeds `[conclave-rework-cycle:<reworkCycle+1>]` in its commit
+   * message so review.yml picks up the next cycle on the re-triggered
+   * run. Defaults to 0 (treated as "first attempt").
+   *
+   * Hard-clamped to AUTONOMY_HARD_CEILING_CYCLES so a malformed
+   * dispatch payload can't ratchet the marker past the safety ceiling.
+   */
+  reworkCycle: number;
 }
 
 export const HARD_MAX_ITERATIONS = 3;
@@ -104,6 +120,12 @@ export const HARD_MAX_BUDGET_USD = 10;
 export const DIFF_BUDGET_LINES = 500;
 export const DEFAULT_BUDGET_USD = 3;
 export const DEFAULT_MAX_ITERATIONS = 2;
+/**
+ * Hard ceiling that mirrors core's AUTONOMY_HARD_CEILING_CYCLES — kept
+ * as a local constant rather than imported so a malformed/missing
+ * cross-package version can't drift the safety bound.
+ */
+export const REWORK_CYCLE_HARD_CEILING = 5;
 
 export function parseArgv(argv: string[]): AutofixArgs {
   const out: AutofixArgs = {
@@ -115,6 +137,7 @@ export function parseArgv(argv: string[]): AutofixArgs {
     help: false,
     allowSecrets: [],
     skipSecretGuard: false,
+    reworkCycle: 0,
   };
   for (let i = 0; i < argv.length; i += 1) {
     const a = argv[i];
@@ -155,6 +178,16 @@ export function parseArgv(argv: string[]): AutofixArgs {
       i += 1;
     } else if (a === "--allow-secret" && argv[i + 1]) {
       out.allowSecrets.push(argv[i + 1]!);
+      i += 1;
+    } else if (a === "--rework-cycle" && argv[i + 1]) {
+      // v0.10 — clamp negative + non-finite to 0; clamp upper end to
+      // the hard ceiling. Malformed input never crashes — autofix
+      // simply behaves as a "first attempt" and the safety bound is
+      // preserved.
+      const n = Number.parseInt(argv[i + 1]!, 10);
+      if (Number.isFinite(n) && n >= 0) {
+        out.reworkCycle = Math.min(n, REWORK_CYCLE_HARD_CEILING);
+      }
       i += 1;
     }
   }
@@ -915,6 +948,15 @@ export async function runAutofix(args: AutofixArgs, deps: AutofixDeps = {}): Pro
     //     iteration. The summary line comes from the first fix's
     //     commitMessage or a generic fallback. v0.7.3 — handler-staged
     //     fixes count toward the commit body/tally alongside patch fixes.
+    //
+    // v0.10 — embed `[conclave-rework-cycle:N+1]` in the message body so
+    // review.yml's cycle extractor (the `git log -1 --pretty=%B HEAD`
+    // grep) picks up the next iteration when the push re-triggers the
+    // workflow. Skipping the marker on local-dev invocations (cycle=0
+    // and not in CI mode) avoids polluting hand-driven autofix runs.
+    // We always emit the marker when reworkCycle was passed > 0 OR
+    // when the env signal CONCLAVE_AUTONOMY_LOOP=1 is set (the
+    // consumer rework workflow sets this, see rework.yml).
     await git("git", ["add", "-A"], { cwd: args.cwd });
     const committedFixes = [...stillReady, ...stillReadyHandlerStaged];
     const title =
@@ -922,7 +964,11 @@ export async function runAutofix(args: AutofixArgs, deps: AutofixDeps = {}): Pro
     const body = committedFixes
       .map((f) => `- [${f.blocker.severity}/${f.blocker.category}] ${f.blocker.message}`)
       .join("\n");
-    const fullMsg = `${title} (conclave-ai)\n\n${body}`;
+    const inAutonomyLoop =
+      args.reworkCycle > 0 || process.env["CONCLAVE_AUTONOMY_LOOP"] === "1";
+    const nextCycle = Math.min(args.reworkCycle + 1, REWORK_CYCLE_HARD_CEILING);
+    const cycleMarker = inAutonomyLoop ? `\n\n[conclave-rework-cycle:${nextCycle}]` : "";
+    const fullMsg = `${title} (conclave-ai)\n\n${body}${cycleMarker}`;
     await git(
       "git",
       [

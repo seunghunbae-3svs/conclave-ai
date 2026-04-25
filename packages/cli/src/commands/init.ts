@@ -1,6 +1,12 @@
 import { detectRepo, type DetectRepoDeps } from "./init/repo-detect.js";
 import { writeConfig, CONFIG_FILENAME } from "./init/config-writer.js";
-import { writeWorkflow, WORKFLOW_PATH, REUSABLE_REF } from "./init/workflow-writer.js";
+import {
+  writeWorkflow,
+  writeReworkWorkflow,
+  WORKFLOW_PATH,
+  REWORK_WORKFLOW_PATH,
+  REUSABLE_REF,
+} from "./init/workflow-writer.js";
 import { createPrompter, createNonInteractivePrompter, type Prompter } from "./init/prompts.js";
 import { runOauthFlow, type OauthFlowDeps } from "./init/oauth-flow.js";
 import { CentralClient, DEFAULT_CENTRAL_URL } from "./init/central-client.js";
@@ -212,6 +218,21 @@ export async function runInit(args: InitArgs, deps: RunInitDeps = {}): Promise<n
       stdout(`• wrote: ${wfResult.path}\n`);
     }
 
+    // Step 7b — v0.10: write the consumer-side rework dispatcher so
+    // central-plane's `conclave-rework` repository_dispatch actually
+    // has a listener. Without this file the autonomous loop never
+    // closes for new installs (review fires, dispatch fires, nothing
+    // listens).
+    const reworkResult = await writeReworkWorkflow({
+      cwd: args.cwd,
+      force: args.reconfigure,
+    });
+    if (reworkResult.skipped) {
+      stdout(`• skip:  ${REWORK_WORKFLOW_PATH} exists (pass --reconfigure to overwrite)\n`);
+    } else {
+      stdout(`• wrote: ${reworkResult.path}\n`);
+    }
+
     // Step 8 — next steps.
     const needsApiKeySetup = Boolean(anthropic || openai || gemini);
     stdout(
@@ -229,7 +250,7 @@ export async function runInit(args: InitArgs, deps: RunInitDeps = {}): Promise<n
               : "")
           : `Next steps:\n  • Set at least one LLM API key secret on ${repoSlug} before opening a PR (ANTHROPIC_API_KEY required).\n`) +
         `  • Commit:\n` +
-        `       git add ${CONFIG_FILENAME} ${WORKFLOW_PATH}\n` +
+        `       git add ${CONFIG_FILENAME} ${WORKFLOW_PATH} ${REWORK_WORKFLOW_PATH}\n` +
         `       git commit -m "chore: install conclave-ai review"\n` +
         `  • Open a PR — the council will comment with a verdict, and Telegram notifications arrive` +
         (oauthOutcome === "success" ? ` in the chat you /link'd.\n` : `. (OAuth skipped — Telegram notifications disabled.)\n`),

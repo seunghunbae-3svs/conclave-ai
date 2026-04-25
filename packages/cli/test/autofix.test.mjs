@@ -58,6 +58,33 @@ test("parseArgv: --build-cmd and --test-cmd override detection", () => {
   assert.equal(a.testCmd, "make check");
 });
 
+// ---- v0.10: --rework-cycle parsing ---------------------------------------
+
+test("parseArgv: --rework-cycle defaults to 0", () => {
+  const a = parseArgv([]);
+  assert.equal(a.reworkCycle, 0);
+});
+
+test("parseArgv: --rework-cycle 2 parses to 2", () => {
+  const a = parseArgv(["--rework-cycle", "2"]);
+  assert.equal(a.reworkCycle, 2);
+});
+
+test("parseArgv: --rework-cycle clamps above hard ceiling (5)", () => {
+  const a = parseArgv(["--rework-cycle", "99"]);
+  assert.equal(a.reworkCycle, 5);
+});
+
+test("parseArgv: --rework-cycle ignores negative values (treated as default 0)", () => {
+  const a = parseArgv(["--rework-cycle", "-1"]);
+  assert.equal(a.reworkCycle, 0);
+});
+
+test("parseArgv: --rework-cycle ignores non-numeric input", () => {
+  const a = parseArgv(["--rework-cycle", "wat"]);
+  assert.equal(a.reworkCycle, 0);
+});
+
 // ---- core autofix helpers (pure) -----------------------------------------
 
 test("isFileDenied: matches .env, *.pem, *secret*", () => {
@@ -248,6 +275,7 @@ const baseArgs = {
   help: false,
   allowSecrets: [],
   skipSecretGuard: false,
+  reworkCycle: 0,
 };
 
 function makeReviewRunner(responses) {
@@ -307,6 +335,133 @@ test("runAutofix: happy path — L2 commits + awaits approval", async () => {
   assert.equal(result.mergeStatus, "not-merged");
   assert.equal(mergeCalls.length, 0, "L2 must NOT auto-merge");
   assert.ok(worker.calls.length >= 2, `expected >=2 worker calls, got ${worker.calls.length}`);
+});
+
+// ---- v0.10: cycle marker in commit message --------------------------------
+
+function findCommitArgs(gitCalls) {
+  // git is invoked via execFile-style runner; the `git commit -m ...` call
+  // has args[0] === "commit". We have to skip the leading -c overrides we
+  // pass to set the bot author.
+  const commit = gitCalls.find((c) => c.bin === "git" && c.args.includes("commit"));
+  if (!commit) return null;
+  const idx = commit.args.indexOf("-m");
+  if (idx < 0 || idx + 1 >= commit.args.length) return null;
+  return commit.args[idx + 1];
+}
+
+async function runHappyPathWithArgs(extraArgs, runReviewResponses, env) {
+  const worker = makeWorker();
+  const git = makeGit();
+  const verifier = makeVerifier();
+  const initialReviews = [
+    {
+      agent: "claude",
+      verdict: "rework",
+      summary: "",
+      blockers: [
+        { severity: "blocker", category: "type-error", message: "m", file: "src/x.ts" },
+      ],
+    },
+  ];
+  const before = process.env["CONCLAVE_AUTONOMY_LOOP"];
+  if (env && env.CONCLAVE_AUTONOMY_LOOP !== undefined) {
+    process.env["CONCLAVE_AUTONOMY_LOOP"] = env.CONCLAVE_AUTONOMY_LOOP;
+  } else {
+    delete process.env["CONCLAVE_AUTONOMY_LOOP"];
+  }
+  try {
+    const out = await runAutofix(
+      { ...baseArgs, pr: 21, ...extraArgs },
+      {
+        loadConfig: async () => fakeConfig,
+        worker,
+        git: git.exec,
+        verifier,
+        readFile: async () => "x",
+        writeTempPatch: async () => {},
+        removeTempPatch: async () => {},
+        mergePr: async () => {},
+        gh: async () => ({
+          stdout: JSON.stringify({
+            state: "OPEN",
+            headRefOid: "h",
+            updatedAt: "t",
+            headRepository: { name: "r" },
+            headRepositoryOwner: { login: "o" },
+          }),
+          stderr: "",
+        }),
+        runReview: makeReviewRunner(
+          runReviewResponses ?? [
+            { verdict: "rework", reviews: initialReviews },
+            {
+              verdict: "approve",
+              reviews: [{ agent: "claude", verdict: "approve", summary: "", blockers: [] }],
+            },
+          ],
+        ),
+        stdout: () => {},
+        stderr: () => {},
+      },
+    );
+    return { ...out, gitCalls: git.calls };
+  } finally {
+    if (before === undefined) delete process.env["CONCLAVE_AUTONOMY_LOOP"];
+    else process.env["CONCLAVE_AUTONOMY_LOOP"] = before;
+  }
+}
+
+test("runAutofix: reworkCycle=0 + no env → commit message has NO cycle marker (local-dev path)", async () => {
+  const { result, gitCalls } = await runHappyPathWithArgs({ reworkCycle: 0 });
+  assert.equal(result.iterations.length, 1);
+  const commitMsg = findCommitArgs(gitCalls);
+  assert.ok(commitMsg, "expected a git commit invocation");
+  assert.ok(
+    !commitMsg.includes("[conclave-rework-cycle:"),
+    `local-dev autofix must NOT embed cycle marker; got: ${commitMsg}`,
+  );
+});
+
+test("runAutofix: reworkCycle=2 → commit message embeds [conclave-rework-cycle:3]", async () => {
+  const { result, gitCalls } = await runHappyPathWithArgs({ reworkCycle: 2 });
+  assert.equal(result.iterations.length, 1);
+  const commitMsg = findCommitArgs(gitCalls);
+  assert.ok(commitMsg, "expected a git commit invocation");
+  assert.ok(
+    commitMsg.includes("[conclave-rework-cycle:3]"),
+    `expected marker [conclave-rework-cycle:3] in commit; got: ${commitMsg}`,
+  );
+});
+
+test("runAutofix: reworkCycle=0 + CONCLAVE_AUTONOMY_LOOP=1 → marker bumps to 1", async () => {
+  const { result, gitCalls } = await runHappyPathWithArgs(
+    { reworkCycle: 0 },
+    null,
+    { CONCLAVE_AUTONOMY_LOOP: "1" },
+  );
+  assert.equal(result.iterations.length, 1);
+  const commitMsg = findCommitArgs(gitCalls);
+  assert.ok(commitMsg, "expected a git commit invocation");
+  assert.ok(
+    commitMsg.includes("[conclave-rework-cycle:1]"),
+    `loop env must force marker even when reworkCycle=0; got: ${commitMsg}`,
+  );
+});
+
+test("runAutofix: reworkCycle=5 (at ceiling) → marker stays at 5, never exceeds", async () => {
+  const { result, gitCalls } = await runHappyPathWithArgs({ reworkCycle: 5 });
+  assert.equal(result.iterations.length, 1);
+  const commitMsg = findCommitArgs(gitCalls);
+  assert.ok(commitMsg, "expected a git commit invocation");
+  assert.ok(
+    commitMsg.includes("[conclave-rework-cycle:5]"),
+    `marker must clamp to ceiling; got: ${commitMsg}`,
+  );
+  assert.ok(
+    !commitMsg.includes("[conclave-rework-cycle:6]"),
+    `marker must NOT exceed hard ceiling; got: ${commitMsg}`,
+  );
 });
 
 // 2. L3 autonomy: auto-merges on approve

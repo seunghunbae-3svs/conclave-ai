@@ -1,0 +1,194 @@
+# Conclave AI — reusable rework (autofix) workflow (v0.10)
+#
+# Closes the autonomous rework loop on the consumer side. Fired by the
+# central plane (apps/central-plane) via `repository_dispatch` of type
+# `conclave-rework` whenever a review verdict comes back as "rework"
+# AND cycle < max. The dispatch carries `pr_number`, `cycle`,
+# `max_cycles`, and `episodic` in its client_payload. This workflow:
+#
+#   1. Checks out the PR branch (the head ref of pr_number).
+#   2. Installs @conclave-ai/cli (same pinned version as review.yml).
+#   3. Runs `conclave autofix --pr N --rework-cycle <cycle>
+#      --max-iterations 1 --autonomy l2`. Autofix (since v0.7) commits
+#      and pushes by itself; v0.10 embeds the cycle marker in the
+#      commit message so the next push re-triggers review.yml and the
+#      review workflow's cycle extractor picks up the bumped cycle.
+#   4. Posts a one-line summary on the PR so humans tracking the loop
+#      see what just happened (which blockers were fixed, cost, build
+#      status).
+#
+# The push that autofix produces re-triggers `review.yml` via the
+# `pull_request: synchronize` event in the consumer-side wrapper
+# workflow `conclave-rework.yml` written by `conclave init`. Review
+# runs again, central-plane sees the new verdict, and either approves
+# (loop ends) or fires a fresh `conclave-rework` dispatch (next cycle).
+#
+# Trust model:
+#   `repository_dispatch` is sent by the install's stored OAuth token,
+#   which only the central plane holds. A dispatch arriving here means
+#   it came from our infrastructure on behalf of an authenticated
+#   install. We still gate on `cycle < max_cycles` so a malformed
+#   dispatch can't loop forever.
+#
+# Secrets the caller MUST provide (or inherit):
+#   ANTHROPIC_API_KEY  required (autofix calls Claude as the worker).
+#   CONCLAVE_TOKEN     optional but recommended — keeps the post-autofix
+#                      review running on the central-plane path.
+#   GITHUB_TOKEN       provided automatically; needs `contents: write`
+#                      so autofix can push the fix commit.
+
+name: Conclave AI Rework (reusable)
+
+on:
+  workflow_call:
+    inputs:
+      pr-number:
+        description: 'Pull-request number from the dispatch client_payload.'
+        required: true
+        type: string
+      cycle:
+        description: 'Current rework cycle (0-based). Autofix bumps this by one in the commit marker.'
+        required: false
+        type: string
+        default: "0"
+      max-cycles:
+        description: 'Hard ceiling for rework cycles. Workflow refuses to run when cycle >= max-cycles.'
+        required: false
+        type: string
+        default: "3"
+      cli-version:
+        description: 'npm version tag for @conclave-ai/cli. Keep in lockstep with review.yml default.'
+        required: false
+        type: string
+        default: 0.10.0
+        # NOTE: when this default changes, also update the matching default
+        # in .github/workflows/review.yml so the two halves of the loop
+        # never split-version. The release workflow advances both at once.
+      build-cmd:
+        description: 'Optional explicit build command for autofix verification (default: auto-detect).'
+        required: false
+        type: string
+        default: ""
+      test-cmd:
+        description: 'Optional explicit test command for autofix verification (default: auto-detect).'
+        required: false
+        type: string
+        default: ""
+
+jobs:
+  rework:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write       # autofix pushes the fix commit
+      pull-requests: write  # autofix posts a bailout comment if needed
+    concurrency:
+      group: conclave-rework-${{ inputs.pr-number }}
+      cancel-in-progress: true
+    timeout-minutes: 15
+    steps:
+      - name: Cycle ceiling guard
+        id: guard
+        run: |
+          set -euo pipefail
+          CYCLE=${{ inputs.cycle }}
+          MAX=${{ inputs.max-cycles }}
+          # Hard upper bound: refuse to run when cycle has already reached
+          # max. The central plane normally won't fire a dispatch in that
+          # state, but defense-in-depth is cheap.
+          if [ "$CYCLE" -ge "$MAX" ]; then
+            echo "::warning::Rework cycle $CYCLE has reached max $MAX — skipping autofix."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Resolve PR head ref
+        if: steps.guard.outputs.skip != 'true'
+        id: pr
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          # Look up the PR head ref so we can check it out. We can't use
+          # `actions/checkout`'s default-branch fallback because we MUST
+          # land the autofix commit on the PR branch, not main.
+          REF=$(gh pr view "${{ inputs.pr-number }}" --json headRefName --jq .headRefName)
+          if [ -z "$REF" ]; then
+            echo "::error::Could not resolve PR #${{ inputs.pr-number }} head ref"
+            exit 1
+          fi
+          echo "head_ref=$REF" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout PR branch
+        if: steps.guard.outputs.skip != 'true'
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.pr.outputs.head_ref }}
+          fetch-depth: 0
+          # Use the GITHUB_TOKEN so the eventual `git push` from autofix
+          # has authorized credentials. Default checkout already configures
+          # this, but we make it explicit for clarity.
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup pnpm
+        if: steps.guard.outputs.skip != 'true'
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.33.0
+
+      - name: Setup Node.js
+        if: steps.guard.outputs.skip != 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install @conclave-ai/cli
+        if: steps.guard.outputs.skip != 'true'
+        run: pnpm add -g "@conclave-ai/cli@${{ inputs.cli-version }}"
+
+      - name: Configure git author for autofix commit
+        if: steps.guard.outputs.skip != 'true'
+        run: |
+          git config user.name "conclave-autofix[bot]"
+          git config user.email "noreply@conclave.ai"
+
+      - name: Run autofix (single-iteration; CI re-triggers next cycle)
+        if: steps.guard.outputs.skip != 'true'
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          CONCLAVE_TOKEN: ${{ secrets.CONCLAVE_TOKEN }}
+          CONCLAVE_CENTRAL_URL: ${{ vars.CONCLAVE_CENTRAL_URL || '' }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Tell autofix it's running inside the autonomy loop so the
+          # commit it produces gets the cycle marker even when --rework-cycle
+          # is 0 (defensive: a dispatch with cycle=0 is still a loop run).
+          CONCLAVE_AUTONOMY_LOOP: "1"
+        run: |
+          set -euo pipefail
+          EXTRA=""
+          if [ -n "${{ inputs.build-cmd }}" ]; then
+            EXTRA="$EXTRA --build-cmd '${{ inputs.build-cmd }}'"
+          fi
+          if [ -n "${{ inputs.test-cmd }}" ]; then
+            EXTRA="$EXTRA --test-cmd '${{ inputs.test-cmd }}'"
+          fi
+          # max-iterations=1 — the loop is driven by GitHub re-triggering
+          # review.yml on push, NOT by autofix's internal review-spawn.
+          # autonomy=l2 — never auto-merge from the rework loop; final
+          # approve still requires Bae's button.
+          # shellcheck disable=SC2086
+          conclave autofix \
+            --pr "${{ inputs.pr-number }}" \
+            --rework-cycle "${{ inputs.cycle }}" \
+            --max-iterations 1 \
+            --autonomy l2 \
+            $EXTRA
+
+      - name: Skipped notice
+        if: steps.guard.outputs.skip == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh pr comment "${{ inputs.pr-number }}" --body "Conclave rework loop hit the cycle ceiling (${{ inputs.cycle }}/${{ inputs.max-cycles }}). Human review needed — see open blockers above." || true
