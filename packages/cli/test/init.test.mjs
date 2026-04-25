@@ -9,7 +9,16 @@ import {
 } from "../dist/commands/init.js";
 import { parseRemoteUrl, detectRepo } from "../dist/commands/init/repo-detect.js";
 import { writeConfig, buildConfigFor, CONFIG_FILENAME, DEFAULT_CONFIG } from "../dist/commands/init/config-writer.js";
-import { writeWorkflow, WORKFLOW_PATH, WORKFLOW_CONTENT, REUSABLE_REF } from "../dist/commands/init/workflow-writer.js";
+import {
+  writeWorkflow,
+  writeReworkWorkflow,
+  WORKFLOW_PATH,
+  REWORK_WORKFLOW_PATH,
+  WORKFLOW_CONTENT,
+  REWORK_WORKFLOW_CONTENT,
+  REUSABLE_REF,
+  REWORK_REUSABLE_REF,
+} from "../dist/commands/init/workflow-writer.js";
 
 // ---- parseArgv ------------------------------------------------------------
 
@@ -196,6 +205,84 @@ test("writeWorkflow: skips existing unless force=true", async () => {
   } finally {
     await fs.rm(dir, { recursive: true, force: true });
   }
+});
+
+// ---- v0.10: rework dispatcher ---------------------------------------------
+
+test("writeReworkWorkflow: creates conclave-rework.yml with repository_dispatch trigger", async () => {
+  const dir = await mkTmpDir("conclave-init-");
+  try {
+    const r = await writeReworkWorkflow({ cwd: dir });
+    assert.equal(r.created, true);
+    assert.equal(
+      path.relative(dir, r.path),
+      path.join(".github", "workflows", "conclave-rework.yml"),
+    );
+    const body = await fs.readFile(r.path, "utf8");
+    assert.ok(body.includes(REWORK_REUSABLE_REF), "missing reusable rework ref");
+    assert.ok(
+      body.includes("repository_dispatch"),
+      "missing repository_dispatch trigger",
+    );
+    assert.ok(
+      body.includes("conclave-rework"),
+      "missing conclave-rework dispatch type",
+    );
+    assert.ok(
+      body.includes("pr-number"),
+      "missing pr-number input forwarding",
+    );
+    assert.ok(
+      body.includes("client_payload.pr_number"),
+      "missing payload.pr_number unwrapping",
+    );
+    assert.ok(
+      body.includes("contents: write"),
+      "rework workflow needs contents: write to push autofix commit",
+    );
+    assert.ok(body.includes("secrets: inherit"), "rework workflow missing secrets: inherit");
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("writeReworkWorkflow: skips existing unless force=true", async () => {
+  const dir = await mkTmpDir("conclave-init-");
+  try {
+    await fs.mkdir(path.join(dir, ".github", "workflows"), { recursive: true });
+    const target = path.join(dir, ".github", "workflows", "conclave-rework.yml");
+    await fs.writeFile(target, "# user edits\n");
+    const r = await writeReworkWorkflow({ cwd: dir });
+    assert.equal(r.skipped, true);
+    const preserved = await fs.readFile(r.path, "utf8");
+    assert.equal(preserved, "# user edits\n");
+
+    const r2 = await writeReworkWorkflow({ cwd: dir, force: true });
+    assert.equal(r2.created, true);
+    const overwritten = await fs.readFile(r2.path, "utf8");
+    assert.ok(overwritten.includes(REWORK_REUSABLE_REF));
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("WORKFLOW_PATH and REWORK_WORKFLOW_PATH are distinct", () => {
+  assert.notEqual(WORKFLOW_PATH, REWORK_WORKFLOW_PATH);
+  assert.equal(WORKFLOW_PATH, ".github/workflows/conclave.yml");
+  assert.equal(REWORK_WORKFLOW_PATH, ".github/workflows/conclave-rework.yml");
+});
+
+test("REWORK_WORKFLOW_CONTENT references rework.yml in source path", () => {
+  // Defense-in-depth: a copy-paste regression that pointed the rework
+  // workflow at review.yml would silently break the loop. Lock the path.
+  assert.ok(
+    REWORK_WORKFLOW_CONTENT.includes("rework.yml"),
+    "rework workflow content should reference rework.yml",
+  );
+  assert.ok(
+    !REWORK_WORKFLOW_CONTENT.includes("review.yml@"),
+    "rework workflow content should NOT reference review.yml",
+  );
 });
 
 // ---- runInit orchestrator (DI) -------------------------------------------
