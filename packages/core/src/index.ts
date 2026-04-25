@@ -12,6 +12,24 @@ export type { Platform, PreviewResolution, ResolvePreviewInput } from "./platfor
 export { computeAgentScore, computeAllAgentScores, AGENT_SCORE_WEIGHTS } from "./scoring.js";
 export type { AgentScore, AgentScoreComponents } from "./scoring.js";
 
+// UI / design-surface detection (v0.9.3 — shared between
+// @conclave-ai/cli's domain-detect and @conclave-ai/agent-design's
+// ui-globs so the two layers can't drift on what counts as "UI").
+export {
+  DEFAULT_UI_SIGNALS,
+  DEFAULT_EXCLUDES,
+  IMAGE_EXTS,
+  pathExt,
+  globToRegExp,
+  matchesAny,
+  isUiPath,
+  filterUiFiles,
+  diffTouchesUi,
+  extractChangedFilePaths,
+  extractChangedFilesFromDiff,
+} from "./ui-detect.js";
+export type { ChangedFile, ChangedFileStatus, UiDetectOptions } from "./ui-detect.js";
+
 // Autofix (v0.7) — shared types for the autonomous fix loop. CLI lives
 // in @conclave-ai/cli; core only owns the data contracts so consumers
 // can render autofix verdicts without pulling the CLI dep graph.

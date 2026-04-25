@@ -17,8 +17,6 @@ export {
   buildAuditPrompt,
 } from "./prompts.js";
 export {
-  UI_EXTENSIONS,
-  UI_PATH_FRAGMENTS,
   extractChangedFiles,
   isUiPath,
   filterUiFiles,
