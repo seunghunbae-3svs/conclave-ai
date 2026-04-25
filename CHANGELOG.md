@@ -1,5 +1,78 @@
 # Changelog
 
+## v0.12.0 — 2026-04-26
+
+### Added
+- **Multi-repo watch — local daemon (v0.12.0).** Fires `gh workflow run`
+  on every newly-appeared PR (and on every head-SHA change of an
+  already-watched PR) across a configurable list of repos. The "wire
+  one repo, then forget about adding new ones" experience that was
+  previously per-repo install setup.
+  - **`conclave repos`** (`add`/`list`/`remove`/`path`) — manages a
+    single per-user watch list at:
+    - Windows: `%USERPROFILE%\.conclave\repos.json`
+    - macOS / Linux: `~/.config/conclave/repos.json` (XDG-ish)
+    File mode 0600 / Windows ACL — sits next to credentials.json so
+    one perm posture covers both. Schema v1 with optional
+    `pollIntervalSec` per-repo override slot (the cadence-per-repo
+    feature itself is a v0.12.x follow-up).
+  - **`conclave watch [--interval N] [--workflow yml] [--once]
+    [--include-drafts] [--include-bots]`** — polls each watched repo
+    via `gh api repos/:slug/pulls?state=open`, diffs against the
+    in-process snapshot, and dispatches a workflow on:
+    - new open PRs
+    - existing PRs whose head SHA changed (force-push or new commit)
+    Default cadence 30s (min 5s — Telegram-rate-limit-ish guardrail).
+    Defaults to `conclave-review.yml` as the dispatched workflow.
+    Drafts and bot-authored PRs (dependabot/renovate/copilot/
+    conclave-autofix) are SKIPPED unless the matching `--include-*`
+    flag is passed. SIGINT cleanly drains the in-flight cycle and
+    exits 0.
+  - Failure posture: per-repo poll failures and per-PR dispatch
+    failures are logged + tolerated. One bad repo never breaks the
+    cycle for the others. The watch loop has no on-disk seen-set —
+    daemon restart re-fires on currently-open PRs (intentional;
+    persistence stays in scope of v0.12.x).
+  - **Tests:** 17 new `repos.test.mjs` cases (slug validation, on-disk
+    round-trip, idempotent add, defensive parse of malformed entries,
+    argv parser, runner exit codes); 13 new `watch.test.mjs` cases
+    (argv parsing, `diffPolls` semantics, `pollOpenPrs` happy path
+    + ENOENT, `dispatchReviewWorkflow` arg shape, full `runWatch`
+    loop with mocked `gh` — covers draft skip, bot skip,
+    `--include-drafts` override, head-sha-change re-dispatch, no-op
+    on stable head, per-repo failure isolation). 47/47 turbo tasks
+    green; 394 cli tests (was 358, +36 new across repos + watch).
+  - **Live verified** against `seunghunbae-3svs/eventbadge` —
+    `conclave repos add` + `conclave watch --once` polled 6 open PRs,
+    skipped #12 (draft), attempted dispatch on the other five.
+    Dispatch failures (HTTP 422 — `Workflow does not have
+    'workflow_dispatch' trigger`) are correctly treated as
+    consumer-repo workflow config issues, surfaced per-PR with the
+    exact gh error, and don't poison the cycle.
+
+### Notes
+- `@conclave-ai/cli@0.12.0`. core / integration-telegram / central-
+  plane stay on 0.11.0 (no functional changes — watch is CLI-only,
+  no protocol or persistence changes outside the CLI).
+- v0.11 left two pre-existing bugs flagged but unfixed; both have
+  follow-up shape now:
+  - **Bug A (rework episodic-not-found):** the v0.8 autonomy loop
+    assumes the original review ran on CI so the rework workflow can
+    re-load the episodic from `.conclave/episodic/...`. When a user
+    runs `conclave review` LOCALLY (as in v0.11 dogfood), the
+    episodic only exists on the local machine and the dispatched
+    rework workflow exits 1 with `episodic ... not found in store`.
+    Fix candidate for v0.12.x: have `conclave review` push the
+    episodic to central plane (`/episodic/push`) so CI rework can
+    fetch it. Out of scope for v0.12.0 — the watch flow naturally
+    re-anchors review on CI.
+  - **Bug B (telegram-bot-runner cron HTTP 409):** legacy polling
+    bot conflicts with itself / with another `getUpdates` consumer.
+    Operational fix: setWebhook to central-plane
+    `/telegram/webhook` and disable the cron workflow. No code
+    change needed — documented in the PR body so the owner can
+    apply it.
+
 ## v0.11.0 — 2026-04-26
 
 ### Added

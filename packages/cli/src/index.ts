@@ -11,6 +11,8 @@ import { migrate } from "./commands/migrate.js";
 import { scores } from "./commands/scores.js";
 import { sync } from "./commands/sync.js";
 import { mcpServer } from "./commands/mcp-server.js";
+import { repos } from "./commands/repos.js";
+import { watch } from "./commands/watch.js";
 import { CLI_VERSION } from "./version.js";
 import { hydrateEnvFromStorage } from "./lib/credentials.js";
 
@@ -33,6 +35,8 @@ Commands:
   scores                Show per-agent performance scores from memory (decision #19)
   sync                  Exchange k-anonymous baseline signal with a federation endpoint (decision #21, opt-in)
   mcp-server            Run an MCP stdio server exposing conclave's memory to Claude Desktop / Cursor / Windsurf (decision #11)
+  repos                 Manage the multi-repo watch list (v0.12)
+  watch                 Local daemon — poll watched repos for new PRs and dispatch reviews (v0.12)
   --help, -h            Show this
   --version, -v         Show version
 
@@ -117,6 +121,12 @@ export async function run(argv: string[]): Promise<void> {
       return;
     case "mcp-server":
       await mcpServer(rest);
+      return;
+    case "repos":
+      await repos(rest);
+      return;
+    case "watch":
+      await watch(rest);
       return;
     default:
       process.stderr.write(`Unknown command: ${cmd}\n\n${HELP}`);
