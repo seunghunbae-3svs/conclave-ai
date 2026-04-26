@@ -112,7 +112,13 @@ jobs:
           # Look up the PR head ref so we can check it out. We can't use
           # `actions/checkout`'s default-branch fallback because we MUST
           # land the autofix commit on the PR branch, not main.
-          REF=$(gh pr view "${{ inputs.pr-number }}" --json headRefName --jq .headRefName)
+          # v0.13.2 — explicit --repo so gh CLI doesn't try to infer it
+          # from `git config remote.origin.url` of the surrounding cwd.
+          # The step runs BEFORE actions/checkout (we need the head ref
+          # to know what to check out), so without --repo we fail with
+          # `fatal: not a git repository`. Live-caught on
+          # seunghunbae-3svs/eventbadge#25 dispatch run 24954226458.
+          REF=$(gh pr view "${{ inputs.pr-number }}" --repo "${{ github.repository }}" --json headRefName --jq .headRefName)
           if [ -z "$REF" ]; then
             echo "::error::Could not resolve PR #${{ inputs.pr-number }} head ref"
             exit 1
