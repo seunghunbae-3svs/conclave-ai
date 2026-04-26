@@ -1,5 +1,34 @@
 # Changelog
 
+## v0.13.11 — 2026-04-27
+
+### Added
+- **`conclave doctor` Telegram webhook check (v0.13.11).** Adds a 5th
+  diagnostic line that verifies the Telegram bot's registered webhook
+  URL matches what the central-plane Worker expects. The doctor never
+  sees the bot token: it hits a new `GET /admin/webhook-status`
+  endpoint on the Worker (Bearer-`CONCLAVE_TOKEN` auth, same gate as
+  every other authed route) which calls `getWebhookInfo` server-side
+  and returns `{ url, expected, matches, outcome, ... }`.
+
+  Outcome → severity:
+  - `bound` (matches=true) → OK
+  - `dropped` (Telegram cleared the webhook) → FAIL with hint to wait
+    for the self-heal cron or re-bind manually
+  - `wrong-url` (some other consumer is calling getUpdates and
+    stealing the webhook) → FAIL with "find + stop the offender" hint
+  - `no-bot-token` / `telegram-unreachable` / 401 / 404 → WARN (the
+    worker isn't in a state where it can answer; doctor's job is
+    diagnostic, not infrastructure surgery)
+
+  Total checks now: env (4) + central-plane /healthz (1) + workflow
+  pins (1) + npm version (1) + telegram webhook (1) = 8 lines.
+
+  **Tests:** 7 cases in `apps/central-plane/test/admin.test.mjs`
+  (auth gate + each outcome shape) + 8 cases in
+  `packages/cli/test/doctor.test.mjs` (each severity branch + token
+  not-leaked-in-URL). 466/466 cli, 142/142 central-plane tests pass.
+
 ## v0.13.10 — 2026-04-27
 
 ### Fixed

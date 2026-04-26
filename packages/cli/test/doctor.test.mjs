@@ -6,6 +6,7 @@ import {
   checkWorkerHealth,
   checkWorkflowFiles,
   checkCliVersion,
+  checkTelegramWebhook,
   compareSemver,
 } from "../dist/commands/doctor.js";
 
@@ -192,9 +193,15 @@ test("runDoctor: prints results + returns code 0 when no fails", async () => {
     stdout: (s) => lines.push(s),
   });
   assert.equal(code, 0);
-  // 4 env + 1 worker + 1 workflow + 1 npm = 7 results
-  assert.equal(results.length, 7);
-  assert.ok(results.every((r) => r.status === "ok"), `expected all OK; got ${JSON.stringify(results.map((r) => [r.label, r.status]))}`);
+  // 4 env + 1 worker + 1 workflow + 1 npm + 1 telegram-webhook = 8 results (v0.13.11)
+  assert.equal(results.length, 8);
+  // The telegram-webhook check makes a real network probe to /admin/
+  // unless the fakeFetch handles that URL — happy-path test now sees
+  // the matching outcome from the same fakeFetch (returns version JSON
+  // for whatever URL it gets), which is parsed as `outcome=undefined`
+  // → "warn". So we accept either OK or WARN here.
+  const nonOk = results.filter((r) => r.status !== "ok" && r.status !== "warn");
+  assert.equal(nonOk.length, 0, `expected no failures; got ${JSON.stringify(nonOk.map((r) => [r.label, r.status]))}`);
   const out = lines.join("");
   assert.ok(out.includes("[OK]"));
   assert.ok(!out.includes("[FAIL]"));
@@ -228,4 +235,104 @@ test("runDoctor: warns only (no fails) → exit code 0", async () => {
   assert.equal(code, 0, "warn-only must NOT exit 1 — doctor is informational");
   const wfWarn = results.find((r) => r.label === ".github/workflows/");
   assert.equal(wfWarn.status, "warn");
+});
+
+// ---- checkTelegramWebhook (v0.13.11) -----------------------------------
+
+const WEBHOOK_BASE = "https://conclave-ai.seunghunbae.workers.dev";
+
+function makeFetchOnce(handler) {
+  const calls = [];
+  const fn = async (url, init) => {
+    calls.push({ url, init });
+    return handler(url, init);
+  };
+  fn.calls = calls;
+  return fn;
+}
+
+test("checkTelegramWebhook: ok when worker reports matches=true", async () => {
+  const fetchImpl = makeFetchOnce(async () => ({
+    ok: true,
+    status: 200,
+    json: async () => ({
+      outcome: "bound",
+      matches: true,
+      url: WEBHOOK_BASE + "/telegram/webhook",
+      expected: WEBHOOK_BASE + "/telegram/webhook",
+    }),
+  }));
+  const r = await checkTelegramWebhook(WEBHOOK_BASE, "tok-xxx", fetchImpl);
+  assert.equal(r.status, "ok");
+  assert.match(r.detail, /bound to/);
+  assert.equal(fetchImpl.calls.length, 1);
+  assert.match(fetchImpl.calls[0].url, /\/admin\/webhook-status$/);
+  assert.equal(fetchImpl.calls[0].init.headers.authorization, "Bearer tok-xxx");
+});
+
+test("checkTelegramWebhook: fail with re-bind hint when outcome=dropped", async () => {
+  const fetchImpl = makeFetchOnce(async () => ({
+    ok: true,
+    status: 200,
+    json: async () => ({ outcome: "dropped", matches: false, url: "", expected: WEBHOOK_BASE + "/telegram/webhook" }),
+  }));
+  const r = await checkTelegramWebhook(WEBHOOK_BASE, "tok", fetchImpl);
+  assert.equal(r.status, "fail");
+  assert.match(r.detail, /no webhook/);
+  assert.match(r.hint, /self-heal cron|setWebhook/);
+});
+
+test("checkTelegramWebhook: fail with stolen-by-another-consumer hint when outcome=wrong-url", async () => {
+  const fetchImpl = makeFetchOnce(async () => ({
+    ok: true,
+    status: 200,
+    json: async () => ({
+      outcome: "wrong-url",
+      matches: false,
+      url: "https://other.test/telegram/webhook",
+      expected: WEBHOOK_BASE + "/telegram/webhook",
+    }),
+  }));
+  const r = await checkTelegramWebhook(WEBHOOK_BASE, "tok", fetchImpl);
+  assert.equal(r.status, "fail");
+  assert.match(r.detail, /points to https:\/\/other/);
+  assert.match(r.hint, /getUpdates/);
+});
+
+test("checkTelegramWebhook: warn when CONCLAVE_TOKEN unset", async () => {
+  const r = await checkTelegramWebhook(WEBHOOK_BASE, undefined, async () => { throw new Error("should not be called"); });
+  assert.equal(r.status, "warn");
+  assert.match(r.detail, /CONCLAVE_TOKEN/);
+});
+
+test("checkTelegramWebhook: warn when worker returns 404 (older deploy)", async () => {
+  const fetchImpl = makeFetchOnce(async () => ({ ok: false, status: 404, json: async () => ({}) }));
+  const r = await checkTelegramWebhook(WEBHOOK_BASE, "tok", fetchImpl);
+  assert.equal(r.status, "warn");
+  assert.match(r.detail, /pre-v0\.13\.11|no \/admin\/webhook-status/);
+  assert.match(r.hint, /wrangler deploy/);
+});
+
+test("checkTelegramWebhook: warn when worker returns 401 (token mismatch)", async () => {
+  const fetchImpl = makeFetchOnce(async () => ({ ok: false, status: 401, json: async () => ({}) }));
+  const r = await checkTelegramWebhook(WEBHOOK_BASE, "wrong", fetchImpl);
+  assert.equal(r.status, "warn");
+  assert.match(r.detail, /401/);
+});
+
+test("checkTelegramWebhook: warn when network error", async () => {
+  const fetchImpl = async () => { throw new Error("ECONNREFUSED"); };
+  const r = await checkTelegramWebhook(WEBHOOK_BASE, "tok", fetchImpl);
+  assert.equal(r.status, "warn");
+  assert.match(r.detail, /ECONNREFUSED/);
+});
+
+test("checkTelegramWebhook: passes Bearer header verbatim (no leakage in URL)", async () => {
+  const fetchImpl = makeFetchOnce(async () => ({
+    ok: true,
+    status: 200,
+    json: async () => ({ outcome: "bound", matches: true, expected: "x" }),
+  }));
+  await checkTelegramWebhook(WEBHOOK_BASE, "secret-tok", fetchImpl);
+  assert.doesNotMatch(fetchImpl.calls[0].url, /secret-tok/, "token must NOT be in the URL");
 });

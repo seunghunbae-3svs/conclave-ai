@@ -21,6 +21,7 @@ import { CLI_VERSION } from "../version.js";
  */
 
 const DEFAULT_WORKER_HEALTH = "https://conclave-ai.seunghunbae.workers.dev/healthz";
+const DEFAULT_WORKER_BASE = "https://conclave-ai.seunghunbae.workers.dev";
 const DEFAULT_NPM_REGISTRY = "https://registry.npmjs.org/@conclave-ai/cli/latest";
 const EXPECTED_REUSABLE_REPO = "seunghunbae-3svs/conclave-ai";
 const EXPECTED_REUSABLE_TAG = "v0.4";
@@ -72,11 +73,15 @@ export async function runDoctor(
   const cwd = deps.cwd ?? process.cwd();
   const stdout = deps.stdout ?? ((s: string) => process.stdout.write(s));
 
+  const conclaveToken = env.CONCLAVE_TOKEN;
+  const workerBase = (deps.workerHealthUrl ?? DEFAULT_WORKER_HEALTH).replace(/\/healthz\/?$/, "") || DEFAULT_WORKER_BASE;
+
   const checks: Promise<DoctorCheckResult[]>[] = [
     Promise.resolve(checkEnvKeys(env)),
     checkWorkerHealth(deps.workerHealthUrl ?? DEFAULT_WORKER_HEALTH, fetchImpl).then((r) => [r]),
     checkWorkflowFiles(cwd, deps).then((r) => [r]),
     checkCliVersion(deps.cliVersion ?? CLI_VERSION, deps.npmRegistryUrl ?? DEFAULT_NPM_REGISTRY, fetchImpl).then((r) => [r]),
+    checkTelegramWebhook(workerBase, conclaveToken, fetchImpl).then((r) => [r]),
   ];
   const results = (await Promise.all(checks)).flat();
 
@@ -320,6 +325,139 @@ export async function checkCliVersion(
     };
   }
 }
+
+// ---- telegram webhook ---------------------------------------------------
+
+/**
+ * v0.13.11 — Telegram webhook check.
+ *
+ * Hits `/admin/webhook-status` on the central plane (Bearer
+ * CONCLAVE_TOKEN) and reports whether the bot's registered webhook
+ * URL matches the Worker's expected URL. The actual Telegram API
+ * call is server-side; the doctor never sees the bot token.
+ *
+ * Three terminal states map onto doctor severity:
+ *   - bound (matches=true)            → OK
+ *   - dropped / wrong-url             → FAIL with re-bind hint
+ *   - no-bot-token / unreachable / 401 / 404 → WARN (the worker isn't
+ *     in a state where it can answer; the doctor's job is diagnostic,
+ *     not infrastructure surgery)
+ */
+export async function checkTelegramWebhook(
+  workerBase: string,
+  conclaveToken: string | undefined,
+  fetchImpl: typeof fetch | undefined,
+): Promise<DoctorCheckResult> {
+  const label = "telegram webhook";
+  if (!fetchImpl) {
+    return { key: "telegram-webhook", label, status: "warn", detail: "no fetch implementation" };
+  }
+  if (!conclaveToken) {
+    return {
+      key: "telegram-webhook",
+      label,
+      status: "warn",
+      detail: "CONCLAVE_TOKEN unset — cannot query /admin/webhook-status",
+      hint: "set CONCLAVE_TOKEN (the central-plane shared secret) or run `conclave config`",
+    };
+  }
+  const url = workerBase.replace(/\/$/, "") + "/admin/webhook-status";
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), HTTP_TIMEOUT_MS);
+  try {
+    const res = await fetchImpl(url, {
+      headers: { authorization: `Bearer ${conclaveToken}` },
+      signal: ctrl.signal,
+    });
+    clearTimeout(t);
+    if (res.status === 401) {
+      return {
+        key: "telegram-webhook",
+        label,
+        status: "warn",
+        detail: "central plane returned 401 (token not recognised)",
+        hint: "re-run `conclave init` or rotate CONCLAVE_TOKEN",
+      };
+    }
+    if (res.status === 404) {
+      return {
+        key: "telegram-webhook",
+        label,
+        status: "warn",
+        detail: "central plane has no /admin/webhook-status (worker pre-v0.13.11)",
+        hint: "deploy the latest central-plane (`pnpm -C apps/central-plane wrangler deploy`)",
+      };
+    }
+    if (!res.ok) {
+      return {
+        key: "telegram-webhook",
+        label,
+        status: "warn",
+        detail: `central plane returned HTTP ${res.status}`,
+      };
+    }
+    const body = (await res.json().catch(() => null)) as
+      | { outcome?: string; matches?: boolean; url?: string | null; expected?: string }
+      | null;
+    if (!body) {
+      return { key: "telegram-webhook", label, status: "warn", detail: "non-JSON response" };
+    }
+    if (body.outcome === "no-bot-token") {
+      return {
+        key: "telegram-webhook",
+        label,
+        status: "warn",
+        detail: "worker has no TELEGRAM_BOT_TOKEN — can't check binding",
+        hint: "set the secret with `wrangler secret put TELEGRAM_BOT_TOKEN`",
+      };
+    }
+    if (body.outcome === "telegram-unreachable") {
+      return {
+        key: "telegram-webhook",
+        label,
+        status: "warn",
+        detail: "worker couldn't reach api.telegram.org",
+      };
+    }
+    if (body.matches === true) {
+      return {
+        key: "telegram-webhook",
+        label,
+        status: "ok",
+        detail: `bound to ${body.expected}`,
+      };
+    }
+    if (body.outcome === "dropped") {
+      return {
+        key: "telegram-webhook",
+        label,
+        status: "fail",
+        detail: `bot has no webhook (expected ${body.expected})`,
+        hint: "wait <10 min for the self-heal cron, or POST setWebhook manually",
+      };
+    }
+    if (body.outcome === "wrong-url") {
+      return {
+        key: "telegram-webhook",
+        label,
+        status: "fail",
+        detail: `bot points to ${body.url ?? "?"}, expected ${body.expected ?? "?"}`,
+        hint: "another consumer is calling getUpdates and stealing the webhook — find + stop it",
+      };
+    }
+    return { key: "telegram-webhook", label, status: "warn", detail: `unknown outcome: ${body.outcome}` };
+  } catch (err) {
+    clearTimeout(t);
+    return {
+      key: "telegram-webhook",
+      label,
+      status: "warn",
+      detail: err instanceof Error ? err.message : String(err),
+    };
+  }
+}
+
+// ---- semver helper ------------------------------------------------------
 
 /** Returns -1 / 0 / 1 like Array.sort comparator (semver-aware, ignores
  * pre-release tags — sufficient for the latest-vs-installed check). */
