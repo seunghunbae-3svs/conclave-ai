@@ -61,6 +61,11 @@ on:
         required: false
         type: string
         default: 0.13.3
+      episodic:
+        description: 'v0.13.4 — episodic id from the dispatch client_payload. When set, the workflow fetches the full episodic from /episodic/anchor and passes it to autofix as --verdict, so autofix does NOT have to re-spawn its own review (saves ~$0.40 per cycle).'
+        required: false
+        type: string
+        default: ""
         # NOTE: when this default changes, also update the matching default
         # in .github/workflows/review.yml so the two halves of the loop
         # never split-version. The release workflow advances both at once.
@@ -158,6 +163,50 @@ jobs:
           git config user.name "conclave-autofix[bot]"
           git config user.email "noreply@conclave.ai"
 
+      # v0.13.4 — fetch the verdict from the central plane's episodic
+      # anchor (stored at /episodic/anchor by `conclave review` since
+      # v0.13). Without this step autofix would spawn its own
+      # `conclave review --pr N --json` to fetch the verdict, which:
+      #   1. doubles cost ($0.40 per cycle for the extra council run)
+      #   2. produces a duplicate verdict notification (mitigated by
+      #      v0.13.2's --no-notify, but the cost was the real issue)
+      #   3. introduces a ~30s race window where the file content the
+      #      worker patches against could differ from the file content
+      #      reviewed
+      # By passing --verdict, autofix skips the spawn entirely.
+      - name: Fetch verdict from episodic anchor
+        if: steps.guard.outputs.skip != 'true' && inputs.episodic != ''
+        id: verdict
+        env:
+          CONCLAVE_TOKEN: ${{ secrets.CONCLAVE_TOKEN }}
+          CONCLAVE_CENTRAL_URL: ${{ vars.CONCLAVE_CENTRAL_URL || '' }}
+          EPISODIC: ${{ inputs.episodic }}
+        run: |
+          set -euo pipefail
+          BASE="${CONCLAVE_CENTRAL_URL:-https://conclave-ai.seunghunbae.workers.dev}"
+          BASE="${BASE%/}"
+          if [ -z "${CONCLAVE_TOKEN:-}" ]; then
+            echo "::warning::CONCLAVE_TOKEN unset — cannot fetch verdict from anchor; autofix will fall back to spawning its own review"
+            echo "have_verdict=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          # Pull the anchor record. The route returns
+          #   { ok: true, payload: { ...EpisodicEntry } }
+          # Extract `payload` directly so autofix's --verdict consumes the
+          # episodic-entry shape (parseVerdictFile accepts both the
+          # episodic shape and the v0.7.1 --json shape).
+          if curl -fsSL \
+            -H "authorization: Bearer ${CONCLAVE_TOKEN}" \
+            "${BASE}/episodic/anchor/${EPISODIC}" \
+            -o /tmp/anchor-response.json; then
+            jq -e '.payload' /tmp/anchor-response.json > /tmp/verdict.json
+            echo "have_verdict=true" >> "$GITHUB_OUTPUT"
+            echo "Fetched verdict from anchor (${EPISODIC}): $(wc -c < /tmp/verdict.json) bytes"
+          else
+            echo "::warning::Could not fetch /episodic/anchor/${EPISODIC} — autofix will fall back to spawning its own review"
+            echo "have_verdict=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Run autofix (single-iteration; CI re-triggers next cycle)
         if: steps.guard.outputs.skip != 'true'
         env:
@@ -179,6 +228,13 @@ jobs:
           fi
           if [ -n "${{ inputs.test-cmd }}" ]; then
             EXTRA="$EXTRA --test-cmd '${{ inputs.test-cmd }}'"
+          fi
+          # v0.13.4 — pass the anchor-fetched verdict file when available,
+          # so autofix does not spawn its own review. Fallback: when the
+          # fetch failed (network blip / anchor missing for legacy review
+          # runs from before v0.13), autofix's auto-spawn path takes over.
+          if [ "${{ steps.verdict.outputs.have_verdict }}" = "true" ]; then
+            EXTRA="$EXTRA --verdict /tmp/verdict.json"
           fi
           # max-iterations=1 — the loop is driven by GitHub re-triggering
           # review.yml on push, NOT by autofix's internal review-spawn.

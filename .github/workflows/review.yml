@@ -131,7 +131,47 @@ jobs:
         with:
           fetch-depth: 0
 
+      # v0.13.4 — skip review when:
+      #   1. PR head commit message contains [skip conclave] / [skip ci]
+      #   2. The just-pushed commit changed zero files (empty commit /
+      #      --allow-empty re-trigger — exactly the pattern that drove
+      #      a $75 credit burn during the eventbadge#25 dogfood).
+      # The existing "< 3 line" skip below catches small PRs by
+      # CUMULATIVE diff against base; that doesn't help when a re-
+      # trigger is pushed on top of a non-trivial PR. This guard runs
+      # FIRST and shortcuts the whole review when the push itself was a
+      # no-op.
+      - name: Skip-conclave guard
+        id: skip-guard
+        if: github.event_name == 'pull_request'
+        run: |
+          set -euo pipefail
+          # Get the actual PR head commit message (NOT the merge-commit
+          # that pull_request workflows check out).
+          HEAD_SHA="${{ github.event.pull_request.head.sha }}"
+          MSG=$(git log -1 --format=%B "$HEAD_SHA" 2>/dev/null || echo "")
+          if echo "$MSG" | grep -qE '\[skip conclave\]|\[skip ci\]|\[ci skip\]|\[no review\]'; then
+            echo "::warning::Skip marker found in commit message — skipping review"
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "SKIP_REVIEW=true" >> "$GITHUB_ENV"
+            exit 0
+          fi
+          # `git diff-tree --no-commit-id --name-only -r HEAD` lists the
+          # files changed BY THE LATEST COMMIT (vs its parent). Empty
+          # output = empty commit = re-trigger with no real content.
+          # Falls back to "do not skip" on any failure (initial commits,
+          # detached states) — better to over-review than to silently drop.
+          CHANGED=$(git diff-tree --no-commit-id --name-only -r "$HEAD_SHA" 2>/dev/null || true)
+          if [ -z "$CHANGED" ]; then
+            echo "::warning::HEAD commit changed zero files (empty re-trigger) — skipping review"
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "SKIP_REVIEW=true" >> "$GITHUB_ENV"
+            exit 0
+          fi
+          echo "skip=false" >> "$GITHUB_OUTPUT"
+
       - name: Setup pnpm
+        if: steps.skip-guard.outputs.skip != 'true'
         uses: pnpm/action-setup@v4
         with:
           version: 10.33.0
