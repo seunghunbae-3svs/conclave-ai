@@ -12,8 +12,9 @@ across up to 3 rounds until it reaches consensus, and learns from every
 merge + rejection so future reviews match your repo's real tolerance for
 "blocker" vs "nit". Built for solo makers who ship with AI.
 
-> **Status**: v0.1 on npm. Architecture locked (see `ARCHITECTURE.md`);
-> dogfood-tested on this repo's own PRs.
+> **Status**: v0.13.x on npm. Architecture locked (see `ARCHITECTURE.md`);
+> dogfood-tested on this repo's own PRs and on `eventbadge` (live
+> autonomy-loop closing in production).
 
 ## Who this is for
 
@@ -41,7 +42,7 @@ majors / minors — no PR required. Budget-capped at $2 by default
 
 ## How it works
 
-**v0.8 — Autonomous Pipeline**: system auto-rewrites on blockers, you sign off.
+**v0.13 — Autonomous Pipeline**: system auto-rewrites on blockers, you sign off in Telegram. Worker prompt + programmatic `recountHunkHeaders` + GNU `patch -p1 --fuzz=3` fallback (v0.13.8/9/10) keep `git apply` from rejecting on worker miscounts. The closing-cycle is currently in active dogfood — see [docs/releases/v0.13.0.md](docs/releases/v0.13.0.md).
 
 ```
 You push AI-generated code
@@ -92,9 +93,10 @@ negative); here `answer-keys ∥ failure-catalog` is the primitive — decision 
   4 notifiers (Telegram/Discord/Slack/Email) + 5 platform adapters
   (Vercel/Netlify/Cloudflare Pages/Railway/GitHub deployment_status) +
   SCM + observability + visual review + CLI.
-- **11 CLI commands** covering init → audit → review → **autofix (v0.7)** →
-  rework → outcome capture → seeding → migration → scoring →
-  federated sync → MCP server.
+- **17 CLI commands** covering init → audit → review → **autofix (v0.7)** →
+  rework → **doctor (v0.13.7)** → repos / watch (v0.12) → outcome
+  capture → seeding → migration → scoring → federated sync → config →
+  MCP server.
 - **Cost per PR**: ~$0.05-$0.20 at current pricing with caching + triage,
   capped by a per-PR budget that the efficiency gate enforces before any
   LLM call fires.
@@ -111,7 +113,7 @@ negative); here `answer-keys ∥ failure-catalog` is the primitive — decision 
 | `@conclave-ai/agent-claude` | Claude reviewer — tool-use with `submit_review` + prompt caching |
 | `@conclave-ai/agent-openai` | OpenAI reviewer — strict JSON schema + cached-token discount |
 | `@conclave-ai/agent-gemini` | Gemini reviewer — long-context routing tier |
-| `@conclave-ai/cli` | `conclave` binary — 9 commands |
+| `@conclave-ai/cli` | `conclave` binary — 17 commands |
 | `@conclave-ai/scm-github` | `gh`-CLI wrapper + `conclave poll-outcomes` |
 | `@conclave-ai/platform-vercel` · `-netlify` · `-cloudflare` · `-railway` · `-deployment-status` | Preview URL resolution for visual review (decision #31) |
 | `@conclave-ai/integration-telegram` · `-discord` · `-slack` · `-email` | Equal-weight notifiers (decision #24) |
@@ -124,8 +126,13 @@ negative); here `answer-keys ∥ failure-catalog` is the primitive — decision 
 conclave init                              # scaffold config + .conclave/ in repo
 conclave audit [options]                   # v0.6+ — full-project health check
 conclave review [--pr N] [--visual]        # run the 3-round council review
+conclave autofix [--pr N --rework-cycle N] # v0.7+ — turn blockers into a patch
+conclave doctor                            # v0.13.7+ — diagnose env / worker / workflows / npm / Telegram webhook
+conclave repos add|list|remove             # v0.12+ — multi-repo registry
+conclave watch [--once]                    # v0.12+ — multi-repo PR daemon
 conclave record-outcome --id <ep-id> --result merged|rejected|reworked
 conclave poll-outcomes [--quiet]           # auto outcome capture via gh
+conclave config [get|set|list]             # v0.7.4+ — managed credentials
 conclave seed [--from <path>]              # bootstrap failure-catalog
 conclave migrate [--from <solo-cto-agent>] # port a v1 install
 conclave scores [--json]                   # per-agent weighted performance
@@ -189,6 +196,13 @@ Requires Node ≥ 20 and pnpm ≥ 9. Monorepo is [Turbo](https://turbo.build/rep
 
 See [CHANGELOG.md](CHANGELOG.md) for what's shipped. Current state per
 locked decision: [docs/decision-status.md](docs/decision-status.md).
+
+Recent (v0.13.x):
+- **v0.13.0** — visual review zero-config + episodic anchor + ops fixes
+- **v0.13.7** — `conclave doctor` + design-domain autofix + post-push deploy wait
+- **v0.13.8/9/10** — autofix patch-apply hardening (GNU `patch` fuzz fallback + worker prompt + programmatic `recountHunkHeaders`)
+- **v0.13.11** — `conclave doctor` Telegram-webhook check via `/admin/webhook-status`
+- **v0.13.12** — apply-step diagnostics (patch(1) failure reason in conflict reports) + per-package release bumping
 
 Locked design decisions (do not reopen without explicit reason) live in
 `ARCHITECTURE.md`.
