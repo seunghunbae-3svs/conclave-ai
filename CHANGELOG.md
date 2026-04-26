@@ -1,9 +1,9 @@
 # Changelog
 
-## v0.13.13 — 2026-04-27
+## v0.13.12 — 2026-04-27
 
-### Changed
-- **Apply-step fuzz fallback diagnostics (v0.13.13).** When BOTH
+### Fixed
+- **Apply-step fuzz fallback diagnostics (cli@0.13.12).** When BOTH
   `git apply --recount` AND `patch -p1 --fuzz=3` reject a worker
   patch (the autofix.ts post-loop apply step), the conflict report
   now includes:
@@ -24,36 +24,22 @@
   Pure additive: no behaviour change for successful applies. Adds
   ≤800 chars to the conflict reason on dual failure.
 
-## v0.13.12 — 2026-04-27
-
-### Changed
-- **Release: per-package bumping (v0.13.12).** `release.yml` no
-  longer advances every internal package's version on every release.
-  The new `scripts/release/bump-changed-packages.mjs` walks
-  `packages/*`, runs `git diff --name-only $PREV_TAG..HEAD --
+### Tooling (no cli version impact)
+- **Release: per-package bumping (release commit v0.11.12).**
+  `release.yml` no longer advances every internal package's version
+  on every release. The new `scripts/release/bump-changed-packages.mjs`
+  walks `packages/*`, runs `git diff --name-only $PREV_TAG..HEAD --
   packages/<pkg>` for each, and only bumps packages with at least one
   changed file. The driver package (`core`) always bumps so the
   `vX.Y.Z` tag advances every release — preserves the existing
   tag-and-publish flow.
 
-  Why: in lockstep mode, packages like `@conclave-ai/agent-design`
-  shipped a new tarball every release even when nothing in their
-  source had moved since the last release. `git log @conclave-ai/agent-design@0.10.7..@0.10.8`
-  came back empty for ~80% of internal-package "releases". After
-  v0.13.12 each tag of an internal package is a real change.
+  Live-verified on this release: only `packages/cli` and
+  `packages/core` bumped (2 files changed in the release commit
+  vs. 24 in the prior lockstep release).
 
-  Behaviour change matrix:
-  - First release on a fresh clone (no v* tag) → all packages bump
-    (legacy behaviour; preserves bootstrap)
-  - Normal release with mixed changes → driver + only-changed bump,
-    rest skipped
-  - Doc-only / workflow-only commit triggers the release → driver
-    bumps alone (the v-tag still advances; consumers see no
-    package-level change)
-
-  **Tests:** 16 unit tests in `scripts/release/bump-changed-packages.test.mjs`
-  cover `nextVersion`, `packageChangedFromList`, and the
-  `planBumps` orchestrator. Pure functions — no git, no fs.
+  16 hermetic unit tests cover `nextVersion`, `packageChangedFromList`,
+  and the `planBumps` orchestrator. Pure functions — no git, no fs.
 
 ## v0.13.11 — 2026-04-27
 
