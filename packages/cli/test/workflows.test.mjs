@@ -53,6 +53,7 @@ const ROOT = path.resolve(
 );
 const REVIEW_YML = readFileSync(path.join(ROOT, ".github/workflows/review.yml"), "utf8");
 const REWORK_YML = readFileSync(path.join(ROOT, ".github/workflows/rework.yml"), "utf8");
+const RELEASE_YML = readFileSync(path.join(ROOT, ".github/workflows/release.yml"), "utf8");
 
 // ---- RC #4 — `gh pr view` always carries --repo --------------------------
 
@@ -148,6 +149,45 @@ test("RC #11: review.yml honours [skip conclave] / [skip ci] / [no review]", () 
     REVIEW_YML,
     /\[skip ci\]/,
     "review.yml must also honour [skip ci] (alias)",
+  );
+});
+
+// ---- v0.13.9 — release.yml floating-tag auto-move ------------------------
+
+test("v0.13.9: release.yml has a 'Move floating tag' step that runs after publish", () => {
+  assert.match(
+    RELEASE_YML,
+    /Move floating tag/,
+    "release.yml must include the floating-tag move step (post-publish)",
+  );
+  // Order check: the move step must come AFTER the npm publish step,
+  // so a publish failure aborts the move (default `if: success()`).
+  const publishIdx = RELEASE_YML.indexOf("Publish to npm");
+  const moveIdx = RELEASE_YML.indexOf("Move floating tag");
+  assert.ok(publishIdx > 0 && moveIdx > 0, "both steps must exist");
+  assert.ok(
+    publishIdx < moveIdx,
+    "Publish to npm must precede Move floating tag in the YAML",
+  );
+});
+
+test("v0.13.9: release.yml move step refuses to move a non-floating (vMAJOR.MINOR.PATCH) tag", () => {
+  // Defense-in-depth: if .release-floating-tag is misconfigured to a
+  // patch tag (e.g. v0.13.9), the step must error out instead of
+  // silently force-moving an immutable release tag.
+  assert.match(
+    RELEASE_YML,
+    /not a floating tag/,
+    "move step must validate the tag shape and reject patch-pinned tags",
+  );
+});
+
+test("v0.13.9: .release-floating-tag exists at repo root and names a valid floating tag", () => {
+  const tagFile = readFileSync(path.join(ROOT, ".release-floating-tag"), "utf8").trim();
+  assert.match(
+    tagFile,
+    /^v[0-9]+(\.[0-9]+)?$/,
+    `.release-floating-tag must contain a vMAJOR or vMAJOR.MINOR string, got "${tagFile}"`,
   );
 });
 

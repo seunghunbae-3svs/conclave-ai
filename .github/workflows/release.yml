@@ -135,3 +135,41 @@ jobs:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
           NPM_CONFIG_PROVENANCE: ${{ vars.NPM_CONFIG_PROVENANCE || 'false' }}
         run: pnpm publish -r --access public --no-git-checks
+
+      # v0.13.9 — auto-move the current floating tag (e.g. v0.4) onto
+      # the just-published release commit. Pre-fix this was manual:
+      # after every patch release we'd `git tag -f v0.4 <sha> && git
+      # push --force origin v0.4`, and forgetting it left consumer
+      # `uses: ...@v0.4` workflows pinned to the previous CLI version.
+      #
+      # Source of truth: `.release-floating-tag` at the repo root (one
+      # line, e.g. `v0.4`). When the file is missing, the step is a
+      # no-op — keeps single-version repos and unrelated forks from
+      # accidentally moving a tag they don't have.
+      #
+      # Concurrency-safe: the surrounding workflow's `concurrency:
+      # release` group already serializes release runs, so two
+      # publishes can't race here.
+      - name: Move floating tag (post-publish)
+        run: |
+          set -euo pipefail
+          if [ ! -f .release-floating-tag ]; then
+            echo "No .release-floating-tag file at repo root; skipping floating-tag move."
+            exit 0
+          fi
+          FLOAT_TAG=$(tr -d '[:space:]' < .release-floating-tag)
+          if [ -z "$FLOAT_TAG" ]; then
+            echo "::warning::.release-floating-tag is empty; skipping."
+            exit 0
+          fi
+          # Refuse to move a non-floating semver tag like v0.13.9 — those
+          # are immutable per release. Floating tags look like vMAJOR or
+          # vMAJOR.MINOR (no patch component).
+          if ! echo "$FLOAT_TAG" | grep -qE '^v[0-9]+(\.[0-9]+)?$'; then
+            echo "::error::.release-floating-tag value '$FLOAT_TAG' is not a floating tag (expected vMAJOR or vMAJOR.MINOR — never vMAJOR.MINOR.PATCH)."
+            exit 1
+          fi
+          CURRENT_HEAD=$(git rev-parse --verify HEAD)
+          echo "Moving $FLOAT_TAG → $CURRENT_HEAD"
+          git tag -f "$FLOAT_TAG" "$CURRENT_HEAD"
+          git push --force origin "$FLOAT_TAG"
