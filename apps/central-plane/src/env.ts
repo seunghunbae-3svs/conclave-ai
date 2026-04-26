@@ -38,4 +38,11 @@ export interface Env {
    *     fails fast with a clear message (see src/preflight.ts).
    */
   CONCLAVE_TOKEN_KEK?: string;
+  /**
+   * v0.13.7 — public base URL of THIS Worker. Used by the webhook
+   * self-heal cron to compute the URL it should re-bind on Telegram.
+   * Defaults to the production URL when unset; override for staging
+   * or self-hosted deployments.
+   */
+  PUBLIC_BASE_URL?: string;
 }

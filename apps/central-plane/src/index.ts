@@ -1,6 +1,7 @@
 import { createApp } from "./router.js";
 import type { Env } from "./env.js";
 import { assertPreflight } from "./preflight.js";
+import { selfHealWebhook } from "./webhook-heal.js";
 
 const app = createApp();
 
@@ -19,6 +20,22 @@ export default {
       preflightCheckedFor = kek;
     }
     return app.fetch(request, env, ctx);
+  },
+  /**
+   * v0.13.7 — scheduled handler for the webhook self-heal cron.
+   * Triggered by the [triggers].crons schedule in wrangler.toml.
+   * Idempotent: only re-binds when Telegram has dropped the webhook.
+   */
+  async scheduled(event: ScheduledEvent, env: Env, ctx: ExecutionContext): Promise<void> {
+    const result = await selfHealWebhook(env);
+    // Log structured outcome so wrangler tail / observability shows
+    // exactly what happened. The scheduled trigger doesn't return data
+    // to anyone, but the log is the audit trail.
+    console.log(JSON.stringify({
+      cron: "webhook-self-heal",
+      cronExpression: event.cron,
+      ...result,
+    }));
   },
 };
 

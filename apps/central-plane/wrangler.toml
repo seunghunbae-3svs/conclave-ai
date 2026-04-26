@@ -20,3 +20,13 @@ GITHUB_CLIENT_ID = "Ov23ctqhuNRdhunT36Y9"
 # Observability. Logs retained 3 days on free tier, sufficient for v0.4-alpha.
 [observability]
 enabled = true
+
+# v0.13.7 — webhook self-heal cron. Telegram drops the registered
+# webhook the moment any consumer calls `getUpdates` on the same bot
+# token (long-polling and webhooks are mutually exclusive). In a
+# multi-repo dogfood environment, stale CI workflows or dev tools
+# occasionally do that. The cron runs every 10 minutes, checks
+# `getWebhookInfo`, and rebinds `setWebhook` if our URL is missing.
+# Worst-case window of inert action buttons = 10 min.
+[triggers]
+crons = ["*/10 * * * *"]
