@@ -1,5 +1,29 @@
 # Changelog
 
+## v0.13.13 — 2026-04-27
+
+### Changed
+- **Apply-step fuzz fallback diagnostics (v0.13.13).** When BOTH
+  `git apply --recount` AND `patch -p1 --fuzz=3` reject a worker
+  patch (the autofix.ts post-loop apply step), the conflict report
+  now includes:
+  - the patch(1) failure reason (stderr/stdout, capped at 800c) —
+    pre-fix this was silently swallowed
+  - the recounted patch (the post-fixup version that was actually
+    fed to git/patch), if it differed from the worker's raw output
+  - on a successful fuzz fallback, patch(1)'s "Hunk #N succeeded at
+    NN with fuzz Z" line is surfaced so operators can see the actual
+    offset patch had to apply
+
+  Live RC source: eventbadge#29 cycle 3 with cli@0.13.10 — the
+  per-blocker validate's fuzz fallback succeeded (autofix-worker.ts
+  uses `--dry-run`) but the apply step's fuzz fallback rejected
+  silently, leaving operators with only the original `git apply`
+  error. The new diagnostics expose what patch(1) actually said.
+
+  Pure additive: no behaviour change for successful applies. Adds
+  ≤800 chars to the conflict reason on dual failure.
+
 ## v0.13.12 — 2026-04-27
 
 ### Changed

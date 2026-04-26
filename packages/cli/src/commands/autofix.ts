@@ -972,14 +972,36 @@ export async function runAutofix(args: AutofixArgs, deps: AutofixDeps = {}): Pro
         // Windows runners it isn't, and the original error stays the
         // surfaced reason so the diagnostic still helps.
         let fuzzApplied = false;
+        // v0.13.13 — capture the fuzz-fallback failure reason so we
+        // can see it in the conflict diagnostic when BOTH `git apply`
+        // and `patch -p1 --fuzz=3` reject. Pre-fix the patch(1)
+        // stderr/stdout was silently swallowed and only the original
+        // git apply error surfaced; on eventbadge#29 cycle 3 this
+        // hid the actual mismatch reason from operators.
+        let fuzzReason: string | undefined;
         try {
-          await git("patch", ["-p1", "--fuzz=3", "-F", "3", "--no-backup-if-mismatch", "-i", tempPath], { cwd: args.cwd });
+          const r = await git(
+            "patch",
+            ["-p1", "--fuzz=3", "-F", "3", "--no-backup-if-mismatch", "-i", tempPath],
+            { cwd: args.cwd },
+          );
           fuzzApplied = true;
           appliedPaths.push(...(rf.appliedFiles ?? []));
           stderr(`autofix: \`git apply\` rejected the patch; \`patch -p1 --fuzz=3\` fallback succeeded (likely off-by-N hunk line number from worker)\n`);
-        } catch {
-          // patch(1) also failed (or isn't installed) — fall through to
-          // the original conflict-reporting path.
+          if (r.stdout && r.stdout.trim()) {
+            // patch(1) prints "Hunk #1 succeeded at NN with fuzz Z" —
+            // surface that so operators see the actual offset/fuzz
+            // patch had to apply. Helpful when comparing rework cycles.
+            stderr(`autofix:   patch(1) said: ${r.stdout.trim()}\n`);
+          }
+        } catch (fuzzErr) {
+          // patch(1) also failed (or isn't installed). Capture the
+          // reason so the conflict report can surface it.
+          fuzzReason = fuzzErr instanceof Error
+            ? (fuzzErr as Error & { stdout?: string; stderr?: string }).stderr ||
+              (fuzzErr as Error & { stdout?: string; stderr?: string }).stdout ||
+              fuzzErr.message
+            : String(fuzzErr);
         }
         if (fuzzApplied) {
           continue;
@@ -1014,7 +1036,24 @@ export async function runAutofix(args: AutofixArgs, deps: AutofixDeps = {}): Pro
             fileSnippet = buf.split(/\r?\n/).slice(0, 12).join("\n");
           } catch { /* ignore */ }
         }
-        rf.reason = `${reason}\n--- generated patch (head 1500c) ---\n${patchDump}\n--- target file head 12 lines ---\n${fileSnippet}`;
+        // v0.13.13 — also surface the recounted patch (what we actually
+        // tried to apply) and the fuzz-fallback failure reason. The
+        // raw patchDump is the worker's original output; the recounted
+        // version may differ in B/D and is what git/patch saw.
+        let recountedDump = "";
+        try {
+          const recounted = recountHunkHeaders(rf.patch ?? "");
+          if (recounted !== rf.patch) {
+            recountedDump = recounted.slice(0, 1500);
+          }
+        } catch { /* ignore */ }
+        const recountedSection = recountedDump
+          ? `\n--- recounted patch (post-fixup, head 1500c) ---\n${recountedDump}`
+          : "";
+        const fuzzSection = fuzzReason
+          ? `\n--- patch(1) --fuzz=3 fallback also failed ---\n${fuzzReason.slice(0, 800)}`
+          : "";
+        rf.reason = `${reason}${fuzzSection}\n--- generated patch (head 1500c) ---\n${patchDump}${recountedSection}\n--- target file head 12 lines ---\n${fileSnippet}`;
         applyFailed = true;
         break;
       } finally {
