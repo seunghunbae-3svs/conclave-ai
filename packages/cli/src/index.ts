@@ -13,6 +13,7 @@ import { sync } from "./commands/sync.js";
 import { mcpServer } from "./commands/mcp-server.js";
 import { repos } from "./commands/repos.js";
 import { watch } from "./commands/watch.js";
+import { doctor } from "./commands/doctor.js";
 import { CLI_VERSION } from "./version.js";
 import { hydrateEnvFromStorage } from "./lib/credentials.js";
 
@@ -37,6 +38,7 @@ Commands:
   mcp-server            Run an MCP stdio server exposing conclave's memory to Claude Desktop / Cursor / Windsurf (decision #11)
   repos                 Manage the multi-repo watch list (v0.12)
   watch                 Local daemon — poll watched repos for new PRs and dispatch reviews (v0.12)
+  doctor                Diagnose env keys / worker health / workflow pin / CLI freshness (v0.13.7)
   --help, -h            Show this
   --version, -v         Show version
 
@@ -127,6 +129,9 @@ export async function run(argv: string[]): Promise<void> {
       return;
     case "watch":
       await watch(rest);
+      return;
+    case "doctor":
+      await doctor(rest);
       return;
     default:
       process.stderr.write(`Unknown command: ${cmd}\n\n${HELP}`);

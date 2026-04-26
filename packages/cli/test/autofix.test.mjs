@@ -556,7 +556,7 @@ test("runAutofix: L3 autonomy calls gh pr merge", async () => {
       writeTempPatch: async () => {},
       removeTempPatch: async () => {},
       mergePr: async (n) => { mergeCalls.push(n); },
-      gh: async () => ({ stdout: JSON.stringify({ state: "OPEN", headRefOid: "h", updatedAt: "t", headRepository: { name: "r" }, headRepositoryOwner: { login: "o" } }), stderr: "" }),
+      gh: ghPopulatesRepo,
       runReview: makeReviewRunner([
         { verdict: "rework", reviews: [{ agent: "claude", verdict: "rework", summary: "", blockers: [{ severity: "blocker", category: "type-error", message: "m", file: "x.ts" }] }] },
         { verdict: "approve", reviews: [{ agent: "claude", verdict: "approve", summary: "", blockers: [] }] },
@@ -588,7 +588,7 @@ test("runAutofix: patch conflict → dropped, no apply attempted for that fix", 
       readFile: async () => "x",
       writeTempPatch: async () => {},
       removeTempPatch: async () => {},
-      gh: async () => ({ stdout: JSON.stringify({ state: "OPEN", headRefOid: "h", updatedAt: "t", headRepository: { name: "r" }, headRepositoryOwner: { login: "o" } }), stderr: "" }),
+      gh: ghPopulatesRepo,
       runReview: makeReviewRunner([
         { verdict: "rework", reviews: [{ agent: "claude", verdict: "rework", summary: "", blockers: [{ severity: "blocker", category: "type-error", message: "m", file: "x.ts" }] }] },
       ]),
@@ -620,7 +620,7 @@ test("runAutofix: build fails → revert + bail", async () => {
       readFile: async () => "x",
       writeTempPatch: async () => {},
       removeTempPatch: async () => {},
-      gh: async () => ({ stdout: JSON.stringify({ state: "OPEN", headRefOid: "h", updatedAt: "t", headRepository: { name: "r" }, headRepositoryOwner: { login: "o" } }), stderr: "" }),
+      gh: ghPopulatesRepo,
       runReview: makeReviewRunner([
         { verdict: "rework", reviews: [{ agent: "claude", verdict: "rework", summary: "", blockers: [{ severity: "blocker", category: "type-error", message: "m", file: "x.ts" }] }] },
       ]),
@@ -654,7 +654,7 @@ test("runAutofix: tests fail → revert, do NOT commit", async () => {
       readFile: async () => "x",
       writeTempPatch: async () => {},
       removeTempPatch: async () => {},
-      gh: async () => ({ stdout: JSON.stringify({ state: "OPEN", headRefOid: "h", updatedAt: "t", headRepository: { name: "r" }, headRepositoryOwner: { login: "o" } }), stderr: "" }),
+      gh: ghPopulatesRepo,
       runReview: makeReviewRunner([
         { verdict: "rework", reviews: [{ agent: "claude", verdict: "rework", summary: "", blockers: [{ severity: "blocker", category: "type-error", message: "m", file: "x.ts" }] }] },
       ]),
@@ -690,7 +690,7 @@ test("runAutofix: secret-guard blocks patches with secrets", async () => {
       readFile: async () => "x",
       writeTempPatch: async () => {},
       removeTempPatch: async () => {},
-      gh: async () => ({ stdout: JSON.stringify({ state: "OPEN", headRefOid: "h", updatedAt: "t", headRepository: { name: "r" }, headRepositoryOwner: { login: "o" } }), stderr: "" }),
+      gh: ghPopulatesRepo,
       runReview: makeReviewRunner([
         { verdict: "rework", reviews: [{ agent: "claude", verdict: "rework", summary: "", blockers: [{ severity: "blocker", category: "type-error", message: "m", file: "x.ts" }] }] },
       ]),
@@ -726,7 +726,7 @@ test("runAutofix: diff budget exceeded → bail", async () => {
       readFile: async () => "x",
       writeTempPatch: async () => {},
       removeTempPatch: async () => {},
-      gh: async () => ({ stdout: JSON.stringify({ state: "OPEN", headRefOid: "h", updatedAt: "t", headRepository: { name: "r" }, headRepositoryOwner: { login: "o" } }), stderr: "" }),
+      gh: ghPopulatesRepo,
       runReview: makeReviewRunner([
         { verdict: "rework", reviews: [{ agent: "claude", verdict: "rework", summary: "", blockers: [{ severity: "blocker", category: "type-error", message: "m", file: "big.ts" }] }] },
       ]),
@@ -757,7 +757,7 @@ test("runAutofix: file deny-list blocks .env.production", async () => {
       readFile: async () => "x",
       writeTempPatch: async () => {},
       removeTempPatch: async () => {},
-      gh: async () => ({ stdout: JSON.stringify({ state: "OPEN", headRefOid: "h", updatedAt: "t", headRepository: { name: "r" }, headRepositoryOwner: { login: "o" } }), stderr: "" }),
+      gh: ghPopulatesRepo,
       runReview: makeReviewRunner([
         { verdict: "rework", reviews: [{ agent: "claude", verdict: "rework", summary: "", blockers: [{ severity: "blocker", category: "type-error", message: "fix", file: ".env.production" }] }] },
       ]),
@@ -772,8 +772,8 @@ test("runAutofix: file deny-list blocks .env.production", async () => {
   assert.ok(/deny-list|.env/.test(f.reason ?? ""));
 });
 
-// 9. Design-domain blocker skipped
-test("runAutofix: design-domain blockers are skipped in v0.7", async () => {
+// 9a. Design-domain blocker WITHOUT file → skipped (no source to patch)
+test("runAutofix: design-domain blocker without `file` → skipped (v0.13.7)", async () => {
   const worker = makeWorker();
   const git = makeGit();
 
@@ -787,9 +787,9 @@ test("runAutofix: design-domain blockers are skipped in v0.7", async () => {
       readFile: async () => "x",
       writeTempPatch: async () => {},
       removeTempPatch: async () => {},
-      gh: async () => ({ stdout: JSON.stringify({ state: "OPEN", headRefOid: "h", updatedAt: "t", headRepository: { name: "r" }, headRepositoryOwner: { login: "o" } }), stderr: "" }),
+      gh: ghPopulatesRepo,
       runReview: makeReviewRunner([
-        { verdict: "rework", reviews: [{ agent: "design", verdict: "rework", summary: "", blockers: [{ severity: "blocker", category: "design-contrast", message: "contrast too low", file: "src/App.tsx" }] }] },
+        { verdict: "rework", reviews: [{ agent: "design", verdict: "rework", summary: "", blockers: [{ severity: "blocker", category: "contrast", message: "contrast too low on /dashboard" }] }] },
       ]),
       stdout: () => {},
       stderr: () => {},
@@ -798,7 +798,38 @@ test("runAutofix: design-domain blockers are skipped in v0.7", async () => {
 
   const f = result.iterations[0].fixes[0];
   assert.equal(f.status, "skipped");
-  assert.ok(/design|visual/i.test(f.reason ?? ""));
+  assert.ok(/design|visual|file/i.test(f.reason ?? ""), `reason should mention design/visual/file: ${f.reason}`);
+  assert.equal(worker.calls.length, 0, "worker must NOT be called for fileless design blockers");
+});
+
+// 9b. Design-domain blocker WITH file → runs the worker (v0.13.7 follow-up)
+test("runAutofix: design-domain blocker with `file` → worker is invoked (v0.13.7)", async () => {
+  const worker = makeWorker({ patch: "diff --git a/src/Button.tsx b/src/Button.tsx\n--- a/src/Button.tsx\n+++ b/src/Button.tsx\n@@\n-text-gray-400\n+text-gray-700\n", appliedFiles: ["src/Button.tsx"] });
+  const git = makeGit();
+
+  const { result } = await runAutofix(
+    { ...baseArgs, pr: 1, maxIterations: 1, dryRun: true },
+    {
+      loadConfig: async () => fakeConfig,
+      worker,
+      git: git.exec,
+      verifier: makeVerifier(),
+      readFile: async () => "<button className='text-gray-400'>x</button>",
+      writeTempPatch: async () => {},
+      removeTempPatch: async () => {},
+      gh: ghPopulatesRepo,
+      runReview: makeReviewRunner([
+        { verdict: "rework", reviews: [{ agent: "design", verdict: "rework", summary: "", blockers: [{ severity: "major", category: "contrast", message: "Button text contrast too low — bump from gray-400 to gray-700", file: "src/Button.tsx" }] }] },
+      ]),
+      stdout: () => {},
+      stderr: () => {},
+    },
+  );
+
+  assert.equal(worker.calls.length, 1, "worker must be invoked when design blocker names a file");
+  // The fix should NOT be marked skipped — it should be ready (dry-run halts before commit).
+  const f = result.iterations[0].fixes[0];
+  assert.notEqual(f.status, "skipped", `expected non-skipped status; got ${f.status}: ${f.reason ?? ""}`);
 });
 
 // 10. --dry-run: shows patches without applying
@@ -817,7 +848,7 @@ test("runAutofix: --dry-run prints but does not apply", async () => {
       readFile: async () => "x",
       writeTempPatch: async () => {},
       removeTempPatch: async () => {},
-      gh: async () => ({ stdout: JSON.stringify({ state: "OPEN", headRefOid: "h", updatedAt: "t", headRepository: { name: "r" }, headRepositoryOwner: { login: "o" } }), stderr: "" }),
+      gh: ghPopulatesRepo,
       runReview: makeReviewRunner([
         { verdict: "rework", reviews: [{ agent: "claude", verdict: "rework", summary: "", blockers: [{ severity: "blocker", category: "type-error", message: "m", file: "x.ts" }] }] },
       ]),
@@ -851,7 +882,7 @@ test("runAutofix: LoopGuard trip → exit 2", async () => {
       git: makeGit().exec,
       verifier: makeVerifier(),
       readFile: async () => "x",
-      gh: async () => ({ stdout: JSON.stringify({ state: "OPEN", headRefOid: "h", updatedAt: "t", headRepository: { name: "r" }, headRepositoryOwner: { login: "o" } }), stderr: "" }),
+      gh: ghPopulatesRepo,
       runReview: async () => ({ verdict: "rework", reviews: [] }),
       stdout: () => {},
       stderr: () => {},
@@ -879,7 +910,7 @@ test("runAutofix: circuit breaker trips after consecutive worker errors", async 
       git: git.exec,
       verifier: makeVerifier(),
       readFile: async () => "x",
-      gh: async () => ({ stdout: JSON.stringify({ state: "OPEN", headRefOid: "h", updatedAt: "t", headRepository: { name: "r" }, headRepositoryOwner: { login: "o" } }), stderr: "" }),
+      gh: ghPopulatesRepo,
       runReview: makeReviewRunner([
         { verdict: "rework", reviews: [{ agent: "claude", verdict: "rework", summary: "", blockers: [{ severity: "blocker", category: "type-error", message: "m", file: "x.ts" }] }] },
       ]),
@@ -1010,7 +1041,7 @@ test("runAutofix: budget exhaustion stops more worker calls", async () => {
       readFile: async () => "x",
       writeTempPatch: async () => {},
       removeTempPatch: async () => {},
-      gh: async () => ({ stdout: JSON.stringify({ state: "OPEN", headRefOid: "h", updatedAt: "t", headRepository: { name: "r" }, headRepositoryOwner: { login: "o" } }), stderr: "" }),
+      gh: ghPopulatesRepo,
       runReview: makeReviewRunner([
         {
           verdict: "rework",
@@ -1031,6 +1062,300 @@ test("runAutofix: budget exhaustion stops more worker calls", async () => {
 
   // After 2 calls ($4) budget is exceeded, so the 3rd should not run.
   assert.ok(workerCalls <= 2, `expected ≤2 worker calls, got ${workerCalls}`);
+});
+
+// ---- v0.13.5-era root-cause regressions ---------------------------------
+
+// RC #10 — multi-agent same bug → 1 worker call (in-flow check)
+//
+// The pure dedupeBlockersAcrossAgents test above (line ~137) covers the
+// helper. This test covers the integrated runAutofix flow: when 3 agents
+// tag the same line with different categories, the worker MUST be invoked
+// only once. Pre-v0.13.5 it ran 3 times, the 2nd/3rd patches conflicted
+// against an already-cleaned line, and the iteration was marked failed.
+test("runAutofix: multi-agent same bug (file+line+message) → worker called once (v0.13.5 RC #10)", async () => {
+  const worker = makeWorker();
+  const git = makeGit();
+  const verifier = makeVerifier();
+  const sameBugReviews = [
+    { agent: "claude", category: "regression", severity: "major" },
+    { agent: "openai", category: "logging", severity: "minor" },
+    { agent: "gemini", category: "code-quality", severity: "major" },
+  ].map(({ agent, category, severity }) => ({
+    agent,
+    verdict: "rework",
+    summary: "",
+    blockers: [
+      {
+        severity,
+        category,
+        message: "Remove the stray module-scope console.log",
+        file: "src/x.ts",
+        line: 2,
+      },
+    ],
+  }));
+
+  await runAutofix(
+    { ...baseArgs, pr: 21, maxIterations: 1 },
+    {
+      loadConfig: async () => fakeConfig,
+      worker,
+      git: git.exec,
+      verifier,
+      readFile: async () => "old",
+      writeTempPatch: async () => {},
+      removeTempPatch: async () => {},
+      gh: ghPopulatesRepo,
+      runReview: makeReviewRunner([{ verdict: "rework", reviews: sameBugReviews }]),
+      stdout: () => {},
+      stderr: () => {},
+    },
+  );
+
+  assert.equal(
+    worker.calls.length,
+    1,
+    `same bug across 3 agents must collapse to 1 worker call; got ${worker.calls.length}`,
+  );
+});
+
+// RC #7 — scoped staging never uses `git add -A` or `git add .`
+//
+// eventbadge#25 commit 22a0b99: autofix used `git add -A` and pulled in an
+// unrelated frontend_old/package-lock.json, which the next review flagged
+// as a compatibility blocker, blocking loop closure. v0.13.4 switched to
+// `git add -- <files>` scoped to applied/handler-staged paths.
+test("runAutofix: scoped staging — never uses `git add -A` or `git add .` (v0.13.5 RC #7)", async () => {
+  const { result, gitCalls } = await runHappyPathWithArgs({});
+  assert.ok(result.iterations.length >= 1);
+  const adds = gitCalls.filter((c) => c.bin === "git" && c.args[0] === "add");
+  assert.ok(adds.length >= 1, `expected at least one git-add; got ${adds.length}`);
+  for (const a of adds) {
+    assert.ok(!a.args.includes("-A"), `git add -A is forbidden; saw ${a.args.join(" ")}`);
+    assert.ok(
+      !(a.args.length === 2 && a.args[1] === "."),
+      `git add . is forbidden; saw ${a.args.join(" ")}`,
+    );
+  }
+  // Confirm the scoped form actually fired with the worker's appliedFiles.
+  const scoped = adds.find((a) => a.args.includes("--") && a.args.includes("src/x.ts"));
+  assert.ok(
+    scoped,
+    `expected scoped \`git add -- src/x.ts\`; saw ${adds.map((a) => a.args.join(" ")).join(" | ")}`,
+  );
+});
+
+// ---- v0.13.7 post-push deploy-wait -------------------------------------
+//
+// After autofix pushes, the next review may run before vercel/netlify finish
+// redeploying — visual review can then capture a stale preview. The poll
+// loop should: (a) exit immediately on success/failure, (b) bail out when
+// no deploy platform is attached ("unknown"), (c) bound the wait by
+// `deployWaitTimeoutMs`. Tests inject `fetchDeployStatus` + `sleep` so
+// the wait completes synchronously.
+
+function makeDeployStatusSequence(statuses) {
+  let i = 0;
+  const calls = [];
+  return {
+    calls,
+    fn: async (repo, sha) => {
+      calls.push({ repo, sha });
+      const next = statuses[Math.min(i, statuses.length - 1)];
+      i += 1;
+      return next;
+    },
+  };
+}
+
+// Wrap makeGit so `git rev-parse HEAD` returns a deterministic sha — the
+// post-push deploy-wait keys off this. The stock makeGit returns `""` for
+// every command, which the wait code interprets as "can't read HEAD; skip
+// the wait." Other tests depend on the stock behavior, so we narrow this.
+function makeGitWithHead(headSha = "deadbeef0123456789abcdef0123456789abcdef") {
+  const inner = makeGit();
+  return {
+    calls: inner.calls,
+    exec: async (bin, args, opts) => {
+      if (bin === "git" && args[0] === "rev-parse" && args[1] === "HEAD") {
+        inner.calls.push({ bin, args: [...args] });
+        return { stdout: `${headSha}\n`, stderr: "", code: 0 };
+      }
+      return inner.exec(bin, args, opts);
+    },
+  };
+}
+
+// gh mock that forces autofix.ts onto the headRepository-aware fallback so
+// `repo` ends up populated as "o/r". The deploy-wait code keys off `repo`,
+// and the stock `gh: async () => ...` mock causes fetchPrState to succeed
+// with an empty repo string ("" is falsy → wait is skipped).
+const ghPopulatesRepo = async (bin, args) => {
+  // fetchPrState's --json field set:
+  if (args.join(" ").includes("state,mergeCommit,headRefOid")) {
+    // Drop headRefOid → fetchPrState throws → autofix.ts hits the catch
+    // branch which calls the second `gh pr view` form below.
+    return { stdout: JSON.stringify({ state: "OPEN" }), stderr: "" };
+  }
+  return {
+    stdout: JSON.stringify({
+      state: "OPEN",
+      headRefOid: "h",
+      updatedAt: "t",
+      headRepository: { name: "r" },
+      headRepositoryOwner: { login: "o" },
+    }),
+    stderr: "",
+  };
+};
+
+test("runAutofix: post-push deploy wait — exits immediately on `success` (v0.13.7)", async () => {
+  const stdoutBuf = [];
+  const ds = makeDeployStatusSequence(["success"]);
+  const sleeps = [];
+  const worker = makeWorker();
+  const git = makeGitWithHead();
+
+  await runAutofix(
+    { ...baseArgs, pr: 21 },
+    {
+      loadConfig: async () => fakeConfig,
+      worker,
+      git: git.exec,
+      verifier: makeVerifier(),
+      readFile: async () => "x",
+      writeTempPatch: async () => {},
+      removeTempPatch: async () => {},
+      gh: ghPopulatesRepo,
+      fetchDeployStatus: ds.fn,
+      sleep: async (ms) => { sleeps.push(ms); },
+      runReview: makeReviewRunner([
+        { verdict: "rework", reviews: [{ agent: "claude", verdict: "rework", summary: "", blockers: [{ severity: "blocker", category: "type-error", message: "m", file: "src/x.ts" }] }] },
+        { verdict: "approve", reviews: [{ agent: "claude", verdict: "approve", summary: "", blockers: [] }] },
+      ]),
+      stdout: (s) => stdoutBuf.push(s),
+      stderr: () => {},
+    },
+  );
+
+  assert.equal(ds.calls.length, 1, "should poll deploy status exactly once when first call returns success");
+  assert.equal(sleeps.length, 0, "no sleep needed when deploy is already success");
+  assert.ok(stdoutBuf.join("").includes("deploy preview ready"), "should announce deploy ready");
+});
+
+test("runAutofix: post-push deploy wait — bails immediately when no deploy platform attached (`unknown`) (v0.13.7)", async () => {
+  const stdoutBuf = [];
+  const ds = makeDeployStatusSequence(["unknown"]);
+  const sleeps = [];
+  const worker = makeWorker();
+  const git = makeGitWithHead();
+
+  await runAutofix(
+    { ...baseArgs, pr: 21 },
+    {
+      loadConfig: async () => fakeConfig,
+      worker,
+      git: git.exec,
+      verifier: makeVerifier(),
+      readFile: async () => "x",
+      writeTempPatch: async () => {},
+      removeTempPatch: async () => {},
+      gh: ghPopulatesRepo,
+      fetchDeployStatus: ds.fn,
+      sleep: async (ms) => { sleeps.push(ms); },
+      runReview: makeReviewRunner([
+        { verdict: "rework", reviews: [{ agent: "claude", verdict: "rework", summary: "", blockers: [{ severity: "blocker", category: "type-error", message: "m", file: "src/x.ts" }] }] },
+        { verdict: "approve", reviews: [{ agent: "claude", verdict: "approve", summary: "", blockers: [] }] },
+      ]),
+      stdout: (s) => stdoutBuf.push(s),
+      stderr: () => {},
+    },
+  );
+
+  assert.equal(ds.calls.length, 1, "should NOT poll past the first `unknown` (no deploy platform)");
+  assert.equal(sleeps.length, 0, "no sleep when there's nothing to wait for");
+  assert.ok(/no deploy preview detected/.test(stdoutBuf.join("")), "should announce skip-wait");
+});
+
+test("runAutofix: post-push deploy wait — polls past `pending`, exits on terminal `success` (v0.13.7)", async () => {
+  const stdoutBuf = [];
+  const ds = makeDeployStatusSequence(["pending", "pending", "success"]);
+  const sleeps = [];
+  const worker = makeWorker();
+  const git = makeGitWithHead();
+
+  await runAutofix(
+    { ...baseArgs, pr: 21 },
+    {
+      loadConfig: async () => fakeConfig,
+      worker,
+      git: git.exec,
+      verifier: makeVerifier(),
+      readFile: async () => "x",
+      writeTempPatch: async () => {},
+      removeTempPatch: async () => {},
+      gh: ghPopulatesRepo,
+      fetchDeployStatus: ds.fn,
+      sleep: async (ms) => { sleeps.push(ms); },
+      deployWaitIntervalMs: 100,
+      runReview: makeReviewRunner([
+        { verdict: "rework", reviews: [{ agent: "claude", verdict: "rework", summary: "", blockers: [{ severity: "blocker", category: "type-error", message: "m", file: "src/x.ts" }] }] },
+        { verdict: "approve", reviews: [{ agent: "claude", verdict: "approve", summary: "", blockers: [] }] },
+      ]),
+      stdout: (s) => stdoutBuf.push(s),
+      stderr: () => {},
+    },
+  );
+
+  assert.equal(ds.calls.length, 3, "should poll 3 times (pending, pending, success)");
+  assert.equal(sleeps.length, 2, "should sleep between the 3 polls");
+  assert.deepEqual(sleeps, [100, 100], "sleep duration honors deployWaitIntervalMs");
+  assert.ok(/deploy preview ready/.test(stdoutBuf.join("")), "should announce eventual success");
+});
+
+test("runAutofix: post-push deploy wait — bounds total wait by deployWaitTimeoutMs and proceeds anyway (v0.13.7)", async () => {
+  const stderrBuf = [];
+  // Pending forever — the loop must exit on the timeout budget, not poll endlessly.
+  const ds = makeDeployStatusSequence(["pending"]);
+  let virtualClock = 0;
+  const dateNowOriginal = Date.now;
+  Date.now = () => virtualClock;
+  const worker = makeWorker();
+  const git = makeGitWithHead();
+
+  try {
+    await runAutofix(
+      { ...baseArgs, pr: 21 },
+      {
+        loadConfig: async () => fakeConfig,
+        worker,
+        git: git.exec,
+        verifier: makeVerifier(),
+        readFile: async () => "x",
+        writeTempPatch: async () => {},
+        removeTempPatch: async () => {},
+        gh: ghPopulatesRepo,
+        fetchDeployStatus: ds.fn,
+        // Each "sleep" advances the virtual clock by the requested ms.
+        sleep: async (ms) => { virtualClock += ms; },
+        deployWaitTimeoutMs: 1000,
+        deployWaitIntervalMs: 200,
+        runReview: makeReviewRunner([
+          { verdict: "rework", reviews: [{ agent: "claude", verdict: "rework", summary: "", blockers: [{ severity: "blocker", category: "type-error", message: "m", file: "src/x.ts" }] }] },
+          { verdict: "approve", reviews: [{ agent: "claude", verdict: "approve", summary: "", blockers: [] }] },
+        ]),
+        stdout: () => {},
+        stderr: (s) => stderrBuf.push(s),
+      },
+    );
+  } finally {
+    Date.now = dateNowOriginal;
+  }
+
+  // 1000ms budget / 200ms steps → at most 5 sleeps before the loop bails.
+  assert.ok(ds.calls.length >= 2 && ds.calls.length <= 7, `expected 2-7 polls; got ${ds.calls.length}`);
+  assert.ok(/still pending/.test(stderrBuf.join("")), "should warn that we're proceeding without convergence");
 });
 
 // 17. renderAutofixSummary produces human-readable output

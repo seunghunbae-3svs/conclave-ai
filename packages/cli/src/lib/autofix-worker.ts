@@ -101,16 +101,39 @@ export async function runPerBlocker(
   input: BuildPerBlockerContextInput,
   deps: AutofixWorkerDeps,
 ): Promise<BlockerFix> {
-  // Design-domain blockers require visual judgment — explicit skip per
-  // v0.7 scope. Category strings set by DesignAgent all start with
-  // "design-*" or "ui-*"; we match case-insensitively.
+  // Design-domain blockers — v0.13.7 update.
+  //
+  // Pre-v0.13.7 we hard-skipped any blocker whose category started with
+  // "design-*" / "ui-*" / "visual-*". That left a class of trivially
+  // fixable visual regressions on the table — e.g. a contrast or
+  // accessibility blocker that names a specific component file (`file:
+  // "src/Button.tsx"`) is structurally no different from a code blocker:
+  // the worker can swap a Tailwind class, a color value, or an aria-*
+  // prop and produce a clean unified diff.
+  //
+  // New rule: only skip when there is no `file` field — i.e. the blocker
+  // points at a visual surface (route label, screenshot id) with no
+  // attributable source. With a `file` set, fall through to the worker;
+  // if the file doesn't exist or the worker can't see how to patch, the
+  // downstream patch-validation handles it (worker-error / no-patch).
   const cat = input.blocker.category?.toLowerCase() ?? "";
-  if (cat.startsWith("design") || cat.startsWith("ui-") || cat.startsWith("visual")) {
+  const isDesignDomain =
+    cat.startsWith("design") ||
+    cat.startsWith("ui-") ||
+    cat.startsWith("visual") ||
+    cat === "contrast" ||
+    cat === "accessibility" ||
+    cat === "layout-regression" ||
+    cat === "style-drift" ||
+    cat === "cropped-text" ||
+    cat === "missing-state" ||
+    cat === "overflow";
+  if (isDesignDomain && !input.blocker.file) {
     return {
       agent: input.agent,
       blocker: input.blocker,
       status: "skipped",
-      reason: "design-domain blocker — human visual judgment required (autofix v0.7)",
+      reason: "design-domain blocker without a file — human visual judgment required",
     };
   }
 

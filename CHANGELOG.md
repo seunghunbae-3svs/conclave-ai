@@ -1,5 +1,79 @@
 # Changelog
 
+## v0.13.7 — 2026-04-27
+
+### Added
+- **`conclave doctor` (v0.13.7).** New top-level command that runs four
+  fixed checks and prints one line per check (`[OK]` / `[WARN]` /
+  `[FAIL]` + remediation hint), no LLM calls:
+  1. env keys — `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` /
+     `GEMINI_API_KEY` (or `GOOGLE_API_KEY` fallback) / `CONCLAVE_TOKEN`
+  2. central-plane `/healthz` — verifies the Cloudflare Worker is up +
+     surfaces version + D1 binding status
+  3. `.github/workflows/` — locates any workflow that pins
+     `seunghunbae-3svs/conclave-ai/.github/workflows/...@<ref>` and
+     warns when the ref drifts from the expected floating tag
+  4. installed CLI version vs latest on npm — semver compare, suggests
+     `npm i -g @conclave-ai/cli@<latest>` when behind
+  Returns exit 1 only on a real `FAIL` (missing env, dead worker);
+  warnings are informational. Fully testable — all I/O (`fetch`,
+  `readDir`, `readFile`) injectable. **22 doctor tests** added.
+- **Autofix can now patch design-domain blockers that name a `file`
+  (v0.13.7 follow-up to the v0.7.1 TODO).** Pre-fix, every
+  design-tagged blocker (categories `contrast`, `accessibility`,
+  `layout-regression`, `style-drift`, `cropped-text`, `missing-state`,
+  `overflow`, plus the `design-*` / `ui-*` / `visual-*` prefixes) was
+  hard-skipped on the assumption that visual judgment requires a human.
+  In practice most design-agent blockers DO name a source file
+  (Tailwind utility class swap, color token bump, aria-* prop edit) —
+  the worker can produce a clean unified diff against it. New rule:
+  skip only when no `file` is set; otherwise fall through to the
+  worker and let the downstream patch-validation handle non-fixable
+  cases as `worker-error` / `no-patch`. Hard-skips still apply for
+  fileless visual surfaces (route labels, screenshot ids).
+
+### Fixed
+- **Autofix: post-push deploy preview wait (v0.13.7).** After a
+  successful autofix push, the next review could fire before
+  Vercel/Netlify finished redeploying — visual review then captured
+  the STALE preview that didn't reflect the fix. Autofix now polls
+  `fetchDeployStatus` (the `gh api .../check-runs` reader from
+  `@conclave-ai/scm-github`) for the new commit's deploy status:
+  - **`success`** → continue to next iteration
+  - **`failure`** → log warning + continue (re-review may flag the
+    broken UI; better to surface than hide)
+  - **`pending`** → poll every 15 s up to 5 min, then proceed anyway
+    (better stale-preview review than hung autofix loop)
+  - **`unknown`** → no deploy platform attached; skip the wait
+    immediately (no-op for non-deploy repos)
+  All thresholds (`deployWaitTimeoutMs`, `deployWaitIntervalMs`),
+  the status fetcher, and the `sleep` helper are deps-injectable so
+  the loop runs synchronously in tests. **4 deploy-wait tests** added.
+
+### Internal
+- **Hermetic regression tests for the v0.13.5-era root causes.**
+  Pre-this-session, last session's burnt-credit dogfood surfaced 14
+  root causes; the in-progress regression tests in `autofix.test.mjs`
+  had a variable-mismatch bug and were reverted to keep the suite
+  green. Re-implemented cleanly:
+  - **RC #10 — multi-agent same-bug → 1 worker call.** Runs the full
+    `runAutofix` flow with 3 agents (claude / openai / gemini) tagging
+    the same console.log under different categories. Asserts
+    `worker.calls.length === 1` (collapsed by dedupe).
+  - **RC #7 — scoped staging never uses `git add -A` or `git add .`.**
+    Asserts every `git add` invocation in the post-commit staging path
+    is the scoped form (`git add -- <files>`) and that the worker's
+    `appliedFiles` actually drives the file list.
+  - **RC #13 — `defaultSpawnReview` passes `--no-notify`.** Drives the
+    real `defaultSpawnReview` against a fake conclave binary that
+    captures its argv to stderr; asserts `--no-notify` is in the call.
+  All 3 tests run from a `dist/` build, no live network, no LLM.
+
+### Removed
+- **`runAutofix: design-domain blockers are skipped in v0.7`** —
+  superseded by the two new design-blocker tests (no-file → skipped,
+  with-file → worker invoked).
+
 ## v0.13.0 — 2026-04-26
 
 ### Added

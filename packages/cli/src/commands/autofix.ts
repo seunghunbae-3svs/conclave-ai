@@ -30,7 +30,7 @@ import {
   type WorkerContext,
 } from "@conclave-ai/agent-worker";
 import { formatFinding, scanPatch, type ScanResult } from "@conclave-ai/secret-guard";
-import { fetchPrState, type GhRunner, type PullRequestState } from "@conclave-ai/scm-github";
+import { fetchPrState, fetchDeployStatus as defaultFetchDeployStatus, type DeployStatus, type GhRunner, type PullRequestState } from "@conclave-ai/scm-github";
 import { loadConfig, resolveMemoryRoot, type ConclaveConfig } from "../lib/config.js";
 import { runPerBlocker, type GitLike, type WorkerLike } from "../lib/autofix-worker.js";
 import { runSpecialHandlers } from "../lib/autofix-handlers/index.js";
@@ -245,6 +245,26 @@ export interface AutofixDeps {
   readStdin?: () => Promise<string>;
   /** Run `gh pr merge`. Tests inject a stub. */
   mergePr?: (prNumber: number, cwd: string) => Promise<void>;
+  /**
+   * v0.13.7 — read deploy preview status for a given commit SHA. Defaults
+   * to `fetchDeployStatus` from `@conclave-ai/scm-github` (uses `gh api
+   * /repos/.../check-runs`). Tests inject a stub to drive the poll loop
+   * without hitting GitHub.
+   */
+  fetchDeployStatus?: (repo: string, sha: string) => Promise<DeployStatus>;
+  /**
+   * v0.13.7 — sleep helper used between deploy-status polls. Tests pass a
+   * no-op so the post-push wait completes synchronously.
+   */
+  sleep?: (ms: number) => Promise<void>;
+  /**
+   * v0.13.7 — total wait budget for the post-push deploy convergence
+   * poll. Default 5 min. Once exceeded, autofix proceeds and lets the
+   * next review run regardless — better stale than hung.
+   */
+  deployWaitTimeoutMs?: number;
+  /** v0.13.7 — interval between deploy-status polls. Default 15 s. */
+  deployWaitIntervalMs?: number;
   /** Stdout / stderr sinks. */
   stdout?: (s: string) => void;
   stderr?: (s: string) => void;
@@ -1137,6 +1157,46 @@ export async function runAutofix(args: AutofixArgs, deps: AutofixDeps = {}): Pro
     await git("git", ["push"], { cwd: args.cwd }).catch((err) => {
       stderr(`autofix: git push warning — ${err instanceof Error ? err.message : String(err)}\n`);
     });
+
+    // v0.13.7 — wait for the deploy preview of the just-pushed commit to
+    // converge before yielding to the next review. Without this, a
+    // visual review can capture the STALE preview that vercel/netlify
+    // hasn't redeployed yet, then flag the same regressions autofix
+    // just patched. The poll exits early on success/failure, returns
+    // immediately when no deploy platform is attached (fetchDeployStatus
+    // → "unknown"), and bounds the total wait at 5 min by default.
+    if (repo) {
+      let pushedSha = "";
+      try {
+        const r = await git("git", ["rev-parse", "HEAD"], { cwd: args.cwd });
+        pushedSha = r.stdout.trim();
+      } catch {
+        // If we can't read HEAD we can't poll — skip the wait.
+      }
+      if (pushedSha) {
+        const fetchDS = deps.fetchDeployStatus ?? defaultFetchDeployStatus;
+        const sleep = deps.sleep ?? ((ms: number) => new Promise((res) => setTimeout(res, ms)));
+        const totalMs = deps.deployWaitTimeoutMs ?? 5 * 60_000;
+        const stepMs = deps.deployWaitIntervalMs ?? 15_000;
+        let status: DeployStatus = await fetchDS(repo, pushedSha).catch(() => "unknown");
+        if (status === "unknown") {
+          stdout(`autofix: no deploy preview detected at ${pushedSha.slice(0, 7)} — skipping deploy wait\n`);
+        } else {
+          const startMs = Date.now();
+          while (status === "pending" && Date.now() - startMs < totalMs) {
+            await sleep(stepMs);
+            status = await fetchDS(repo, pushedSha).catch(() => "pending");
+          }
+          if (status === "success") {
+            stdout(`autofix: deploy preview ready at ${pushedSha.slice(0, 7)} — re-review can run against fresh URL\n`);
+          } else if (status === "failure") {
+            stderr(`autofix: deploy preview FAILED at ${pushedSha.slice(0, 7)} — re-review may flag the broken UI\n`);
+          } else {
+            stderr(`autofix: deploy preview still pending after ${Math.round(totalMs / 60_000)}min at ${pushedSha.slice(0, 7)} — proceeding anyway\n`);
+          }
+        }
+      }
+    }
 
     iterations.push(
       finalizeIteration(

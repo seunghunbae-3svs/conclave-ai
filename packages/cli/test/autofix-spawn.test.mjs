@@ -603,6 +603,42 @@ test("v0.7.2 defaultSpawnReview: exit 2 (reject) DOES NOT THROW — returns {cod
   }
 });
 
+// v0.13.2 RC #13 — defaultSpawnReview must pass --no-notify so the spawned
+// verdict-fetch review doesn't push a duplicate Telegram notification (the
+// upstream rework workflow's earlier review already notified). Pre-fix the
+// chat saw "Conclave reviewing..." → "verdict: rework" twice per cycle.
+test("v0.13.2 defaultSpawnReview: passes --no-notify to spawned review (RC #13)", async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "conclave-autofix-test-"));
+  const script = path.join(dir, "conclave.js");
+  // Fake binary: writes its received argv (post-script-path) to stderr,
+  // then a valid approve verdict to stdout, then exits 0. We assert on
+  // the captured argv to confirm --no-notify is in the call.
+  const src = `
+process.stderr.write(JSON.stringify(process.argv.slice(2)));
+process.stdout.write(${JSON.stringify(approveVerdictJson)});
+process.exit(0);
+`;
+  await fs.writeFile(script, src, "utf8");
+  try {
+    const result = await callDefaultSpawnReviewWithFakeBinary(script, dir);
+    assert.equal(result.code, 0);
+    const argv = JSON.parse(result.stderr);
+    assert.equal(argv[0], "review", `first arg must be 'review'; got ${JSON.stringify(argv)}`);
+    assert.ok(
+      argv.includes("--no-notify"),
+      `defaultSpawnReview must pass --no-notify; got argv=${JSON.stringify(argv)}`,
+    );
+    assert.ok(
+      argv.includes("--json"),
+      `defaultSpawnReview must request --json; got argv=${JSON.stringify(argv)}`,
+    );
+    const prIdx = argv.indexOf("--pr");
+    assert.ok(prIdx >= 0 && argv[prIdx + 1] === "999", `expected --pr 999; got argv=${JSON.stringify(argv)}`);
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});
+
 test("v0.7.2 defaultSpawnReview: exit 5 (crash) throws with clear message", async () => {
   const { dir, script } = await makeFakeConclave(5, "", "boom: subprocess crashed");
   try {
