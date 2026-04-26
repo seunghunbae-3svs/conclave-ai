@@ -1,6 +1,16 @@
-import type { Notifier, NotifyReviewInput } from "@conclave-ai/core";
-import { TelegramClient, type HttpFetch, type TelegramInlineKeyboard } from "./client.js";
+import type {
+  Notifier,
+  NotifyReviewInput,
+  NotifyProgressInput,
+} from "@conclave-ai/core";
+import {
+  TelegramClient,
+  type HttpFetch,
+  type TelegramInlineKeyboard,
+  type TelegramMessage,
+} from "./client.js";
 import { formatReviewForTelegram, formatPlainSummaryForTelegram } from "./format.js";
+import { renderProgressLine, renderProgressMessage, type ProgressLine } from "./progress-format.js";
 
 /**
  * Default Conclave central plane URL. Duplicated from
@@ -78,12 +88,28 @@ export class TelegramNotifier implements Notifier {
   private readonly centralFetch: HttpFetch | null;
   private readonly repoSlug: string;
 
-  // path B (direct bot) — populated when useCentralPlane is off
+  // path B (direct bot) — populated when useCentralPlane is off OR when
+  // central-mode also has TELEGRAM_BOT_TOKEN + TELEGRAM_CHAT_ID present
+  // (v0.11 — kept around so progress streaming can fall back to the Bot
+  // API directly when the central plane returns 404 / 5xx for
+  // /review/notify-progress, e.g. the Worker hasn't been re-deployed
+  // since the route was added).
   private readonly chatId: number | string | null;
   private readonly client: TelegramClient | null;
 
   private readonly includeActionButtons: boolean;
   private readonly log: (msg: string) => void;
+
+  /**
+   * v0.11 — in-process progress chains. Keyed by (episodicId, pullNumber)
+   * so the same review's stage emissions accumulate onto one message.
+   * Direct path only — central path persists in D1 because the notifier
+   * instance per CLI invocation is short-lived.
+   */
+  private readonly progressChains = new Map<
+    string,
+    { messageId: number; lines: ProgressLine[]; lastText: string; chatId: number | string }
+  >();
 
   constructor(opts: TelegramNotifierOptions = {}) {
     this.includeActionButtons = opts.includeActionButtons ?? true;
@@ -128,13 +154,37 @@ export class TelegramNotifier implements Notifier {
       ).replace(/\/$/, "");
       this.centralFetch = opts.fetch ?? null;
       this.repoSlug = opts.repoSlug ?? process.env["GITHUB_REPOSITORY"] ?? "unknown/unknown";
-      this.chatId = null;
-      this.client = null;
+      // v0.11 — opportunistic dual-init: when running in central mode
+      // AND the legacy direct-path env creds are also present, build
+      // the direct client too so notifyProgress can fall back to it
+      // when the central plane's /review/notify-progress route is
+      // missing (e.g. consumer Worker hasn't been re-deployed since
+      // v0.11). Pre-v0.11 behaviour (direct fields = null in central
+      // mode) is preserved when only central creds are set.
+      const fbToken = opts.token ?? process.env["TELEGRAM_BOT_TOKEN"] ?? "";
+      const fbChatRaw = opts.chatId ?? process.env["TELEGRAM_CHAT_ID"] ?? "";
+      if (fbToken && fbChatRaw) {
+        this.chatId =
+          typeof fbChatRaw === "string" && /^-?\d+$/.test(fbChatRaw)
+            ? Number(fbChatRaw)
+            : fbChatRaw;
+        if (opts.client) {
+          this.client = opts.client;
+        } else {
+          const clientOpts: ConstructorParameters<typeof TelegramClient>[0] = { token: fbToken };
+          if (opts.fetch) clientOpts.fetch = opts.fetch;
+          if (opts.baseUrl) clientOpts.baseUrl = opts.baseUrl;
+          this.client = new TelegramClient(clientOpts);
+        }
+      } else {
+        this.chatId = null;
+        this.client = null;
+      }
       // Diagnostic log — never logs the actual token value. Length only.
       // Helps consumer-repo operators see at a glance whether their
       // `CONCLAVE_TOKEN` secret actually reached the review step.
       this.log(
-        `conclave review: CONCLAVE_TOKEN is set (length: ${conclaveToken.length}) — attempting central plane path (url: ${this.centralUrl})`,
+        `conclave review: CONCLAVE_TOKEN is set (length: ${conclaveToken.length}) — attempting central plane path (url: ${this.centralUrl}${this.client ? "; direct fallback armed for progress" : ""})`,
       );
       return;
     }
@@ -304,6 +354,149 @@ export class TelegramNotifier implements Notifier {
       sendParams.reply_markup = buildActionKeyboard(input);
     }
     await this.client.sendMessage(sendParams);
+  }
+
+  /**
+   * v0.11 — emit a progress stage. First call per (episodicId, pullNumber)
+   * sends a fresh message; subsequent calls append a line and edit the
+   * same message in place. Failures here are logged and swallowed —
+   * progress is telemetry, not the verdict, and a 429 / network blip
+   * must not break the review flow.
+   *
+   * Central path: route through `/review/notify-progress` (one-shot
+   * stage emission; the central plane owns the message_id persistence).
+   *
+   * Direct path: keep the chain in-process. Single CLI invocation =
+   * single notifier instance = single chain — autofix runs in a separate
+   * process and starts its own chain by design.
+   */
+  async notifyProgress(input: NotifyProgressInput): Promise<void> {
+    if (this.centralToken && this.centralUrl) {
+      try {
+        await this.notifyProgressViaCentral(input);
+        return;
+      } catch (err) {
+        const msg = (err as Error).message;
+        // v0.11 — central plane returns HTTP 404 when the Worker
+        // hasn't been re-deployed since the /review/notify-progress
+        // route landed. Fall back to direct path if it's available;
+        // otherwise log + drop. This keeps progress streaming working
+        // for users who upgrade their CLI before bouncing the Worker
+        // (matches the dual-path flexibility of notifyReview minus the
+        // verdict semantics, which DO require central for now).
+        const looksLikeMissingRoute =
+          /HTTP 404/.test(msg) || /\bnot found\b/i.test(msg);
+        if (looksLikeMissingRoute && this.client && this.chatId !== null) {
+          this.log(
+            `conclave progress: central /review/notify-progress missing — falling back to direct Bot API for this stage (deploy central-plane to remove this fallback)`,
+          );
+          try {
+            await this.notifyProgressViaDirect(input);
+          } catch (fbErr) {
+            this.log(
+              `conclave progress: direct fallback also failed — ${(fbErr as Error).message}`,
+            );
+          }
+          return;
+        }
+        this.log(`conclave progress: central emit failed — ${msg}`);
+      }
+      return;
+    }
+    if (!this.client || this.chatId === null) {
+      // No surface to render to. Skip silently — progress is opt-in.
+      return;
+    }
+    try {
+      await this.notifyProgressViaDirect(input);
+    } catch (err) {
+      this.log(`conclave progress: direct emit failed — ${(err as Error).message}`);
+    }
+  }
+
+  private async notifyProgressViaCentral(input: NotifyProgressInput): Promise<void> {
+    const fetchFn: HttpFetch | typeof fetch =
+      this.centralFetch ??
+      ((...args: Parameters<typeof fetch>) =>
+        fetch(...args) as unknown as ReturnType<HttpFetch>);
+    const body = {
+      repo_slug: input.payload?.repo ?? this.repoSlug,
+      episodic_id: input.episodicId,
+      stage: input.stage,
+      ...(input.payload ? { payload: input.payload } : {}),
+    };
+    const resp = await (fetchFn as HttpFetch)(`${this.centralUrl}/review/notify-progress`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: `Bearer ${this.centralToken ?? ""}`,
+      },
+      body: JSON.stringify(body),
+    });
+    if (!resp.ok) {
+      const msg = await resp.text().catch(() => "");
+      throw new Error(
+        `/review/notify-progress returned HTTP ${resp.status} — ${msg.slice(0, 300)}`,
+      );
+    }
+  }
+
+  private async notifyProgressViaDirect(input: NotifyProgressInput): Promise<void> {
+    if (!this.client || this.chatId === null) return;
+    const pr = input.payload?.pullNumber;
+    const key = `${input.episodicId}::${pr ?? ""}`;
+    const line = renderProgressLine(input);
+    const existing = this.progressChains.get(key);
+    if (!existing) {
+      const lines = [line];
+      const text = renderProgressMessage(lines, {
+        episodicId: input.episodicId,
+        ...(input.payload?.repo !== undefined ? { repo: input.payload.repo } : {}),
+        ...(typeof pr === "number" ? { pullNumber: pr } : {}),
+      });
+      const resp = await this.client.sendMessage({
+        chat_id: this.chatId,
+        text,
+        parse_mode: "HTML",
+        disable_web_page_preview: true,
+      });
+      const msg = resp.result;
+      const messageId =
+        msg && typeof (msg as TelegramMessage).message_id === "number"
+          ? (msg as TelegramMessage).message_id
+          : null;
+      if (messageId === null) {
+        // No message_id back — without it we can't edit. Treat as
+        // single-shot fire and skip future edits for this chain.
+        return;
+      }
+      this.progressChains.set(key, {
+        messageId,
+        lines,
+        lastText: text,
+        chatId: this.chatId,
+      });
+      return;
+    }
+    existing.lines.push(line);
+    const text = renderProgressMessage(existing.lines, {
+      episodicId: input.episodicId,
+      ...(input.payload?.repo !== undefined ? { repo: input.payload.repo } : {}),
+      ...(typeof pr === "number" ? { pullNumber: pr } : {}),
+    });
+    if (text === existing.lastText) {
+      // Telegram returns 400 "message is not modified" if we edit with
+      // identical text. Guard locally so the error doesn't bubble.
+      return;
+    }
+    await this.client.editMessageText({
+      chat_id: existing.chatId,
+      message_id: existing.messageId,
+      text,
+      parse_mode: "HTML",
+      disable_web_page_preview: true,
+    });
+    existing.lastText = text;
   }
 }
 

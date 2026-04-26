@@ -13,6 +13,7 @@ import {
   formatAnswerKeyForPrompt,
   formatFailureForPrompt,
   generatePlainSummary,
+  newEpisodicId,
   type Agent,
   type MetricsSink,
   type PlainSummary,
@@ -29,11 +30,9 @@ import { GeminiAgent } from "@conclave-ai/agent-gemini";
 import { OllamaAgent } from "@conclave-ai/agent-ollama";
 import { GrokAgent } from "@conclave-ai/agent-grok";
 import { LangfuseMetricsSink } from "@conclave-ai/observability-langfuse";
-import { TelegramNotifier } from "@conclave-ai/integration-telegram";
-import { DiscordNotifier } from "@conclave-ai/integration-discord";
-import { SlackNotifier } from "@conclave-ai/integration-slack";
-import { EmailNotifier } from "@conclave-ai/integration-email";
 import type { Notifier } from "@conclave-ai/core";
+import { buildNotifiers } from "../lib/notifier-factory.js";
+import { emitProgress } from "../lib/progress-emit.js";
 import { fetchDeployStatus } from "@conclave-ai/scm-github";
 import { loadConfig, resolveMemoryRoot } from "../lib/config.js";
 import { loadProjectContext, loadDesignContext } from "../lib/project-context.js";
@@ -515,6 +514,34 @@ export async function review(argv: string[]): Promise<void> {
     reviewCtx.designReferences = designCtxLoaded.designReferences;
   }
 
+  // 4a. v0.11 — pre-generate the episodic id so progress streaming has a
+  //     stable anchor BEFORE deliberation starts. The same id is later
+  //     handed to OutcomeWriter.writeReview so the persisted episodic
+  //     entry shares the id with the Telegram timeline message.
+  const episodicId = newEpisodicId();
+
+  // 4a-bis. v0.11 — build notifiers up-front so notifyProgress can fire
+  //     during phase boundaries (visual capture, deliberation). The same
+  //     instances are reused for the final notifyReview call below.
+  const notifiers: Notifier[] = buildNotifiers(config);
+
+  // v0.11 — review-started progress stage. Fires before any work that
+  // a user would notice (visual capture, deliberation). Carries the
+  // tier-1 + tier-2 agent ids resolved earlier so the user can see at
+  // a glance which council is about to run.
+  await emitProgress(notifiers, {
+    episodicId,
+    stage: "review-started",
+    payload: {
+      repo: loaded.repo,
+      ...(loaded.pullNumber ? { pullNumber: loaded.pullNumber } : {}),
+      agentIds:
+        tier1IdsResolved.length > 0
+          ? [...tier1IdsResolved, ...tier2IdsResolved.filter((id) => !tier1IdsResolved.includes(id))]
+          : config.agents,
+    },
+  });
+
   // 4b. v0.9.0 — multi-modal visual capture. Runs BEFORE the council so
   //     DesignAgent's Mode A (vision) gets real screenshots. Only when:
   //       (a) domain is design or mixed (text-only code PRs skip entirely)
@@ -560,6 +587,18 @@ export async function review(argv: string[]): Promise<void> {
           infoOut(
             `conclave review: visual capture starting (routes=${routes.length > 0 ? routes.join(",") : "auto-detect"}, viewports=[${viewports.map((v) => v.label).join(",")}])\n`,
           );
+          // v0.11 — progress: visual capture phase starting. Routes
+          // payload is the explicit list when configured, else empty
+          // (renderer says "auto-detect routes").
+          await emitProgress(notifiers, {
+            episodicId,
+            stage: "visual-capture-started",
+            payload: {
+              repo: loaded.repo,
+              ...(loaded.pullNumber ? { pullNumber: loaded.pullNumber } : {}),
+              ...(routes.length > 0 ? { routes } : {}),
+            },
+          });
           visualCaptureResult = await runVisualCapture({
             repo: loaded.repo,
             beforeSha: loaded.prevSha,
@@ -583,6 +622,19 @@ export async function review(argv: string[]): Promise<void> {
               `conclave review: visual capture produced no artifacts — ${visualCaptureResult.reason}\n`,
             );
           }
+          // v0.11 — progress: visual capture phase done. Always fired
+          // (paired with started) so the timeline closes the phase
+          // even when artifacts == 0 (renderer shows "0 pairs").
+          await emitProgress(notifiers, {
+            episodicId,
+            stage: "visual-capture-done",
+            payload: {
+              repo: loaded.repo,
+              ...(loaded.pullNumber ? { pullNumber: loaded.pullNumber } : {}),
+              artifactCount: visualCaptureResult.artifacts.length,
+              totalMs: visualCaptureResult.totalMs,
+            },
+          });
           for (const w of visualCaptureResult.warnings) {
             process.stderr.write(`conclave review: visual warning — ${w}\n`);
           }
@@ -604,12 +656,15 @@ export async function review(argv: string[]): Promise<void> {
 
   // 6. Persist the episodic entry (outcome: "pending") so `conclave
   //    record-outcome` can classify it later into answer-keys / failures.
+  // v0.11 — pre-generated episodicId is reused so the Telegram timeline
+  //         message and the on-disk episodic entry share the same id.
   const writer = new OutcomeWriter({ store });
   const episodic = await writer.writeReview({
     ctx: reviewCtx,
     reviews: outcome.results,
     councilVerdict: outcome.verdict,
     costUsd: gate.metrics.summary().totalCostUsd,
+    episodicId,
   });
 
   // 7. Render + exit with a verdict-derived code
@@ -617,6 +672,70 @@ export async function review(argv: string[]): Promise<void> {
     useTiered && "tier1Outcome" in outcome
       ? (outcome as TieredCouncilOutcome)
       : null;
+
+  // v0.11 — progress: deliberation phase done. tier1 always emits;
+  // tier-2 only emits when escalation actually ran (outcome.tier2Outcome
+  // is populated). Blocker count is summed across results, capped at
+  // major+blocker severity so nit/minor noise doesn't inflate the
+  // headline number a user sees in the chat.
+  if (tieredOutcome) {
+    const tier1Blockers = tieredOutcome.tier1Outcome.results.reduce(
+      (sum, r) => sum + r.blockers.filter((b) => b.severity === "blocker" || b.severity === "major").length,
+      0,
+    );
+    await emitProgress(notifiers, {
+      episodicId,
+      stage: "tier1-done",
+      payload: {
+        repo: loaded.repo,
+        ...(loaded.pullNumber ? { pullNumber: loaded.pullNumber } : {}),
+        blockerCount: tier1Blockers,
+        rounds: tieredOutcome.tier1Outcome.rounds,
+      },
+    });
+    if (tieredOutcome.escalated && tieredOutcome.tier2Outcome) {
+      await emitProgress(notifiers, {
+        episodicId,
+        stage: "escalating-to-tier2",
+        payload: {
+          repo: loaded.repo,
+          ...(loaded.pullNumber ? { pullNumber: loaded.pullNumber } : {}),
+          ...(tieredOutcome.escalationReason ? { reason: tieredOutcome.escalationReason } : {}),
+        },
+      });
+      const tier2Blockers = tieredOutcome.tier2Outcome.results.reduce(
+        (sum, r) => sum + r.blockers.filter((b) => b.severity === "blocker" || b.severity === "major").length,
+        0,
+      );
+      await emitProgress(notifiers, {
+        episodicId,
+        stage: "tier2-done",
+        payload: {
+          repo: loaded.repo,
+          ...(loaded.pullNumber ? { pullNumber: loaded.pullNumber } : {}),
+          blockerCount: tier2Blockers,
+          rounds: tieredOutcome.tier2Outcome.rounds,
+        },
+      });
+    }
+  } else {
+    // Flat-Council path — emit a single tier1-done so the timeline still
+    // closes. Reuses outcome.results since there's no tier split.
+    const flatBlockers = outcome.results.reduce(
+      (sum, r) => sum + r.blockers.filter((b) => b.severity === "blocker" || b.severity === "major").length,
+      0,
+    );
+    await emitProgress(notifiers, {
+      episodicId,
+      stage: "tier1-done",
+      payload: {
+        repo: loaded.repo,
+        ...(loaded.pullNumber ? { pullNumber: loaded.pullNumber } : {}),
+        blockerCount: flatBlockers,
+        rounds: outcome.rounds,
+      },
+    });
+  }
   const renderInput: Parameters<typeof renderReview>[0] = {
     repo: loaded.repo,
     pullNumber: loaded.pullNumber,
@@ -769,102 +888,9 @@ export async function review(argv: string[]): Promise<void> {
   // 8. Optional integrations — equal-weight per decision #24. Missing
   //    credentials skip with stderr warning; integration failures never
   //    kill the review exit code.
-  const notifiers: Notifier[] = [];
-  const tg = config.integrations?.telegram;
-  if (tg?.enabled !== false) {
-    // v0.4.4 — dual-path: CONCLAVE_TOKEN routes through the central plane
-    // (no per-repo bot token needed). Direct-bot path still works when
-    // CONCLAVE_TOKEN is absent (self-hosted / v0.3-style installs).
-    //
-    // v0.6.3: trim before deciding so a whitespace-only secret expansion
-    // from a consumer-repo workflow is treated as absent (matches the
-    // trim in TelegramNotifier's constructor).
-    const hasConclaveToken = (process.env["CONCLAVE_TOKEN"] ?? "").trim().length > 0;
-    const hasToken = !!process.env["TELEGRAM_BOT_TOKEN"];
-    const hasChat = tg?.chatId !== undefined || !!process.env["TELEGRAM_CHAT_ID"];
-    if (hasConclaveToken) {
-      const opts: ConstructorParameters<typeof TelegramNotifier>[0] = {};
-      if (tg?.includeActionButtons !== undefined) opts.includeActionButtons = tg.includeActionButtons;
-      try {
-        notifiers.push(new TelegramNotifier(opts));
-      } catch (err) {
-        process.stderr.write(
-          `conclave review: Telegram notifier (central) init failed — ${(err as Error).message}\n`,
-        );
-      }
-    } else if (tg?.enabled === true && !hasToken) {
-      process.stderr.write(
-        "conclave review: neither CONCLAVE_TOKEN nor TELEGRAM_BOT_TOKEN set — skipping Telegram notifier\n",
-      );
-    } else if (hasToken && hasChat) {
-      const opts: ConstructorParameters<typeof TelegramNotifier>[0] = {};
-      if (tg?.chatId !== undefined) opts.chatId = tg.chatId;
-      if (tg?.includeActionButtons !== undefined) opts.includeActionButtons = tg.includeActionButtons;
-      try {
-        notifiers.push(new TelegramNotifier(opts));
-      } catch (err) {
-        process.stderr.write(`conclave review: Telegram notifier init failed — ${(err as Error).message}\n`);
-      }
-    }
-  }
-  const dc = config.integrations?.discord;
-  if (dc?.enabled !== false) {
-    const hasUrl = !!(dc?.webhookUrl || process.env["DISCORD_WEBHOOK_URL"]);
-    if (dc?.enabled === true && !hasUrl) {
-      process.stderr.write(
-        "conclave review: DISCORD_WEBHOOK_URL not set — skipping Discord notifier\n",
-      );
-    } else if (hasUrl) {
-      const opts: ConstructorParameters<typeof DiscordNotifier>[0] = {};
-      if (dc?.webhookUrl) opts.webhookUrl = dc.webhookUrl;
-      if (dc?.username) opts.username = dc.username;
-      if (dc?.avatarUrl) opts.avatarUrl = dc.avatarUrl;
-      try {
-        notifiers.push(new DiscordNotifier(opts));
-      } catch (err) {
-        process.stderr.write(`conclave review: Discord notifier init failed — ${(err as Error).message}\n`);
-      }
-    }
-  }
-  const sl = config.integrations?.slack;
-  if (sl?.enabled !== false) {
-    const hasUrl = !!(sl?.webhookUrl || process.env["SLACK_WEBHOOK_URL"]);
-    if (sl?.enabled === true && !hasUrl) {
-      process.stderr.write("conclave review: SLACK_WEBHOOK_URL not set — skipping Slack notifier\n");
-    } else if (hasUrl) {
-      const opts: ConstructorParameters<typeof SlackNotifier>[0] = {};
-      if (sl?.webhookUrl) opts.webhookUrl = sl.webhookUrl;
-      if (sl?.username) opts.username = sl.username;
-      if (sl?.iconUrl) opts.iconUrl = sl.iconUrl;
-      if (sl?.iconEmoji) opts.iconEmoji = sl.iconEmoji;
-      try {
-        notifiers.push(new SlackNotifier(opts));
-      } catch (err) {
-        process.stderr.write(`conclave review: Slack notifier init failed — ${(err as Error).message}\n`);
-      }
-    }
-  }
-  const em = config.integrations?.email;
-  if (em?.enabled !== false) {
-    const fromConfigured = !!(em?.from || process.env["CONCLAVE_EMAIL_FROM"]);
-    const toConfigured = !!(em?.to || process.env["CONCLAVE_EMAIL_TO"]);
-    const transportReady = !!process.env["RESEND_API_KEY"];
-    if (em?.enabled === true && (!fromConfigured || !toConfigured || !transportReady)) {
-      process.stderr.write(
-        "conclave review: email integration enabled but missing from / to / RESEND_API_KEY — skipping\n",
-      );
-    } else if (fromConfigured && toConfigured && transportReady) {
-      const opts: ConstructorParameters<typeof EmailNotifier>[0] = {};
-      if (em?.from) opts.from = em.from;
-      if (em?.to) opts.to = em.to;
-      if (em?.subjectOverride) opts.subjectOverride = em.subjectOverride;
-      try {
-        notifiers.push(new EmailNotifier(opts));
-      } catch (err) {
-        process.stderr.write(`conclave review: Email notifier init failed — ${(err as Error).message}\n`);
-      }
-    }
-  }
+  // v0.11 — notifiers were already constructed earlier (right after
+  // reviewCtx) so notifyProgress could fire during deliberation. Reuse
+  // the same array here for the final notifyReview call.
   if (notifiers.length > 0) {
     // Only pass plainSummary to notifiers if the "telegram" delivery is
     // enabled for plain summary (Telegram is our primary non-dev surface).

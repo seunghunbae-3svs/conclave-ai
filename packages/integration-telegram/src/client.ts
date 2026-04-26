@@ -6,6 +6,35 @@ export interface TelegramSendMessageParams {
   reply_markup?: TelegramInlineKeyboard;
 }
 
+/**
+ * v0.11 — `editMessageText` parameters. Telegram requires either
+ * (chat_id + message_id) for chat messages or `inline_message_id` for
+ * inline-mode messages — we only ever produce the chat-message form.
+ *
+ * Caveats:
+ *   - Per-chat edit budget: ~1 edit/sec. Bursting past that produces a
+ *     429 with retry_after; the notifier debounces phase emissions so
+ *     this rarely matters in practice.
+ *   - Re-sending IDENTICAL text returns `Bad Request: message is not
+ *     modified` (HTTP 400). The notifier short-circuits when the rendered
+ *     text hasn't changed since the last edit to avoid that error.
+ */
+export interface TelegramEditMessageTextParams {
+  chat_id: number | string;
+  message_id: number;
+  text: string;
+  parse_mode?: "HTML" | "MarkdownV2";
+  disable_web_page_preview?: boolean;
+  reply_markup?: TelegramInlineKeyboard;
+}
+
+/** v0.11 — minimal message shape returned by sendMessage. We only need
+ * `message_id` so we can edit the same message later. */
+export interface TelegramMessage {
+  message_id: number;
+  chat: { id: number };
+}
+
 export interface TelegramInlineKeyboard {
   inline_keyboard: TelegramInlineKeyboardButton[][];
 }
@@ -52,8 +81,17 @@ export class TelegramClient {
     this.fetchFn = opts.fetch ?? ((...args) => fetch(...(args as Parameters<typeof fetch>)) as ReturnType<HttpFetch>);
   }
 
-  async sendMessage(params: TelegramSendMessageParams): Promise<TelegramResponse<unknown>> {
+  async sendMessage(params: TelegramSendMessageParams): Promise<TelegramResponse<TelegramMessage>> {
     return this.call("sendMessage", params);
+  }
+
+  /**
+   * v0.11 — edit an existing message's text in place. Used by the
+   * progress-streaming notifier so a single message accumulates phase
+   * lines instead of spamming reply chains.
+   */
+  async editMessageText(params: TelegramEditMessageTextParams): Promise<TelegramResponse<TelegramMessage | true>> {
+    return this.call("editMessageText", params);
   }
 
   private async call<T>(method: string, body: unknown): Promise<TelegramResponse<T>> {

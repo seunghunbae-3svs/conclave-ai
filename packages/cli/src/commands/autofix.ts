@@ -35,6 +35,9 @@ import { loadConfig, resolveMemoryRoot, type ConclaveConfig } from "../lib/confi
 import { runPerBlocker, type GitLike, type WorkerLike } from "../lib/autofix-worker.js";
 import { runSpecialHandlers } from "../lib/autofix-handlers/index.js";
 import { resolveKey } from "../lib/credentials.js";
+import { buildNotifiers } from "../lib/notifier-factory.js";
+import { emitProgress } from "../lib/progress-emit.js";
+import type { Notifier } from "@conclave-ai/core";
 import {
   detectCommand,
   runCommand,
@@ -374,7 +377,19 @@ async function defaultReadStdin(): Promise<string> {
  *
  * Throws on malformed input.
  */
-export function parseVerdictFile(raw: string): { verdict: "approve" | "rework" | "reject"; reviews: ReviewResult[] } {
+export function parseVerdictFile(raw: string): {
+  verdict: "approve" | "rework" | "reject";
+  reviews: ReviewResult[];
+  /** v0.11 — optional episodic id from the verdict source. When present,
+   * autofix uses it as the progress-streaming anchor so iter-started /
+   * iter-done lines accumulate onto the SAME Telegram message that the
+   * earlier `conclave review` started. */
+  episodicId?: string;
+  /** v0.11 — repo + PR for progress payloads. Both optional; the
+   * autofix progress emit happily renders without them. */
+  repo?: string;
+  pullNumber?: number;
+} {
   let parsed: unknown;
   try {
     parsed = JSON.parse(raw);
@@ -389,11 +404,20 @@ export function parseVerdictFile(raw: string): { verdict: "approve" | "rework" |
     councilVerdict?: string;
     reviews?: ReviewResult[];
     agents?: Array<{ id?: string; agent?: string; verdict?: string; blockers?: unknown; summary?: string }>;
+    episodicId?: string;
+    id?: string; // episodic-entry shape uses `id`
+    repo?: string;
+    prNumber?: number;
+    pullNumber?: number;
   };
   const verdict = (p.councilVerdict ?? p.verdict) as "approve" | "rework" | "reject" | undefined;
   if (!verdict || !["approve", "rework", "reject"].includes(verdict)) {
     throw new Error("verdict file missing 'verdict' / 'councilVerdict' field");
   }
+  const episodicId = typeof p.episodicId === "string" ? p.episodicId : (typeof p.id === "string" ? p.id : undefined);
+  const repo = typeof p.repo === "string" ? p.repo : undefined;
+  const pullNumber =
+    typeof p.prNumber === "number" ? p.prNumber : typeof p.pullNumber === "number" ? p.pullNumber : undefined;
   // v0.7.1 --json shape uses `agents` instead of `reviews`. Normalize.
   if (!Array.isArray(p.reviews) && Array.isArray(p.agents)) {
     const reviews: ReviewResult[] = p.agents.map((a) => ({
@@ -402,12 +426,24 @@ export function parseVerdictFile(raw: string): { verdict: "approve" | "rework" |
       blockers: Array.isArray(a.blockers) ? (a.blockers as ReviewResult["blockers"]) : [],
       summary: typeof a.summary === "string" ? a.summary : "",
     }));
-    return { verdict, reviews };
+    return {
+      verdict,
+      reviews,
+      ...(episodicId ? { episodicId } : {}),
+      ...(repo ? { repo } : {}),
+      ...(pullNumber !== undefined ? { pullNumber } : {}),
+    };
   }
   if (!Array.isArray(p.reviews)) {
     throw new Error("verdict file missing 'reviews' / 'agents' array");
   }
-  return { verdict, reviews: p.reviews };
+  return {
+    verdict,
+    reviews: p.reviews,
+    ...(episodicId ? { episodicId } : {}),
+    ...(repo ? { repo } : {}),
+    ...(pullNumber !== undefined ? { pullNumber } : {}),
+  };
 }
 
 export async function runAutofix(args: AutofixArgs, deps: AutofixDeps = {}): Promise<{ code: number; result: AutofixResult }> {
@@ -433,6 +469,11 @@ export async function runAutofix(args: AutofixArgs, deps: AutofixDeps = {}): Pro
   let initialReviews: ReviewResult[] = [];
   let initialVerdict: "approve" | "rework" | "reject" | undefined;
 
+  // v0.11 — episodic id from the verdict source. Used as the progress
+  // streaming anchor so autofix lines accumulate onto the SAME Telegram
+  // message that the upstream `conclave review` started. Undefined ==
+  // pre-v0.11 verdict file or autofix run with no progress at all.
+  let progressEpisodicId: string | undefined;
   if (args.verdictFile) {
     // v0.7.1 — "-" means read from stdin (lets users pipe `gh api ... |
     // conclave autofix --pr N --verdict -`, sidestepping PowerShell's
@@ -447,6 +488,7 @@ export async function runAutofix(args: AutofixArgs, deps: AutofixDeps = {}): Pro
     const parsed = parseVerdictFile(raw);
     initialReviews = parsed.reviews;
     initialVerdict = parsed.verdict;
+    if (parsed.episodicId) progressEpisodicId = parsed.episodicId;
     // Episodic / --json shape also carries repo / pullNumber / sha.
     try {
       const ep = JSON.parse(raw) as Partial<EpisodicEntry> & { prNumber?: number };
@@ -554,7 +596,7 @@ export async function runAutofix(args: AutofixArgs, deps: AutofixDeps = {}): Pro
           result: bailResult("bailed-no-patches", `review subprocess exit ${spawnResult.code}`, []),
         };
       }
-      let parsed: { verdict: "approve" | "rework" | "reject"; reviews: ReviewResult[] };
+      let parsed: ReturnType<typeof parseVerdictFile>;
       try {
         parsed = parseVerdictFile(spawnResult.stdout);
       } catch (err) {
@@ -570,6 +612,7 @@ export async function runAutofix(args: AutofixArgs, deps: AutofixDeps = {}): Pro
       }
       initialReviews = parsed.reviews;
       initialVerdict = parsed.verdict;
+      if (parsed.episodicId) progressEpisodicId = parsed.episodicId;
       // v0.7.1 --json also carries `sha` / `prNumber` — pick them up to
       // fill in missing loopKey pieces if the gh pr view fallback didn't.
       try {
@@ -627,12 +670,38 @@ export async function runAutofix(args: AutofixArgs, deps: AutofixDeps = {}): Pro
   let currentReviews = initialReviews;
   let finalVerdict: "approve" | "rework" | "reject" = initialVerdict;
 
+  // v0.11 — progress streaming. Build notifiers only when we have an
+  // episodicId to anchor on (verdict file or auto-spawned review carried
+  // it). Without an episodicId, autofix runs WITHOUT streaming — the
+  // upstream review's final notifyReview already reported the verdict,
+  // and there's no message to edit on. emitProgress no-ops on an empty
+  // notifier list, so the per-iteration calls below stay cost-free.
+  const progressNotifiers: Notifier[] = progressEpisodicId
+    ? buildNotifiers(cfg.config)
+    : [];
+
   for (let i = 0; i < args.maxIterations; i += 1) {
     // v0.7 — collect unique (agent, blocker) pairs across the council.
     const targets = dedupeBlockersAcrossAgents(currentReviews);
     if (targets.length === 0) {
       stdout(`autofix: no blockers this iteration — exiting loop\n`);
       break;
+    }
+
+    // v0.11 — progress: autofix iter starting. iteration is 1-based for
+    // user-facing prose; the internal `i` is 0-based.
+    if (progressEpisodicId) {
+      const iterationNum = i + 1;
+      const startedPayload: NonNullable<Parameters<typeof emitProgress>[1]["payload"]> = {
+        iteration: iterationNum,
+      };
+      if (repo) startedPayload.repo = repo;
+      if (typeof prNumber === "number") startedPayload.pullNumber = prNumber;
+      await emitProgress(progressNotifiers, {
+        episodicId: progressEpisodicId,
+        stage: "autofix-iter-started",
+        payload: startedPayload,
+      });
     }
 
     const fixes: BlockerFix[] = [];
@@ -1007,6 +1076,25 @@ export async function runAutofix(args: AutofixArgs, deps: AutofixDeps = {}): Pro
         },
       ),
     );
+
+    // v0.11 — progress: autofix iter done (success path). fixesVerified
+    // counts only the committed fixes — these passed build + tests +
+    // were pushed. Bailing iterations (apply-conflict, build-fail) emit
+    // their own done lines via the failure-path emit below.
+    if (progressEpisodicId) {
+      const iterationNum = i + 1;
+      const donePayload: NonNullable<Parameters<typeof emitProgress>[1]["payload"]> = {
+        iteration: iterationNum,
+        fixesVerified: committedFixes.length,
+      };
+      if (repo) donePayload.repo = repo;
+      if (typeof prNumber === "number") donePayload.pullNumber = prNumber;
+      await emitProgress(progressNotifiers, {
+        episodicId: progressEpisodicId,
+        stage: "autofix-iter-done",
+        payload: donePayload,
+      });
+    }
 
     // --- Meta-review ----------------------------------------------------
     if (!deps.runReview) {

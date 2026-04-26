@@ -34,7 +34,7 @@ export class TelegramClient {
     replyMarkup?: {
       inline_keyboard: Array<Array<{ text: string; callback_data?: string; url?: string }>>;
     };
-  }): Promise<void> {
+  }): Promise<{ messageId: number } | null> {
     const body: Record<string, unknown> = {
       chat_id: opts.chatId,
       text: opts.text,
@@ -54,6 +54,49 @@ export class TelegramClient {
     });
     if (!resp.ok) {
       throw new Error(`telegram sendMessage: HTTP ${resp.status}`);
+    }
+    // v0.11 — read message_id from the body so progress streaming can
+    // editMessageText the same message later. Best-effort: any parse
+    // failure or shape mismatch returns null and the caller treats the
+    // send as fire-and-forget.
+    const parsed = (await (resp as unknown as { json: () => Promise<unknown> })
+      .json()
+      .catch(() => null)) as { ok?: boolean; result?: { message_id?: unknown } } | null;
+    const mid = parsed?.result?.message_id;
+    return typeof mid === "number" ? { messageId: mid } : null;
+  }
+
+  /**
+   * v0.11 — edit an existing message's text. Used by the progress
+   * streaming path so a single Telegram message accumulates phase
+   * lines instead of producing a reply chain.
+   *
+   * Returns true on 200, throws on transport error. The "message is not
+   * modified" 400 (when the new text is identical to the current text)
+   * is short-circuited by the caller's lastText cache, so we don't
+   * special-case it here.
+   */
+  async editMessageText(opts: {
+    chatId: number;
+    messageId: number;
+    text: string;
+    parseMode?: "HTML" | "MarkdownV2";
+  }): Promise<void> {
+    const body: Record<string, unknown> = {
+      chat_id: opts.chatId,
+      message_id: opts.messageId,
+      text: opts.text,
+      disable_web_page_preview: true,
+    };
+    if (opts.parseMode) body.parse_mode = opts.parseMode;
+    const fetchImpl = this.fetchImpl;
+    const resp = await fetchImpl(this.url("editMessageText"), {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    if (!resp.ok) {
+      throw new Error(`telegram editMessageText: HTTP ${resp.status}`);
     }
   }
 

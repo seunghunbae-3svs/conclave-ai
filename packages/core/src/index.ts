@@ -6,7 +6,13 @@ export type { TieredCouncilOptions, TieredCouncilOutcome } from "./tiered-counci
 export { LoopGuard, CircuitBreaker, LoopDetectedError, CircuitOpenError } from "./guards.js";
 export type { LoopGuardOptions, CircuitBreakerOptions } from "./guards.js";
 export { ReviewResultSchema, BlockerSchema } from "./schema.js";
-export type { Notifier, NotifyReviewInput } from "./notifier.js";
+export type {
+  Notifier,
+  NotifyReviewInput,
+  NotifyProgressInput,
+  ProgressStage,
+  ProgressPayload,
+} from "./notifier.js";
 export { resolveFirstPreview } from "./platform.js";
 export type { Platform, PreviewResolution, ResolvePreviewInput } from "./platform.js";
 export { computeAgentScore, computeAllAgentScores, AGENT_SCORE_WEIGHTS } from "./scoring.js";
