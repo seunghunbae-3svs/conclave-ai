@@ -157,6 +157,70 @@ jobs:
         if: steps.guard.outputs.skip != 'true'
         run: pnpm add -g "@conclave-ai/cli@${{ inputs.cli-version }}"
 
+      # v0.13.4 — install consumer repo's deps so autofix's build/test
+      # verify step can actually run. Without this, `pnpm run build`
+      # fails with missing-binary errors because node_modules doesn't
+      # exist, autofix logs "build failed — reverting", and the loop
+      # never produces a commit. Live-caught on eventbadge#25 rework
+      # run 24957219839 (cli@0.13.3, anchor verdict path verified
+      # working but the eventbadge build itself can't start).
+      #
+      # Auto-detect the package manager from the lockfile so we don't
+      # force pnpm on yarn/npm consumer repos. Soft-fail (|| true) on
+      # the install — autofix is best-effort, and a missing lockfile
+      # is rare enough that the bail message ("build failed") points
+      # operators at the real issue (no install step ran) instead of
+      # crashing the whole workflow.
+      - name: Install consumer-repo dependencies (for autofix verify)
+        if: steps.guard.outputs.skip != 'true'
+        run: |
+          set -euo pipefail
+          # v0.13.4 — install dependencies in every directory that has a
+          # package.json (excluding node_modules and any vendored copies).
+          # Handles three common layouts:
+          #   1. monolithic: root package.json + lockfile
+          #   2. monorepo (pnpm workspace): root pnpm-workspace.yaml; one
+          #      `pnpm install -r` covers everything
+          #   3. split (e.g. eventbadge): root package.json with a
+          #      `cd frontend && build` script + frontend/ subdir with its
+          #      own package.json + lockfile. Neither `-r` nor a single
+          #      root install covers the nested deps; we walk and install.
+          # The ordering is deliberate:
+          #   - pnpm workspace: cheapest single command, do it first
+          #   - else: walk each package.json and install in its dir
+          install_dir() {
+            local dir="$1"
+            cd "$dir"
+            if [ -f pnpm-lock.yaml ]; then
+              pnpm install --frozen-lockfile 2>&1 || pnpm install 2>&1 || true
+            elif [ -f yarn.lock ]; then
+              corepack enable 2>&1 || true
+              yarn install --frozen-lockfile 2>&1 || yarn install 2>&1 || true
+            elif [ -f package-lock.json ]; then
+              npm ci 2>&1 || npm install 2>&1 || true
+            elif [ -f package.json ]; then
+              npm install 2>&1 || true
+            fi
+            cd - > /dev/null
+          }
+          if [ -f pnpm-workspace.yaml ]; then
+            echo "Detected pnpm workspace — recursive install"
+            pnpm install -r --frozen-lockfile || pnpm install -r || true
+          elif [ -f package.json ]; then
+            echo "Installing root deps"
+            install_dir "."
+            # Walk for nested package.json (skip node_modules + vendored).
+            while IFS= read -r nested; do
+              ndir=$(dirname "$nested")
+              if [ "$ndir" != "." ]; then
+                echo "Installing nested deps: $ndir"
+                install_dir "$ndir"
+              fi
+            done < <(find . -name package.json -not -path "*/node_modules/*" -not -path "./node_modules/*" 2>/dev/null | head -10)
+          else
+            echo "::warning::No package.json at repo root — skipping dependency install (autofix verify may fail)"
+          fi
+
       - name: Configure git author for autofix commit
         if: steps.guard.outputs.skip != 'true'
         run: |
