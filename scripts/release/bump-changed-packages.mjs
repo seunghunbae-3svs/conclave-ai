@@ -241,6 +241,9 @@ async function main() {
   const prevTag = findPreviousTag();
   const changed = changedFilesSince(prevTag);
   // Initial pass: which packages have direct file changes since prev tag?
+  // Always include the driver in the initial set — it will bump
+  // unconditionally, and its dependents must follow (so cli +
+  // every agent etc. pick up the new core version reference).
   const directlyChanged = new Set(
     dirs.filter((n) => packageChangedFromList(n, changed)),
   );
@@ -248,11 +251,15 @@ async function main() {
   // workspace:* with the exact current version at publish time, so any
   // dependent of a bumped package must also republish to pick up the
   // new dep version. Skip on first release (changed === null already
-  // marks every package, no expansion needed).
+  // marks every package, no expansion needed). The driver is added
+  // before expansion so even an "empty diff" release still bumps every
+  // dependent of core.
+  const seedSet = new Set(directlyChanged);
+  seedSet.add(DRIVER_PACKAGE);
   const allChanged = changed === null
     ? directlyChanged
-    : expandWithDependents(directlyChanged, packagesDir, dirs);
-  const transitivelyAdded = [...allChanged].filter((p) => !directlyChanged.has(p));
+    : expandWithDependents(seedSet, packagesDir, dirs);
+  const transitivelyAdded = [...allChanged].filter((p) => !directlyChanged.has(p) && p !== DRIVER_PACKAGE);
   const summary = planBumps(
     dirs,
     (name) => allChanged.has(name),
