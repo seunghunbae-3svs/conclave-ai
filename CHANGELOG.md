@@ -1,5 +1,33 @@
 # Changelog
 
+## v0.13.10 — 2026-04-27
+
+### Fixed
+- **Programmatic patch fixup: `recountHunkHeaders` (v0.13.10).** Live
+  cycle-2 attempt on eventbadge#29 sha `279cb22` with cli@0.13.9
+  exposed the next failure mode: the worker emitted
+  `@@ -14,7 +14,6 @@` but the body contained only 5 source lines and
+  4 result lines. `git apply --recount` only recomputes counts when
+  the body is structurally complete; a *truncated* hunk (B=7 with 5
+  source lines) trips the parser with "corrupt patch at line 10"
+  before --recount can do its job. The v0.13.8 `patch -p1 --fuzz=3`
+  fallback also rejected the malformed input.
+
+  New helper `recountHunkHeaders(patch)` walks every hunk body, counts
+  the actual source (` ` + `-`) and result (` ` + `+`) lines, and
+  rewrites the `@@ -A,B +C,D @@` header so B and D match the body
+  exactly. Idempotent on already-correct patches. Runs before the
+  first `git apply --check --recount` in BOTH apply paths:
+  - `runPerBlocker` (per-blocker validate, autofix-worker.ts)
+  - the post-loop apply step (autofix.ts)
+  Start line A is NOT modified — the existing fuzz fallback handles
+  modest A offsets.
+
+  **Tests:** 9 cases in `patch-fixup.test.mjs` cover the eventbadge#29
+  shape, idempotence, single-add / single-delete edges, multi-hunk
+  multi-file walks, `@@` context-suffix preservation, the "no newline
+  at end of file" marker, and degenerate input.
+
 ## v0.13.9 — 2026-04-27
 
 ### Fixed

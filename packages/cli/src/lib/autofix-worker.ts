@@ -12,6 +12,7 @@ import type {
   WorkerContext,
   WorkerOutcome,
 } from "@conclave-ai/agent-worker";
+import { recountHunkHeaders } from "./patch-fixup.js";
 
 export type WorkerLike = {
   work: (ctx: WorkerContext) => Promise<WorkerOutcome>;
@@ -224,8 +225,13 @@ export async function runPerBlocker(
     await unlink(p);
   });
 
+  // v0.13.10 — recount hunk headers before validate. Worker miscounts
+  // (B too large) trip `git apply --recount` with "corrupt patch at
+  // line N" before --recount can do its job. Idempotent for already-
+  // correct patches.
+  const validatedPatch = recountHunkHeaders(outcome.patch);
   try {
-    await writeTemp(tempPath, outcome.patch);
+    await writeTemp(tempPath, validatedPatch);
     try {
       await deps.git("git", ["apply", "--check", "--recount", tempPath], { cwd: deps.cwd });
     } catch (err) {

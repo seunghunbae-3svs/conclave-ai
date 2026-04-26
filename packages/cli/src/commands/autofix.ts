@@ -33,6 +33,7 @@ import { formatFinding, scanPatch, type ScanResult } from "@conclave-ai/secret-g
 import { fetchPrState, fetchDeployStatus as defaultFetchDeployStatus, type DeployStatus, type GhRunner, type PullRequestState } from "@conclave-ai/scm-github";
 import { loadConfig, resolveMemoryRoot, type ConclaveConfig } from "../lib/config.js";
 import { runPerBlocker, type GitLike, type WorkerLike } from "../lib/autofix-worker.js";
+import { recountHunkHeaders } from "../lib/patch-fixup.js";
 import { runSpecialHandlers } from "../lib/autofix-handlers/index.js";
 import { resolveKey } from "../lib/credentials.js";
 import { buildNotifiers } from "../lib/notifier-factory.js";
@@ -940,7 +941,14 @@ export async function runAutofix(args: AutofixArgs, deps: AutofixDeps = {}): Pro
     let applyFailed = false;
     for (const rf of stillReady) {
       const tempPath = path.join(args.cwd, `.conclave-autofix-apply-${shortId()}.patch`);
-      await fs.writeFile(tempPath, rf.patch!, "utf8").catch(() => undefined);
+      // v0.13.10 — programmatically rewrite hunk headers so B/D match
+      // the body. The worker reliably miscounts (eventbadge#29 cycle 2:
+      // emitted B=7 with 5 source lines → "corrupt patch at line 10"
+      // from `git apply --recount` because the parser ran out of body
+      // mid-hunk). recountHunkHeaders is idempotent for already-correct
+      // patches, so it's safe to always run.
+      const fixedPatch = recountHunkHeaders(rf.patch!);
+      await fs.writeFile(tempPath, fixedPatch, "utf8").catch(() => undefined);
       try {
         // re-check then apply (files may have shifted after earlier patches).
         await git("git", ["apply", "--check", "--recount", tempPath], { cwd: args.cwd });
