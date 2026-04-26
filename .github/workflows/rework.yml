@@ -136,10 +136,19 @@ jobs:
         with:
           ref: ${{ steps.pr.outputs.head_ref }}
           fetch-depth: 0
-          # Use the GITHUB_TOKEN so the eventual `git push` from autofix
-          # has authorized credentials. Default checkout already configures
-          # this, but we make it explicit for clarity.
-          token: ${{ secrets.GITHUB_TOKEN }}
+          # v0.13.4 — prefer ORCHESTRATOR_PAT (or AUTOFIX_PUSH_TOKEN if
+          # provided) for the checkout token. Pushes made with the
+          # default GITHUB_TOKEN do NOT trigger downstream workflows
+          # (GitHub Actions security policy: a workflow run can't
+          # cascade into another workflow run via GITHUB_TOKEN to
+          # prevent infinite loops). That broke the autonomy loop:
+          # autofix pushed cleanly, but pull_request:synchronize
+          # never fired, so review.yml didn't re-run, and the cycle
+          # stalled at 1/3 forever.
+          # Live-caught on eventbadge#25 commit 22a0b99.
+          # Fallback: GITHUB_TOKEN. The autofix commit lands either
+          # way; only the auto-re-review hinges on the PAT.
+          token: ${{ secrets.AUTOFIX_PUSH_TOKEN || secrets.ORCHESTRATOR_PAT || secrets.GITHUB_TOKEN }}
 
       - name: Setup pnpm
         if: steps.guard.outputs.skip != 'true'
