@@ -930,7 +930,33 @@ export async function runAutofix(args: AutofixArgs, deps: AutofixDeps = {}): Pro
         // Mark THIS fix as conflict and bail the iteration. Stage gets
         // reset below.
         rf.status = "conflict";
-        rf.reason = err instanceof Error ? err.message : String(err);
+        const reason = err instanceof Error ? err.message : String(err);
+        // v0.13.5 — capture the patch + a snippet of the target file
+        // around the rejection point so operators can see EXACTLY why
+        // the patch failed (line ending mismatch, context drift,
+        // wrong indent — all leave fingerprints in the dump).
+        // Pre-fix the conflict reason was just `git apply --check ...
+        // failed: error: patch failed: <file>:<line>` with no way to
+        // see the patch itself; the temp file got unlinked in finally.
+        let patchDump = "";
+        let fileSnippet = "";
+        try {
+          patchDump = (rf.patch ?? "").slice(0, 1500);
+        } catch { /* ignore */ }
+        const targetFile = rf.blocker.file;
+        if (targetFile) {
+          try {
+            const fp = path.isAbsolute(targetFile)
+              ? targetFile
+              : path.join(args.cwd, targetFile);
+            const buf = await fs.readFile(fp, "utf8");
+            // Show the first 12 lines (most patch failures are at top
+            // of file, and that's where context lines are most likely
+            // to drift on imports).
+            fileSnippet = buf.split(/\r?\n/).slice(0, 12).join("\n");
+          } catch { /* ignore */ }
+        }
+        rf.reason = `${reason}\n--- generated patch (head 1500c) ---\n${patchDump}\n--- target file head 12 lines ---\n${fileSnippet}`;
         applyFailed = true;
         break;
       } finally {
@@ -951,8 +977,10 @@ export async function runAutofix(args: AutofixArgs, deps: AutofixDeps = {}): Pro
       const conflicting = fixes.filter((f) => f.status === "conflict");
       stderr(`autofix: apply conflict mid-iteration — rolled back staged changes (${conflicting.length} fix(es) rejected)\n`);
       for (const cf of conflicting) {
-        const reasonTail = (cf.reason ?? "").slice(-500);
-        stderr(`autofix:   reject — ${cf.blocker.file ?? "<unknown>"}: ${reasonTail}\n`);
+        // v0.13.5 — show the full reason, not just last 500 chars,
+        // because patch dumps embedded by the apply-conflict catch
+        // run 1500-3000 chars and the tail cut hid the patch start.
+        stderr(`autofix:   reject — ${cf.blocker.file ?? "<unknown>"}:\n${cf.reason ?? "(no detail)"}\n`);
       }
       iterations.push(finalizeIteration(i, fixes, false, ["apply-conflict"]));
       return {
