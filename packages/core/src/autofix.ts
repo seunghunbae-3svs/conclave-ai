@@ -188,10 +188,27 @@ export function summarizeAutofixPatches(patches: readonly string[]): {
 }
 
 /**
- * Dedupe Council blockers across agents — same file + category + first
- * 80 chars of message collapses to one entry (whichever agent reported
- * first wins). Keeps the autofix loop from paying two worker calls to
- * fix the same issue twice.
+ * Dedupe Council blockers across agents — same observable issue
+ * collapses to one entry (whichever agent reported first wins).
+ * Keeps the autofix loop from paying two worker calls AND from
+ * generating patches that conflict on the second apply.
+ *
+ * Key shape (v0.13.5+): `${file}|${line ?? ""}|${message[:60]}`.
+ * Pre-fix the key included `category`, so different agents reporting
+ * the SAME line bug under different category labels (e.g. claude
+ * said "regression", openai said "logging" for the same console.log)
+ * passed dedupe and produced two patches. First patch removed the
+ * line, second patch failed to apply because the line was already
+ * gone — `apply conflict mid-iteration — rolled back staged changes`,
+ * loop stalled. Live-caught on eventbadge#28.
+ *
+ * Why drop `category`: agents disagree on category labels for the
+ * same observable bug ("regression" vs "logging" vs "code-quality"
+ * for a stray console.log). The bug is the bug; the label is taxonomy.
+ *
+ * Why include `line`: two different blockers might exist on the same
+ * file with similar opening prose ("Add input validation to ..."
+ * pattern recurs). Line number disambiguates same-file repeats.
  */
 export function dedupeBlockersAcrossAgents(
   reviews: readonly ReviewResult[],
@@ -202,7 +219,12 @@ export function dedupeBlockersAcrossAgents(
     for (const b of r.blockers) {
       // nit-level is advisory — never autofix.
       if (b.severity === "nit") continue;
-      const key = `${b.category}|${b.file ?? ""}|${b.message.slice(0, 80)}`;
+      const lineKey = typeof b.line === "number" ? String(b.line) : "";
+      // First 60 chars of message is enough to differentiate distinct
+      // bugs at the same file+line (real-world bug messages vary
+      // within the first sentence) without locking out near-paraphrases
+      // from different agents.
+      const key = `${b.file ?? ""}|${lineKey}|${b.message.slice(0, 60)}`;
       if (seen.has(key)) continue;
       seen.add(key);
       out.push({ agent: r.agent, blocker: b });

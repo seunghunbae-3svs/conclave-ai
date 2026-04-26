@@ -106,7 +106,7 @@ test("summarizeAutofixPatches: counts + files across multiple patches", () => {
   assert.equal(s.totalLines, 2 + 1 + 1 + 1); // +b +c -a -d +e
 });
 
-test("dedupeBlockersAcrossAgents: dedupes same (category, file, message-prefix) across agents", () => {
+test("dedupeBlockersAcrossAgents: dedupes same (file, line, message-prefix) across agents", () => {
   const reviews = [
     {
       agent: "claude",
@@ -132,6 +132,80 @@ test("dedupeBlockersAcrossAgents: dedupes same (category, file, message-prefix) 
   assert.equal(out.length, 2);
   assert.equal(out[0].blocker.file, "a.ts");
   assert.equal(out[1].blocker.file, "c.ts");
+});
+
+test("dedupeBlockersAcrossAgents: collapses agents who report same bug under different categories (v0.13.5)", () => {
+  // Live regression from eventbadge#28: claude tagged a stray
+  // console.log as "regression", openai tagged the same line as
+  // "logging". Pre-fix dedupe used category in the key so both
+  // passed through, autofix generated 2 patches, the second one
+  // failed to apply because the first already removed the line.
+  const reviews = [
+    {
+      agent: "claude",
+      verdict: "rework",
+      summary: "",
+      blockers: [
+        {
+          severity: "major",
+          category: "regression",
+          message: "Remove the stray module-scope console.log",
+          file: "frontend/src/AddressSearch.jsx",
+          line: 2,
+        },
+      ],
+    },
+    {
+      agent: "openai",
+      verdict: "rework",
+      summary: "",
+      blockers: [
+        {
+          severity: "minor",
+          category: "logging",
+          message: "Remove the stray module-scope console.log",
+          file: "frontend/src/AddressSearch.jsx",
+          line: 2,
+        },
+      ],
+    },
+    {
+      agent: "gemini",
+      verdict: "rework",
+      summary: "",
+      blockers: [
+        {
+          severity: "major",
+          category: "code-quality",
+          message: "Remove the stray module-scope console.log",
+          file: "frontend/src/AddressSearch.jsx",
+          line: 2,
+        },
+      ],
+    },
+  ];
+  const out = dedupeBlockersAcrossAgents(reviews);
+  assert.equal(out.length, 1);
+  assert.equal(out[0].blocker.file, "frontend/src/AddressSearch.jsx");
+  assert.equal(out[0].blocker.line, 2);
+});
+
+test("dedupeBlockersAcrossAgents: keeps DIFFERENT bugs at the same file+line (different message prefixes)", () => {
+  // Defense check on the v0.13.5 dedupe: same file/line is allowed
+  // when the message prefixes diverge.
+  const reviews = [
+    {
+      agent: "claude",
+      verdict: "rework",
+      summary: "",
+      blockers: [
+        { severity: "blocker", category: "security", message: "Add input validation to prevent XSS", file: "a.ts", line: 50 },
+        { severity: "blocker", category: "perf", message: "Cache the result; this loop is hot", file: "a.ts", line: 50 },
+      ],
+    },
+  ];
+  const out = dedupeBlockersAcrossAgents(reviews);
+  assert.equal(out.length, 2);
 });
 
 // ---- parseVerdictFile -----------------------------------------------------
