@@ -1,6 +1,6 @@
 {
   "name": "@conclave-ai/integration-telegram",
-  "version": "0.11.2",
+  "version": "0.11.3",
   "description": "Conclave AI Telegram notifier — posts review outcomes to a Telegram chat via Bot API.",
   "license": "MIT",
   "type": "module",

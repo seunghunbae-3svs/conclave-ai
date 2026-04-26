@@ -1,6 +1,6 @@
 {
   "name": "@conclave-ai/telegram-bot-runner",
-  "version": "0.5.2",
+  "version": "0.5.3",
   "description": "Conclave AI Telegram bot-runner — long-polls Telegram callback_query events and dispatches repository_dispatch actions back to the target repo's GH Actions workflows.",
   "license": "MIT",
   "type": "module",
