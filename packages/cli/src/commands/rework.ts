@@ -21,6 +21,7 @@ import { formatFinding, scanPatch, type ScanResult } from "@conclave-ai/secret-g
 import { formatCycleMarker } from "@conclave-ai/core";
 import { loadConfig, resolveMemoryRoot, type ConclaveConfig } from "../lib/config.js";
 import { resolveKey } from "../lib/credentials.js";
+import { fetchEpisodicAnchor } from "../lib/episodic-anchor.js";
 
 const execFile = promisify(execFileCallback);
 
@@ -162,6 +163,9 @@ export interface ReworkDeps {
   loopGuard?: LoopGuard;
   /** CircuitBreaker — inject for test-time clock control. */
   breaker?: CircuitBreaker;
+  /** v0.12.x — central plane fallback when local store misses. Tests
+   * inject a stub that returns the fixture episodic. */
+  fetchAnchor?: (id: string) => Promise<EpisodicEntry | null>;
   /** Factory for a real ClaudeWorker when `worker` is not injected. */
   workerFactory?: (opts: ClaudeWorkerOptions) => { work: (ctx: Parameters<ClaudeWorker["work"]>[0]) => Promise<WorkerOutcome> };
   /** Patch scanner — defaults to `scanPatch` from @conclave-ai/secret-guard. */
@@ -206,11 +210,29 @@ const defaultGh: GhRunner = async (bin, args, opts) => {
 export async function resolveEpisodic(
   store: MemoryStore,
   args: Pick<ReworkArgs, "pr" | "episodic">,
+  deps: {
+    fetchAnchor?: (id: string) => Promise<EpisodicEntry | null>;
+    log?: (msg: string) => void;
+  } = {},
 ): Promise<EpisodicEntry> {
+  const log = deps.log ?? ((m: string) => process.stderr.write(m + "\n"));
   if (args.episodic) {
     const found = await store.findEpisodic(args.episodic);
-    if (!found) throw new Error(`rework: episodic ${args.episodic} not found in store`);
-    return found;
+    if (found) return found;
+    // v0.12.x — local store missed. The CI rework workflow runs in a
+    // fresh checkout that won't have a locally-authored review's
+    // episodic; fall back to /episodic/anchor on central plane if
+    // CONCLAVE_TOKEN is set. Closes Bug A from v0.11 dogfood.
+    if (deps.fetchAnchor) {
+      const remote = await deps.fetchAnchor(args.episodic);
+      if (remote) {
+        log(
+          `conclave rework: episodic ${args.episodic} not in local store — fetched from central plane anchor`,
+        );
+        return remote;
+      }
+    }
+    throw new Error(`rework: episodic ${args.episodic} not found in store`);
   }
   if (!args.pr) {
     throw new Error("rework: --pr or --episodic is required");
@@ -246,7 +268,9 @@ export async function runRework(args: ReworkArgs, deps: ReworkDeps = {}): Promis
     new FileSystemMemoryStore({ root: resolveMemoryRoot(cfg.config, cfg.configDir) });
   const writer = deps.writer ?? new OutcomeWriter({ store });
 
-  const episodic = await resolveEpisodic(store, args);
+  const episodic = await resolveEpisodic(store, args, {
+    fetchAnchor: deps.fetchAnchor ?? ((id) => fetchEpisodicAnchor(id)),
+  });
 
   const prState: PullRequestState = await fetchPrState(episodic.repo, episodic.pullNumber, { run: deps.gh ?? defaultGh });
   if (prState.state !== "open") {

@@ -33,6 +33,7 @@ import { LangfuseMetricsSink } from "@conclave-ai/observability-langfuse";
 import type { Notifier } from "@conclave-ai/core";
 import { buildNotifiers } from "../lib/notifier-factory.js";
 import { emitProgress } from "../lib/progress-emit.js";
+import { pushEpisodicAnchor } from "../lib/episodic-anchor.js";
 import { fetchDeployStatus } from "@conclave-ai/scm-github";
 import { loadConfig, resolveMemoryRoot } from "../lib/config.js";
 import { loadProjectContext, loadDesignContext } from "../lib/project-context.js";
@@ -551,9 +552,26 @@ export async function review(argv: string[]): Promise<void> {
   //     Failures here NEVER kill the review — DesignAgent falls back to
   //     Mode B (text-UI) when artifacts are empty. Cost: only paid when
   //     visual is explicitly opted in; vision calls ~4x text cost.
-  const visualFromConfig = config.visual?.enabled ?? false;
-  const visualEnabled = args.noVisual ? false : args.visual || visualFromConfig;
+  // v0.13 — visual review zero-config. Old default (v0.9-v0.12):
+  //   args.noVisual ? false : args.visual || (config.visual.enabled ?? false)
+  // Pre-v0.13 the user had to either pass --visual or flip
+  // `visual.enabled: true` in config to get screenshot-aware design
+  // review on UI PRs. v0.13 flips the default: when the auto-detected
+  // domain is design or mixed AND visual.enabled isn't EXPLICITLY
+  // false, visual fires automatically. Code-only PRs still skip.
+  // Three knobs honored, in order of precedence:
+  //   1. --no-visual        → always off
+  //   2. --visual           → always on
+  //   3. visual.enabled = true   → always on
+  //   4. visual.enabled = false  → always off
+  //   5. visual.enabled unset    → on iff domain is design/mixed (v0.13 default)
+  const visualConfigSetting = config.visual?.enabled;
   const domainWantsVisual = resolvedDomain === "design" || resolvedDomain === "mixed";
+  const visualEnabled = args.noVisual
+    ? false
+    : args.visual ||
+      visualConfigSetting === true ||
+      (visualConfigSetting === undefined && domainWantsVisual);
   let visualCaptureResult: VisualCaptureResult | null = null;
   if (visualEnabled && domainWantsVisual) {
     if (!loaded.prevSha) {
@@ -666,6 +684,27 @@ export async function review(argv: string[]): Promise<void> {
     costUsd: gate.metrics.summary().totalCostUsd,
     episodicId,
   });
+
+  // v0.12.x — anchor the episodic in central plane so the autonomy
+  // loop's CI rework can fetch it when local-only invocation means
+  // the .conclave/episodic/... file isn't on the CI runner. Best-
+  // effort: a failure here NEVER kills the review — the verdict is
+  // already valid, the autonomy loop just degrades to "rework workflow
+  // logs episodic-not-found and exits 1" (the v0.11 behaviour).
+  // Skip when CONCLAVE_TOKEN is absent (v0.3-compat direct path users
+  // don't have a central plane to push to).
+  if ((process.env["CONCLAVE_TOKEN"] ?? "").trim().length > 0) {
+    const anchorResult = await pushEpisodicAnchor(episodic);
+    if (anchorResult.ok) {
+      infoOut(`conclave review: episodic anchored to central plane (${episodic.id})\n`);
+    } else if (anchorResult.reason) {
+      // Already-logged inside pushEpisodicAnchor on transport errors;
+      // surface the reason here only for the silent skip cases.
+      if (!anchorResult.reason.startsWith("HTTP ")) {
+        process.stderr.write(`conclave review: episodic anchor skipped — ${anchorResult.reason}\n`);
+      }
+    }
+  }
 
   // 7. Render + exit with a verdict-derived code
   const tieredOutcome =

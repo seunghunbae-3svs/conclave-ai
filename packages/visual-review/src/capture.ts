@@ -79,6 +79,43 @@ export interface PlaywrightCaptureOptions {
   playwrightFactory?: () => Promise<PlaywrightLike>;
   /** Run browser with visible UI (debugging). Default headless. */
   headless?: boolean;
+  /** v0.13 — when import("playwright") fails on first capture, run
+   * `npx playwright install chromium` once and retry. Defaults true.
+   * Set false in air-gapped CI where the install would hang. */
+  autoInstall?: boolean;
+  /** v0.13 — test seam for the auto-install runner. Production calls
+   * `npx playwright install chromium --with-deps`. */
+  installRunner?: () => Promise<{ ok: boolean; reason?: string }>;
+  /** v0.13 — log sink (defaults to stderr). Used to surface the
+   * install-in-progress message so the user knows why a first-run
+   * is slower. */
+  log?: (msg: string) => void;
+}
+
+/**
+ * v0.13 — default auto-install runner. Spawns
+ * `npx playwright install chromium --with-deps`. Returns a structured
+ * result so the caller can fold `reason` into the user-facing error
+ * when install fails.
+ */
+async function defaultInstallRunner(): Promise<{ ok: boolean; reason?: string }> {
+  const { spawn } = await import("node:child_process");
+  return new Promise((resolve) => {
+    const child = spawn("npx", ["-y", "playwright", "install", "chromium", "--with-deps"], {
+      stdio: ["ignore", "inherit", "inherit"],
+      shell: process.platform === "win32",
+    });
+    child.on("error", (err) => {
+      resolve({ ok: false, reason: err.message });
+    });
+    child.on("exit", (code) => {
+      if (code === 0) {
+        resolve({ ok: true });
+      } else {
+        resolve({ ok: false, reason: `exit code ${code}` });
+      }
+    });
+  });
 }
 
 /**
@@ -94,10 +131,16 @@ export class PlaywrightCapture implements ScreenshotCapture {
 
   private readonly factory: () => Promise<PlaywrightLike>;
   private readonly headless: boolean;
+  private readonly autoInstall: boolean;
+  private readonly installRunner: () => Promise<{ ok: boolean; reason?: string }>;
+  private readonly log: (msg: string) => void;
   private browserPromise: Promise<PlaywrightBrowser> | null = null;
 
   constructor(opts: PlaywrightCaptureOptions = {}) {
     this.headless = opts.headless ?? true;
+    this.autoInstall = opts.autoInstall ?? true;
+    this.installRunner = opts.installRunner ?? defaultInstallRunner;
+    this.log = opts.log ?? ((m) => process.stderr.write(m + "\n"));
     this.factory =
       opts.playwrightFactory ??
       (async () => {
@@ -105,9 +148,34 @@ export class PlaywrightCapture implements ScreenshotCapture {
         try {
           return (await import("playwright")) as unknown as PlaywrightLike;
         } catch (err) {
-          throw new Error(
-            "PlaywrightCapture: playwright not installed. Run `pnpm add playwright && npx playwright install chromium`.",
+          // v0.13 — auto-install fallback. The Node-side `playwright`
+          // npm package is a workspace dep, so the SDK itself loads
+          // fine; the missing piece on a fresh machine is the
+          // BROWSER BINARY (chromium ~150MB). We try to fetch it once
+          // when capture is first requested, then re-import. Opt out
+          // via `autoInstall: false` for air-gapped CI.
+          if (!this.autoInstall) {
+            throw new Error(
+              "PlaywrightCapture: playwright not installed. Run `pnpm add playwright && npx playwright install chromium`. (autoInstall disabled)",
+            );
+          }
+          this.log(
+            "conclave visual: playwright SDK or browser missing — attempting one-time `npx playwright install chromium` (this can take ~30-60s)...",
           );
+          const installed = await this.installRunner();
+          if (!installed.ok) {
+            throw new Error(
+              `PlaywrightCapture: auto-install failed — ${installed.reason}. Run \`pnpm add playwright && npx playwright install chromium\` manually, or pass --no-visual.`,
+            );
+          }
+          // Retry the import after install succeeds.
+          try {
+            return (await import("playwright")) as unknown as PlaywrightLike;
+          } catch (retryErr) {
+            throw new Error(
+              `PlaywrightCapture: install reported ok but re-import still failed — ${(retryErr as Error).message}`,
+            );
+          }
         }
       });
   }
