@@ -1,6 +1,6 @@
 {
   "name": "@conclave-ai/agent-openai",
-  "version": "0.7.6",
+  "version": "0.7.7",
   "description": "Conclave AI OpenAI agent — wraps the OpenAI SDK with strict-JSON-schema structured output.",
   "license": "MIT",
   "type": "module",

@@ -1,6 +1,6 @@
 {
   "name": "@conclave-ai/observability-langfuse",
-  "version": "0.5.6",
+  "version": "0.5.7",
   "description": "Conclave AI observability sink — forwards efficiency-gate metrics to Langfuse (self-hosted per decision #13).",
   "license": "MIT",
   "type": "module",
