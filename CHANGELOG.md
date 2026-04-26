@@ -1,5 +1,80 @@
 # Changelog
 
+## v0.13.0 — 2026-04-26
+
+### Added
+- **Visual review zero-config (v0.13).** Removed the manual opt-in
+  step. Pre-v0.13 a user had to either pass `--visual` or flip
+  `visual.enabled: true` in `.conclaverc.json` to get screenshot-aware
+  design review on UI PRs. v0.13 flips the default: when the auto-
+  detected domain is `design` or `mixed` AND `visual.enabled` isn't
+  EXPLICITLY false, visual fires automatically. Code-only PRs still
+  skip — no surprise vision-token bills on backend-only diffs.
+  Precedence ladder unchanged at the user-input level (5 knobs):
+  `--no-visual` > `--visual` > config `enabled: true` > config
+  `enabled: false` > config unset (v0.13 default = on iff UI domain).
+- **Playwright auto-install (v0.13).** Pre-v0.13, a fresh machine
+  without `chromium` saw `Cannot find module 'playwright'` on first
+  visual-capture invocation and the user had to manually run
+  `npx playwright install chromium`. v0.13's `PlaywrightCapture`
+  catches the import error, runs the install once via
+  `npx -y playwright install chromium --with-deps`, and retries the
+  import. Air-gapped CI opts out via `autoInstall: false` (or by
+  passing `--no-visual`). New `installRunner` test seam injects a
+  controllable runner.
+  - **Tests:** 5 new `auto-install.test.mjs` cases covering option
+    plumbing, install-runner contract, log sink, opt-out path, and
+    explicit-factory bypass.
+
+### Fixed
+- **Bug A (v0.11 leftover): rework workflow can't find local-only
+  episodics.** Closed via the new episodic anchor service.
+  - **Central plane:** new `POST /episodic/anchor` (Bearer auth, body
+    = `{episodic_id, repo_slug, pr_number?, payload}`) and
+    `GET /episodic/anchor/:id` (Bearer auth → returns the persisted
+    episodic). New D1 table `episodic_anchors` keyed on
+    `(install_id, episodic_id)` with `repo_slug + pr_number` for
+    diagnostics; cross-install isolation enforced at the storage
+    layer (install A's anchor is invisible to install B). 256KB
+    payload cap. Migration `0007_episodic_anchors.sql`.
+  - **CLI:** new `lib/episodic-anchor.ts` with `pushEpisodicAnchor` +
+    `fetchEpisodicAnchor`. `conclave review` calls push after
+    `OutcomeWriter.writeReview` succeeds (best-effort — a failure
+    NEVER kills a review). `conclave rework`'s `resolveEpisodic`
+    falls back to `fetchEpisodicAnchor` when the local store misses.
+    No CLI flag changes — the fallback is automatic when
+    `CONCLAVE_TOKEN` is set in env.
+  - **Tests:** 7 new `apps/central-plane/test/episodic-anchor.test.mjs`
+    cases (POST/GET happy path, validation, cross-install isolation,
+    payload size cap); 8 new `packages/cli/test/episodic-anchor.test.mjs`
+    cases (skip-when-token-absent, push happy path, HTTP 5xx no-throw,
+    network-error no-throw, fetch happy path, 404, payload_raw
+    fallback).
+  - **Operational fix shipped, not in code:** Worker re-deployed +
+    migrations 0006 (progress_messages) and 0007 (episodic_anchors)
+    applied to remote D1.
+- **Bug B (v0.11 leftover): `conclave-telegram-bot` cron HTTP 409.**
+  Operational fix only (no code change). Generated a fresh
+  `TELEGRAM_WEBHOOK_SECRET` (64-hex), uploaded as Cloudflare Worker
+  secret via `wrangler secret put`, and called Telegram's
+  `setWebhook` to bind `@BAE_DUAL_bot` →
+  `https://conclave-ai.seunghunbae.workers.dev/telegram/webhook`.
+  Then disabled `conclave-telegram-bot.yml` on
+  `seunghunbae-3svs/eventbadge` via `gh workflow disable`. Inbound
+  callback_query routing now goes through the central plane's
+  webhook handler — action buttons (✅/🔧/❌) are no longer inert.
+
+### Notes
+- `@conclave-ai/cli@0.13.0`, `@conclave-ai/visual-review@0.13.0`,
+  `@conclave-ai/central-plane@0.13.0`. core /
+  integration-telegram stay on 0.11.0 (no changes).
+- Worker live at `https://conclave-ai.seunghunbae.workers.dev`
+  (version 0.13.0 per /healthz). Both new routes verified via curl
+  401-on-no-auth probes.
+- Webhook live: `getWebhookInfo` reports
+  `url=conclave-ai.seunghunbae.workers.dev/telegram/webhook`,
+  `pending_update_count=0`, `max_connections=40`.
+
 ## v0.12.0 — 2026-04-26
 
 ### Added
