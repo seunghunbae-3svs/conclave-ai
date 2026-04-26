@@ -75,7 +75,14 @@ jobs:
           set -euo pipefail
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          pnpm -r --filter "./packages/*" exec npm version "$BUMP" --no-git-tag-version
+          # v0.13.12 — bump only packages whose files changed since the
+          # last v* tag, plus the "driver" package (core) so the
+          # vX.Y.Z tag advances every release. Replaces the old
+          # `pnpm -r exec npm version $BUMP` lockstep step which
+          # advanced every internal package's version on every release
+          # even when the package code hadn't moved.
+          # See scripts/release/bump-changed-packages.test.mjs for unit tests.
+          node scripts/release/bump-changed-packages.mjs | tee /tmp/bump-summary.json
           ROOT_VERSION=$(node -p "require('./packages/core/package.json').version")
           # Idempotent: only commit when there are actual changes (covers
           # pnpm no-op re-runs and manual-bump recoveries).
