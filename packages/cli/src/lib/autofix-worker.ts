@@ -229,16 +229,38 @@ export async function runPerBlocker(
     try {
       await deps.git("git", ["apply", "--check", "--recount", tempPath], { cwd: deps.cwd });
     } catch (err) {
-      return {
-        agent: input.agent,
-        blocker: input.blocker,
-        status: "conflict",
-        reason: err instanceof Error ? err.message : String(err),
-        patch: outcome.patch,
-        appliedFiles: outcome.appliedFiles,
-        ...(outcome.costUsd !== undefined ? { costUsd: outcome.costUsd } : {}),
-        ...(outcome.tokensUsed !== undefined ? { tokensUsed: outcome.tokensUsed } : {}),
-      };
+      // v0.13.8 — fall back to GNU `patch -p1 --fuzz=3 --dry-run`. The
+      // worker can emit hunk headers with off-by-N starting line
+      // numbers (eventbadge#29 sha 279cb22 surfaced this: "@@ -17,..."
+      // vs actual line 18); `git apply --recount` only fixes COUNTS,
+      // not the start line, and on Linux runners the offset tolerance
+      // isn't enough. patch(1) accepts off-by-N starts; --dry-run
+      // mirrors --check semantics (validate without writing).
+      let fuzzOk = false;
+      try {
+        await deps.git(
+          "patch",
+          ["-p1", "--fuzz=3", "-F", "3", "--dry-run", "--no-backup-if-mismatch", "-i", tempPath],
+          { cwd: deps.cwd },
+        );
+        fuzzOk = true;
+      } catch {
+        // patch(1) also rejected (or not on PATH) — fall through to the
+        // existing conflict response so operators see the original git
+        // apply error in the CI logs.
+      }
+      if (!fuzzOk) {
+        return {
+          agent: input.agent,
+          blocker: input.blocker,
+          status: "conflict",
+          reason: err instanceof Error ? err.message : String(err),
+          patch: outcome.patch,
+          appliedFiles: outcome.appliedFiles,
+          ...(outcome.costUsd !== undefined ? { costUsd: outcome.costUsd } : {}),
+          ...(outcome.tokensUsed !== undefined ? { tokensUsed: outcome.tokensUsed } : {}),
+        };
+      }
     }
   } finally {
     await removeTemp(tempPath).catch(() => undefined);

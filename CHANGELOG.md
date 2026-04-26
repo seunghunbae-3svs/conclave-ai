@@ -1,5 +1,36 @@
 # Changelog
 
+## v0.13.8 — 2026-04-27
+
+### Fixed
+- **Autofix patch-apply: GNU `patch -p1 --fuzz=3` fallback (v0.13.8).**
+  The first live closing-cycle attempt on eventbadge#29 (sha `279cb22`)
+  surfaced a real RC: the worker emitted a unified diff with the hunk
+  header line number off by one — `@@ -17,...` against an actual
+  deletion target at line 18. `git apply --check --recount` rejected
+  on the Linux runner ("patch failed: ...:17 — patch does not apply"),
+  blocking the autonomy loop at step 2/7. Locally the same patch +
+  same blob applied cleanly because git apply's offset tolerance
+  forgave the off-by-one; on the CI runner (same git 2.53.0) it did
+  not. `--recount` only recomputes line COUNTS, not start positions.
+
+  Both apply paths in autofix now fall back to GNU `patch -p1
+  --fuzz=3 -F 3` when `git apply` rejects:
+  1. `runPerBlocker` (the per-blocker validation step) — uses
+     `--dry-run` to mirror `git apply --check` semantics.
+  2. The post-loop apply step in `autofix.ts` — actually writes the
+     fix when fuzz-tolerant apply succeeds.
+  Both must succeed for a fix to land. If `patch(1)` is unavailable
+  (Windows runners) or also rejects, the existing
+  conflict-with-diagnostic path runs and surfaces the original `git
+  apply` error so the failure mode stays debuggable from CI logs.
+
+  **Tests:** 2 new `runAutofix` cases — fallback-success-path and
+  both-fail-path. Existing `makeGit` helper updated so
+  `applyCheckFails`/`applyFails` overrides also reject the patch(1)
+  fallback (otherwise the fuzz path would mask "patch is bogus"
+  test scenarios).
+
 ## v0.13.7 — 2026-04-27
 
 ### Added

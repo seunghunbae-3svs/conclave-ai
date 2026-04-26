@@ -946,7 +946,37 @@ export async function runAutofix(args: AutofixArgs, deps: AutofixDeps = {}): Pro
         await git("git", ["apply", "--check", "--recount", tempPath], { cwd: args.cwd });
         await git("git", ["apply", "--recount", tempPath], { cwd: args.cwd });
         appliedPaths.push(...(rf.appliedFiles ?? []));
-      } catch (err) {
+      } catch (gitErr) {
+        // v0.13.8 — fallback: GNU `patch -p1 --fuzz=3 -F 3`.
+        //
+        // Live test on eventbadge#29 (sha 279cb22) surfaced this:
+        // worker generated a patch where the hunk header line number
+        // was off by one ("@@ -17,..." but the deletion target was
+        // actually at line 18). `git apply --recount` only recomputes
+        // line COUNTS — it does not relocate hunks; offset tolerance
+        // exists but is not always enough on Linux runners (worked
+        // locally on Windows git 2.53.0, failed on Linux git 2.53.0
+        // with the same blob + same patch). GNU `patch(1)` has built-
+        // in fuzz/fuzz-context tolerance and accepts off-by-N starting
+        // line numbers, which catches this class of worker miscount.
+        //
+        // We only attempt the fallback if `patch` is on PATH; on
+        // Windows runners it isn't, and the original error stays the
+        // surfaced reason so the diagnostic still helps.
+        let fuzzApplied = false;
+        try {
+          await git("patch", ["-p1", "--fuzz=3", "-F", "3", "--no-backup-if-mismatch", "-i", tempPath], { cwd: args.cwd });
+          fuzzApplied = true;
+          appliedPaths.push(...(rf.appliedFiles ?? []));
+          stderr(`autofix: \`git apply\` rejected the patch; \`patch -p1 --fuzz=3\` fallback succeeded (likely off-by-N hunk line number from worker)\n`);
+        } catch {
+          // patch(1) also failed (or isn't installed) — fall through to
+          // the original conflict-reporting path.
+        }
+        if (fuzzApplied) {
+          continue;
+        }
+        const err = gitErr;
         // Mark THIS fix as conflict and bail the iteration. Stage gets
         // reset below.
         rf.status = "conflict";

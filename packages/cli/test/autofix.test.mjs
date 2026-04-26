@@ -314,6 +314,15 @@ function makeGit(overrides = {}) {
     if (overrides.applyFails && args[0] === "apply" && args[1] !== "--check") {
       throw new Error("error: cannot apply");
     }
+    // v0.13.8 — autofix falls back to GNU `patch` when `git apply`
+    // rejects. Tests that simulate "patch is bogus and won't apply"
+    // need both git apply AND patch to fail; otherwise the fallback
+    // makes the bogus patch "succeed" via fuzz. `applyCheckFails` and
+    // `applyFails` now also reject the patch(1) fallback so legacy
+    // expectations (conflict bail) hold.
+    if (bin === "patch" && (overrides.applyCheckFails || overrides.applyFails)) {
+      throw new Error("patch: **** unexpected end of file in patch");
+    }
     return { stdout: "", stderr: "", code: 0 };
   };
   return { calls, exec: runner };
@@ -1356,6 +1365,118 @@ test("runAutofix: post-push deploy wait — bounds total wait by deployWaitTimeo
   // 1000ms budget / 200ms steps → at most 5 sleeps before the loop bails.
   assert.ok(ds.calls.length >= 2 && ds.calls.length <= 7, `expected 2-7 polls; got ${ds.calls.length}`);
   assert.ok(/still pending/.test(stderrBuf.join("")), "should warn that we're proceeding without convergence");
+});
+
+// ---- v0.13.8 patch-apply fuzz fallback ---------------------------------
+//
+// Live test on eventbadge#29 surfaced this RC: the worker emits a unified
+// diff with the hunk header line number off by one ("@@ -17,...") but the
+// deletion target is at line 18. `git apply --recount` rejected on the
+// Linux CI runner. GNU `patch -p1 --fuzz=3 -F 3` tolerates off-by-N start
+// lines and applies cleanly. The autofix apply path now falls back to
+// patch(1) when git apply fails, only triggering the conflict-bail path
+// when BOTH fail.
+
+test("runAutofix: patch-apply fallback — `git apply` rejects, `patch` accepts → fix lands (v0.13.8)", async () => {
+  const stderrBuf = [];
+  const worker = makeWorker();
+  const inner = makeGit();
+  // Custom git mock: fail any `git apply ...` invocation, succeed all else
+  // including `patch -p1 ...`. Mirrors the eventbadge#29 scenario where
+  // git apply rejects an off-by-one patch but GNU patch fuzz-applies it.
+  let patchInvocations = 0;
+  let gitApplyInvocations = 0;
+  const git = {
+    calls: inner.calls,
+    exec: async (bin, args, opts) => {
+      inner.calls.push({ bin, args: [...args] });
+      if (bin === "git" && args[0] === "apply") {
+        gitApplyInvocations += 1;
+        throw new Error("error: patch failed: src/x.ts:17\nerror: src/x.ts: patch does not apply");
+      }
+      if (bin === "patch") {
+        patchInvocations += 1;
+        return { stdout: "patching file src/x.ts\nHunk #1 succeeded at 18 (offset 1 line).", stderr: "", code: 0 };
+      }
+      if (bin === "git" && args[0] === "rev-parse" && args[1] === "HEAD") {
+        return { stdout: "deadbeef0123456789abcdef0123456789abcdef\n", stderr: "", code: 0 };
+      }
+      return { stdout: "", stderr: "", code: 0 };
+    },
+  };
+
+  const { code, result } = await runAutofix(
+    { ...baseArgs, pr: 21 },
+    {
+      loadConfig: async () => fakeConfig,
+      worker,
+      git: git.exec,
+      verifier: makeVerifier(),
+      readFile: async () => "old",
+      writeTempPatch: async () => {},
+      removeTempPatch: async () => {},
+      gh: ghPopulatesRepo,
+      fetchDeployStatus: async () => "unknown",
+      runReview: makeReviewRunner([
+        { verdict: "rework", reviews: [{ agent: "claude", verdict: "rework", summary: "", blockers: [{ severity: "blocker", category: "type-error", message: "m", file: "src/x.ts" }] }] },
+        { verdict: "approve", reviews: [{ agent: "claude", verdict: "approve", summary: "", blockers: [] }] },
+      ]),
+      stdout: () => {},
+      stderr: (s) => stderrBuf.push(s),
+    },
+  );
+
+  assert.equal(code, 0, "should exit 0 since patch fuzz-applied successfully");
+  assert.ok(gitApplyInvocations >= 2, `git apply should be tried first (got ${gitApplyInvocations})`);
+  // patch(1) fires twice: once in runPerBlocker (--dry-run check) and
+  // once in the autofix.ts apply loop (actual write). Both must succeed
+  // for the fix to land.
+  assert.ok(patchInvocations >= 2, `patch fallback should fire at least twice (check + apply); got ${patchInvocations}`);
+  assert.ok(/fuzz=3.*fallback succeeded/i.test(stderrBuf.join("")), "should announce the fuzz fallback");
+  assert.notEqual(result.status, "bailed-no-patches", "should NOT bail when fallback succeeds");
+});
+
+test("runAutofix: patch-apply fallback — both `git apply` and `patch` fail → bails with diagnostic (v0.13.8)", async () => {
+  const stderrBuf = [];
+  const worker = makeWorker();
+  const inner = makeGit();
+  const git = {
+    calls: inner.calls,
+    exec: async (bin, args, opts) => {
+      inner.calls.push({ bin, args: [...args] });
+      if (bin === "git" && args[0] === "apply") {
+        throw new Error("error: patch failed: src/x.ts:17");
+      }
+      if (bin === "patch") {
+        throw new Error("patch: **** unexpected end of file in patch");
+      }
+      return { stdout: "", stderr: "", code: 0 };
+    },
+  };
+
+  const { code, result } = await runAutofix(
+    { ...baseArgs, pr: 1, maxIterations: 1 },
+    {
+      loadConfig: async () => fakeConfig,
+      worker,
+      git: git.exec,
+      verifier: makeVerifier(),
+      readFile: async () => "x",
+      writeTempPatch: async () => {},
+      removeTempPatch: async () => {},
+      gh: ghPopulatesRepo,
+      runReview: makeReviewRunner([
+        { verdict: "rework", reviews: [{ agent: "claude", verdict: "rework", summary: "", blockers: [{ severity: "blocker", category: "type-error", message: "m", file: "src/x.ts" }] }] },
+      ]),
+      stdout: () => {},
+      stderr: (s) => stderrBuf.push(s),
+    },
+  );
+
+  assert.equal(code, 1);
+  assert.ok(["bailed-no-patches", "bailed-max-iterations"].includes(result.status), `got ${result.status}`);
+  // The original git-apply error should still appear in the conflict diagnostic.
+  assert.ok(/patch failed: src\/x\.ts:17/.test(stderrBuf.join("")), "should surface the original git apply error");
 });
 
 // 17. renderAutofixSummary produces human-readable output
