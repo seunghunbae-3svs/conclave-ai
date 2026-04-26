@@ -1,9 +1,14 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { writeFileSync, mkdirSync, rmSync } from "node:fs";
+import path from "node:path";
+import os from "node:os";
 import {
   nextVersion,
   packageChangedFromList,
   planBumps,
+  readWorkspaceDeps,
+  expandWithDependents,
 } from "./bump-changed-packages.mjs";
 
 /**
@@ -138,4 +143,133 @@ test("planBumps: bumpFn return value is folded into the summary", () => {
   );
   assert.equal(result.bumped[0].from, "0.13.10");
   assert.equal(result.bumped[0].to, "0.13.11");
+});
+
+// ---- readWorkspaceDeps + expandWithDependents (v0.13.13) ---------------
+
+function makeWorkspace(pkgs) {
+  const tmp = path.join(os.tmpdir(), `bump-test-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`);
+  for (const [name, manifest] of Object.entries(pkgs)) {
+    const dir = path.join(tmp, name);
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(path.join(dir, "package.json"), JSON.stringify(manifest, null, 2) + "\n", "utf8");
+  }
+  return tmp;
+}
+
+test("readWorkspaceDeps: extracts @conclave-ai/* from dependencies", () => {
+  const ws = makeWorkspace({
+    cli: {
+      name: "@conclave-ai/cli",
+      version: "0.13.0",
+      dependencies: {
+        "@conclave-ai/core": "workspace:*",
+        "@conclave-ai/agent-claude": "workspace:*",
+        "external-pkg": "^1.0.0",
+      },
+    },
+  });
+  try {
+    const deps = readWorkspaceDeps(path.join(ws, "cli"));
+    assert.deepEqual([...deps].sort(), ["agent-claude", "core"]);
+  } finally {
+    rmSync(ws, { recursive: true, force: true });
+  }
+});
+
+test("readWorkspaceDeps: includes devDependencies and peerDependencies", () => {
+  const ws = makeWorkspace({
+    pkg: {
+      name: "@conclave-ai/pkg",
+      version: "0.0.0",
+      devDependencies: { "@conclave-ai/test-utils": "workspace:*" },
+      peerDependencies: { "@conclave-ai/types": "workspace:*" },
+    },
+  });
+  try {
+    const deps = readWorkspaceDeps(path.join(ws, "pkg"));
+    assert.deepEqual([...deps].sort(), ["test-utils", "types"]);
+  } finally {
+    rmSync(ws, { recursive: true, force: true });
+  }
+});
+
+test("expandWithDependents: cli depends on core → bumping core also bumps cli", () => {
+  const ws = makeWorkspace({
+    core: { name: "@conclave-ai/core", version: "0.1.0" },
+    cli: {
+      name: "@conclave-ai/cli",
+      version: "0.1.0",
+      dependencies: { "@conclave-ai/core": "workspace:*" },
+    },
+    "agent-design": {
+      name: "@conclave-ai/agent-design",
+      version: "0.1.0",
+      dependencies: { "@conclave-ai/core": "workspace:*" },
+    },
+  });
+  try {
+    const expanded = expandWithDependents(new Set(["core"]), ws, ["core", "cli", "agent-design"]);
+    assert.deepEqual([...expanded].sort(), ["agent-design", "cli", "core"]);
+  } finally {
+    rmSync(ws, { recursive: true, force: true });
+  }
+});
+
+test("expandWithDependents: transitive — core → cli → integration-x", () => {
+  const ws = makeWorkspace({
+    core: { name: "@conclave-ai/core", version: "0.1.0" },
+    cli: {
+      name: "@conclave-ai/cli",
+      version: "0.1.0",
+      dependencies: { "@conclave-ai/core": "workspace:*" },
+    },
+    "integration-x": {
+      name: "@conclave-ai/integration-x",
+      version: "0.1.0",
+      dependencies: { "@conclave-ai/cli": "workspace:*" },
+    },
+  });
+  try {
+    const expanded = expandWithDependents(new Set(["core"]), ws, ["core", "cli", "integration-x"]);
+    assert.deepEqual([...expanded].sort(), ["cli", "core", "integration-x"]);
+  } finally {
+    rmSync(ws, { recursive: true, force: true });
+  }
+});
+
+test("expandWithDependents: independent packages don't get pulled in", () => {
+  const ws = makeWorkspace({
+    core: { name: "@conclave-ai/core", version: "0.1.0" },
+    cli: {
+      name: "@conclave-ai/cli",
+      version: "0.1.0",
+      dependencies: { "@conclave-ai/core": "workspace:*" },
+    },
+    standalone: { name: "@conclave-ai/standalone", version: "0.1.0" },
+  });
+  try {
+    const expanded = expandWithDependents(new Set(["core"]), ws, ["core", "cli", "standalone"]);
+    assert.deepEqual([...expanded].sort(), ["cli", "core"]);
+    assert.equal(expanded.has("standalone"), false);
+  } finally {
+    rmSync(ws, { recursive: true, force: true });
+  }
+});
+
+test("expandWithDependents: empty initial set → empty expansion", () => {
+  const ws = makeWorkspace({
+    core: { name: "@conclave-ai/core", version: "0.1.0" },
+    cli: {
+      name: "@conclave-ai/cli",
+      version: "0.1.0",
+      dependencies: { "@conclave-ai/core": "workspace:*" },
+    },
+  });
+  try {
+    const expanded = expandWithDependents(new Set(), ws, ["core", "cli"]);
+    assert.equal(expanded.size, 0);
+  } finally {
+    rmSync(ws, { recursive: true, force: true });
+  }
 });

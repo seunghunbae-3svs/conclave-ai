@@ -76,6 +76,75 @@ export function packageChangedFromList(name, changed) {
   return changed.some((p) => p.startsWith(prefix));
 }
 
+const WORKSPACE_SCOPE = "@conclave-ai/";
+
+/**
+ * Read the workspace-internal dependencies declared by a package's
+ * package.json. Returns the set of dependency names with the scope
+ * prefix stripped — i.e., for `"@conclave-ai/core": "workspace:*"`
+ * we return "core". Both runtime and dev deps are included; both
+ * cause the consumer to be republished.
+ */
+export function readWorkspaceDeps(pkgDir) {
+  const json = JSON.parse(readFileSync(path.join(pkgDir, "package.json"), "utf8"));
+  const out = new Set();
+  for (const block of [json.dependencies, json.devDependencies, json.peerDependencies]) {
+    if (!block) continue;
+    for (const dep of Object.keys(block)) {
+      if (dep.startsWith(WORKSPACE_SCOPE)) {
+        out.add(dep.slice(WORKSPACE_SCOPE.length));
+      }
+    }
+  }
+  return out;
+}
+
+/**
+ * v0.13.13 — when a package's source changes, every package that
+ * declares it as a workspace dep must ALSO bump, because at publish
+ * time pnpm replaces `workspace:*` with the exact current version.
+ * Without this, downstream packages keep referencing the OLD core/agent
+ * versions on npm, and consumers don't pick up the fix until the
+ * downstream package's own source happens to change.
+ *
+ * Live RC: v0.13.13 fuzzy-dedupe shipped in core@0.11.13 but cli was
+ * still on 0.13.12 (no source change). cli@0.13.12's published
+ * package.json says `"@conclave-ai/core": "0.11.12"` (exact) — so
+ * `pnpm i -g @conclave-ai/cli@0.13.12` pulls the OLD core, no fuzzy
+ * dedupe. Operators wouldn't see the fix until cli's source
+ * incidentally changed.
+ *
+ * Returns the EXPANDED set: the input changed set plus every
+ * transitively-dependent package. BFS over the dependents graph.
+ */
+export function expandWithDependents(initiallyChanged, packagesDir, packages) {
+  const dependents = new Map(); // pkg → array of pkgs that depend on it
+  for (const p of packages) dependents.set(p, []);
+  for (const p of packages) {
+    let deps;
+    try {
+      deps = readWorkspaceDeps(path.join(packagesDir, p));
+    } catch {
+      continue;
+    }
+    for (const d of deps) {
+      if (dependents.has(d)) dependents.get(d).push(p);
+    }
+  }
+  const expanded = new Set(initiallyChanged);
+  const queue = [...initiallyChanged];
+  while (queue.length > 0) {
+    const cur = queue.shift();
+    for (const dependent of dependents.get(cur) ?? []) {
+      if (!expanded.has(dependent)) {
+        expanded.add(dependent);
+        queue.push(dependent);
+      }
+    }
+  }
+  return expanded;
+}
+
 export function listPackages(packagesDir) {
   return readdirSync(packagesDir, { withFileTypes: true })
     .filter((e) => e.isDirectory())
@@ -171,11 +240,25 @@ async function main() {
   }
   const prevTag = findPreviousTag();
   const changed = changedFilesSince(prevTag);
+  // Initial pass: which packages have direct file changes since prev tag?
+  const directlyChanged = new Set(
+    dirs.filter((n) => packageChangedFromList(n, changed)),
+  );
+  // Expand to include transitive workspace-dep consumers — pnpm replaces
+  // workspace:* with the exact current version at publish time, so any
+  // dependent of a bumped package must also republish to pick up the
+  // new dep version. Skip on first release (changed === null already
+  // marks every package, no expansion needed).
+  const allChanged = changed === null
+    ? directlyChanged
+    : expandWithDependents(directlyChanged, packagesDir, dirs);
+  const transitivelyAdded = [...allChanged].filter((p) => !directlyChanged.has(p));
   const summary = planBumps(
     dirs,
-    (name) => packageChangedFromList(name, changed),
+    (name) => allChanged.has(name),
     (name) => bumpVersionFile(path.join(packagesDir, name), bump),
   );
+  summary.transitivelyAddedDependents = transitivelyAdded;
   process.stdout.write(JSON.stringify({
     bump,
     prevTag,

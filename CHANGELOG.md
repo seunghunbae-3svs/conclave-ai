@@ -4,7 +4,7 @@
 
 ### Fixed
 - **Fuzzy dedupe across agents that report the SAME bug at off-by-one
-  lines (core@0.11.13).** Live RC: eventbadge#29 cycle 3 verdict had
+  lines (core@0.11.13 / cli@0.13.13).** Live RC: eventbadge#29 cycle 3 verdict had
   Claude flagging a `console.log` at line 18 and OpenAI flagging the
   SAME `console.log` at line 17. Pre-fix dedupe key was
   `file|line|message[:60]` — both passed through. Autofix produced
@@ -27,6 +27,24 @@
   cover the eventbadge#29 case, the must-NOT-collapse cases (line
   diff > 1, file mismatch, no shared token, stopwords-only overlap),
   and the existing exact-dedupe + nit-filter behaviour.
+
+### Tooling (no source change)
+- **Release: bump transitive dependents (release commit).** First
+  attempt at v0.13.13 only bumped `core` (the direct source change).
+  But `cli@0.13.12`'s published `package.json` says
+  `"@conclave-ai/core": "0.11.12"` (exact, not `^`) — so
+  `pnpm i -g @conclave-ai/cli@0.13.12` resolves the OLD core, and
+  the fuzzy-dedupe fix doesn't reach consumers until cli's source
+  happens to change.
+
+  `bump-changed-packages.mjs` now also computes the dependents graph
+  and bumps any package whose workspace dep was bumped. So when core
+  bumps, cli (and every other consumer) bumps too — guaranteeing
+  consumers pick up the fix on the next install.
+
+  6 new unit tests cover `readWorkspaceDeps` (deps + devDeps + peer)
+  and `expandWithDependents` (BFS, transitive chains, no false
+  pull-in).
 
 ## v0.13.12 — 2026-04-27
 
