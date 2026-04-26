@@ -226,9 +226,82 @@ export function dedupeBlockersAcrossAgents(
       // from different agents.
       const key = `${b.file ?? ""}|${lineKey}|${b.message.slice(0, 60)}`;
       if (seen.has(key)) continue;
+
+      // v0.13.13 — fuzzy dedupe across agents that disagree on the
+      // EXACT line of the same observable bug. Live RC: eventbadge#29
+      // verdict had Claude flagging a `console.log` at line 18 and
+      // OpenAI flagging the same `console.log` at line 17 (off-by-one
+      // in OpenAI's attribution). Existing key keyed on the line
+      // number, so the two passed through. autofix produced 2 patches
+      // — first applied with fuzz, second hit "patch already applied"
+      // because the line was gone. applyFailed=true → loop stalled.
+      //
+      // Fuzzy rule: collapse iff (same file) AND (line diff ≤ 1) AND
+      // (messages share a notable code-shaped token of ≥4 chars).
+      // The token check guards against false-positives where two
+      // genuinely-different blockers happen to land at adjacent lines.
+      // Keep the FIRST one (highest-trust agent gets through; later
+      // overlaps drop). nit-severity is already filtered above.
+      if (isFuzzyDuplicate(b, out)) continue;
+
       seen.add(key);
       out.push({ agent: r.agent, blocker: b });
     }
+  }
+  return out;
+}
+
+/**
+ * v0.13.13 — fuzzy duplicate detection. True iff the candidate blocker
+ * is "the same observable bug" as one we've already accepted, where
+ * "same" means same file, line within ±1, and the two messages share
+ * at least one notable identifier-like token (≥4 chars, not a common
+ * English stopword). Conservative — leans toward keeping both when in
+ * doubt, since dropping a real blocker is worse than processing a
+ * harmless duplicate.
+ */
+export function isFuzzyDuplicate(
+  candidate: Blocker,
+  accepted: ReadonlyArray<{ agent: string; blocker: Blocker }>,
+): boolean {
+  if (!candidate.file || typeof candidate.line !== "number") return false;
+  for (const a of accepted) {
+    const o = a.blocker;
+    if (o.file !== candidate.file) continue;
+    if (typeof o.line !== "number") continue;
+    if (Math.abs(o.line - candidate.line) > 1) continue;
+    if (sharesNotableToken(o.message, candidate.message)) return true;
+  }
+  return false;
+}
+
+const FUZZY_DEDUPE_STOPWORDS = new Set([
+  "this", "that", "with", "from", "have", "been", "were", "your",
+  "their", "should", "would", "could", "before", "after", "remove",
+  "added", "fixed", "issue", "the", "and", "for", "but", "into",
+  "onto", "than", "then", "when", "what", "will", "must", "very",
+  "more", "most", "less", "such", "some", "other", "above", "below",
+  "addresses", "addresses", "consider", "consider", "production",
+]);
+
+function sharesNotableToken(a: string, b: string): boolean {
+  const ta = notableTokens(a);
+  if (ta.size === 0) return false;
+  const tb = notableTokens(b);
+  for (const t of ta) {
+    if (tb.has(t)) return true;
+  }
+  return false;
+}
+
+function notableTokens(s: string): Set<string> {
+  const out = new Set<string>();
+  // Match identifier-shaped tokens: must start with a letter, allow
+  // ascii letters/digits/_/- after. Length ≥ 4. Lowercase before
+  // adding to the set so case differences don't split tokens.
+  for (const m of s.toLowerCase().match(/[a-z][a-z0-9_-]{3,}/g) ?? []) {
+    if (FUZZY_DEDUPE_STOPWORDS.has(m)) continue;
+    out.add(m);
   }
   return out;
 }

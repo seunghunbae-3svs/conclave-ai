@@ -1,5 +1,33 @@
 # Changelog
 
+## v0.13.13 — 2026-04-27
+
+### Fixed
+- **Fuzzy dedupe across agents that report the SAME bug at off-by-one
+  lines (core@0.11.13).** Live RC: eventbadge#29 cycle 3 verdict had
+  Claude flagging a `console.log` at line 18 and OpenAI flagging the
+  SAME `console.log` at line 17. Pre-fix dedupe key was
+  `file|line|message[:60]` — both passed through. Autofix produced
+  TWO patches; the first applied (with `patch -p1 --fuzz=3` fallback,
+  offset 3 lines, exit 0); the second hit a "patch already applied"
+  conflict because the line was gone. `applyFailed=true` →
+  whole-iteration rollback → loop stalled at cycle 1/3.
+
+  New rule (in addition to the exact key): collapse iff
+  - same `file`, AND
+  - `|line_a - line_b| ≤ 1`, AND
+  - the messages share a notable code-shaped token (≥4 chars,
+    excludes a curated stopword list).
+
+  Conservative — keeps both blockers when in doubt (false-positive
+  cost = drop a real bug; false-negative cost = waste a worker call).
+  First-seen agent wins.
+
+  **Tests:** 11 cases in `packages/core/test/autofix-dedupe.test.mjs`
+  cover the eventbadge#29 case, the must-NOT-collapse cases (line
+  diff > 1, file mismatch, no shared token, stopwords-only overlap),
+  and the existing exact-dedupe + nit-filter behaviour.
+
 ## v0.13.12 — 2026-04-27
 
 ### Fixed

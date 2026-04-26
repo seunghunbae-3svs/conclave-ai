@@ -43,6 +43,7 @@ export {
   isFileDenied,
   summarizeAutofixPatches,
   dedupeBlockersAcrossAgents,
+  isFuzzyDuplicate,
   DEFAULT_AUTOFIX_DENY_PATTERNS,
 } from "./autofix.js";
 export type {
