@@ -1,6 +1,6 @@
 {
   "name": "@conclave-ai/visual-review",
-  "version": "0.13.9",
+  "version": "0.13.10",
   "description": "Conclave AI visual review — Playwright screenshots + pixel diff for before/after design review.",
   "license": "MIT",
   "type": "module",
