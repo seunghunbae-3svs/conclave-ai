@@ -60,7 +60,7 @@ on:
         description: 'npm version tag for @conclave-ai/cli. Keep in lockstep with review.yml default.'
         required: false
         type: string
-        default: 0.13.10
+        default: 0.13.13
       episodic:
         description: 'v0.13.4 — episodic id from the dispatch client_payload. When set, the workflow fetches the full episodic from /episodic/anchor and passes it to autofix as --verdict, so autofix does NOT have to re-spawn its own review (saves ~$0.40 per cycle).'
         required: false
