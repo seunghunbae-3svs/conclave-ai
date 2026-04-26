@@ -99,7 +99,7 @@ on:
         description: 'npm version tag for @conclave-ai/cli. Pinned default; override to a specific semver for reproducible reviews.'
         required: false
         type: string
-        default: 0.13.3
+        default: 0.13.4
       force-max-cycles:
         description: 'v0.8 — override the configured autonomy.maxReworkCycles for this run (clamped to 5). Empty string uses config.'
         required: false
@@ -227,7 +227,21 @@ jobs:
       - name: Extract conclave-rework cycle from commit marker
         run: |
           set -euo pipefail
-          MSG=$(git log -1 --pretty=%B HEAD)
+          # v0.13.4 — read the PR's HEAD commit, NOT the workflow's
+          # checkout HEAD. On `pull_request` events, GitHub Actions
+          # checks out `refs/pull/N/merge` (a synthetic merge commit
+          # with auto-generated message like "Merge X into Y") — the
+          # cycle marker autofix embeds in its real commit gets
+          # invisible behind that merge commit. Live-caught on
+          # eventbadge#25 review run 24957470277 where autofix's
+          # commit had [conclave-rework-cycle:2] but the extractor
+          # read the merge commit and pulled cycle=0.
+          HEAD_SHA="${{ github.event.pull_request.head.sha }}"
+          if [ -n "${HEAD_SHA}" ]; then
+            MSG=$(git log -1 --format=%B "$HEAD_SHA" 2>/dev/null || git log -1 --pretty=%B HEAD)
+          else
+            MSG=$(git log -1 --pretty=%B HEAD)
+          fi
           CYCLE=$(printf "%s" "$MSG" | grep -oE '\[conclave-rework-cycle:[0-9]+\]' | head -1 | grep -oE '[0-9]+' || true)
           if [ -z "${CYCLE:-}" ]; then CYCLE=0; fi
           # Hard-ceiling safety: clamp to 5 no matter what the commit said.
