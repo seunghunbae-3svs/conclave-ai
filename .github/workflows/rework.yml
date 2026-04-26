@@ -60,7 +60,7 @@ on:
         description: 'npm version tag for @conclave-ai/cli. Keep in lockstep with review.yml default.'
         required: false
         type: string
-        default: 0.10.0
+        default: 0.13.1
         # NOTE: when this default changes, also update the matching default
         # in .github/workflows/review.yml so the two halves of the loop
         # never split-version. The release workflow advances both at once.
