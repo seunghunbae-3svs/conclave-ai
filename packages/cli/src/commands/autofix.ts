@@ -886,7 +886,17 @@ export async function runAutofix(args: AutofixArgs, deps: AutofixDeps = {}): Pro
     }
 
     if (stillReady.length === 0 && stillReadyHandlerStaged.length === 0) {
-      stderr(`autofix: no applicable patches this iteration (all blockers skipped/conflict) — stopping\n`);
+      // v0.13.3 — dump per-blocker disposition so operators can see WHY
+      // each blocker dropped out (worker-error / conflict / secret-block /
+      // skip with custom reason). Pre-fix the bail line just said
+      // "all skipped/conflict" with no breakdown — operators couldn't
+      // tell whether the worker errored, the patch contextually
+      // mismatched, or secret-guard blocked it.
+      stderr(`autofix: no applicable patches this iteration — ${fixes.length} blocker(s) processed, none usable:\n`);
+      for (const f of fixes) {
+        const reasonTail = (f.reason ?? "").slice(-300);
+        stderr(`autofix:   [${f.status}] ${f.blocker.category} @ ${f.blocker.file ?? "<unscoped>"}: ${reasonTail || "(no detail)"}\n`);
+      }
       iterations.push(finalizeIteration(i, fixes, false, ["no-ready-patches"]));
       return {
         code: 1,
