@@ -280,6 +280,35 @@ jobs:
             echo "have_verdict=false" >> "$GITHUB_OUTPUT"
           fi
 
+      # v0.13.6 — pre-autofix worktree diagnostic. Live-needed because
+      # eventbadge#28 showed the file content at apply time was the
+      # BASE branch's version (no console.log) even though the PR
+      # branch's HEAD commit definitely had it. Prints git status +
+      # heads of files in the diff so we can pinpoint where the file
+      # state diverges from what the worker saw.
+      - name: DEBUG — pre-autofix worktree state
+        if: steps.guard.outputs.skip != 'true'
+        run: |
+          set -euo pipefail
+          echo "::group::git status"
+          git status --short || true
+          echo "::endgroup::"
+          echo "::group::HEAD sha"
+          git rev-parse HEAD || true
+          echo "::endgroup::"
+          BASE_REF="${GITHUB_BASE_REF:-main}"
+          git fetch --no-tags --depth=50 origin "$BASE_REF" 2>/dev/null || true
+          echo "::group::files changed vs $BASE_REF"
+          git diff --name-only "origin/${BASE_REF}...HEAD" || true
+          echo "::endgroup::"
+          for f in $(git diff --name-only "origin/${BASE_REF}...HEAD" 2>/dev/null | head -3); do
+            if [ -f "$f" ]; then
+              echo "::group::head 8 lines of $f"
+              head -8 "$f" || true
+              echo "::endgroup::"
+            fi
+          done
+
       - name: Run autofix (single-iteration; CI re-triggers next cycle)
         if: steps.guard.outputs.skip != 'true'
         env:
