@@ -1,6 +1,6 @@
 {
   "name": "@conclave-ai/platform-netlify",
-  "version": "0.5.7",
+  "version": "0.5.8",
   "description": "Conclave AI Netlify adapter — resolve preview URL for a commit SHA via Netlify API.",
   "license": "MIT",
   "type": "module",

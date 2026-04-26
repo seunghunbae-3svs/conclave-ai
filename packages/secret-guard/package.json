@@ -1,6 +1,6 @@
 {
   "name": "@conclave-ai/secret-guard",
-  "version": "0.5.7",
+  "version": "0.5.8",
   "description": "Conclave AI secret-guard — scans patches + file content for API keys, tokens, and private keys before the worker commits them.",
   "license": "MIT",
   "type": "module",
