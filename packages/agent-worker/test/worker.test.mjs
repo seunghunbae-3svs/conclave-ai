@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { EfficiencyGate } from "@conclave-ai/core";
-import { ClaudeWorker, looksLikeUnifiedDiff, parsePatchToolUse } from "../dist/index.js";
+import { ClaudeWorker, looksLikeUnifiedDiff, parsePatchToolUse, WORKER_SYSTEM_PROMPT } from "../dist/index.js";
 
 function makeMockClient(responses) {
   let i = 0;
@@ -245,4 +245,25 @@ test("parsePatchToolUse: direct parser happy path (no LLM)", () => {
   assert.equal(parsed.patch, VALID_PATCH);
   assert.equal(parsed.message, "fix: something");
   assert.deepEqual(parsed.appliedFiles, ["src/x.ts"]);
+});
+
+// v0.13.9 — guard against regression of leading-context guidance in
+// the worker system prompt. eventbadge#29 sha 279cb22 produced a
+// patch with only one line of leading context (`export function ...`)
+// that BOTH `git apply --recount` and `patch -p1 --fuzz=3` rejected.
+// The prompt now requires 2-3 lines of leading + trailing context;
+// these snapshot assertions lock that guidance in.
+test("WORKER_SYSTEM_PROMPT: requires 2-3 lines of leading context", () => {
+  const p = WORKER_SYSTEM_PROMPT;
+  assert.match(p, /leading context/i, "prompt must mention 'leading context'");
+  assert.match(p, /2-3 lines/i, "prompt must specify the 2-3 lines requirement");
+  assert.match(p, /starting line/i, "prompt must call out that the @@ start line A is verified");
+});
+
+test("WORKER_SYSTEM_PROMPT: starting-line guidance overrides the old 'do not need to be exact' wording", () => {
+  const p = WORKER_SYSTEM_PROMPT;
+  // Pre-v0.13.9 the prompt told the worker @@ headers "DO NOT need
+  // to be exact". That literal wording masked the off-by-one failure
+  // mode; assert it's gone.
+  assert.doesNotMatch(p, /DO NOT need to be exact/, "old (overly permissive) wording must be removed");
 });

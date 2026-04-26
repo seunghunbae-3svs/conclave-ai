@@ -15,7 +15,8 @@ Hard rules:
 - If NO blocker is fixable with the information given, return an empty \`patch\` string, an empty \`filesTouched\` array, and explain in \`summary\` what the caller should gather before retrying.
 - \`commitMessage\` should be a single line (≤ 72 chars), conventional-commit style where it fits. No trailing period.
 - \`filesTouched\` must list every repo-relative path the patch modifies, creates, or deletes — forward slashes, exactly as they appear in the patch headers.
-- The caller applies your patch with \`git apply --recount\`, so the line counts in your \`@@ -A,B +C,D @@\` headers DO NOT need to be exact — they will be recomputed from the actual hunk content. Focus on correct \`-\`/\`+\`/context lines; don't agonise over the header numbers.`;
+- The caller applies your patch with \`git apply --recount\`, which only recomputes the line *counts* B and D in \`@@ -A,B +C,D @@\` — the *starting line* A is still checked against the actual file. An off-by-one starting line rejects on stricter git installations, so make A match the line in the source where your first context line actually lives. If you're unsure, count from the file snapshots provided.
+- Every hunk MUST include at least 2-3 lines of unchanged context BEFORE the first changed line and 2-3 lines AFTER the last changed line. With only one line of leading context, both \`git apply --recount\` AND the GNU \`patch -p1 --fuzz=3\` fallback can fail to anchor the hunk on stricter installations — there isn't enough surrounding text to uniquely locate the change. When the change is at the very top of a file (line 1-2), prepend whatever leading context exists; when it's at the bottom, do the same with trailing context.`;
 
 function renderBlockers(reviews: WorkerContext["reviews"]): string {
   const lines: string[] = [];

@@ -1,5 +1,31 @@
 # Changelog
 
+## v0.13.9 — 2026-04-27
+
+### Fixed
+- **Worker prompt: require 2-3 lines of leading + trailing context per
+  hunk (v0.13.9).** Live re-attempt of eventbadge#29 sha `279cb22` with
+  cli@0.13.8 surfaced the next layer: the v0.13.8 GNU `patch -p1
+  --fuzz=3` fallback ALSO rejected, because the worker emitted a hunk
+  with only one line of leading context (`export function ...` followed
+  immediately by the deletions). With one line of context, neither
+  `git apply --recount` nor `patch -p1 --fuzz=3` can disambiguate the
+  anchor on stricter installations.
+
+  `WORKER_SYSTEM_PROMPT` now spells this out:
+  - the @@ start line A is verified against the actual file even with
+    `--recount` (only B is recomputed) — match A to where the first
+    context line really lives in the source snapshot.
+  - every hunk MUST include 2-3 lines of unchanged context BEFORE the
+    first changed line and 2-3 lines AFTER the last changed line.
+  Locks-in via two snapshot tests on the prompt string (regression
+  guard) — assert the new wording is present and the old "DO NOT need
+  to be exact" phrase is gone.
+
+  The v0.13.8 fuzz fallback is retained as defense-in-depth for cases
+  where the worker still slips through with thin context; v0.13.9 just
+  reduces how often that fallback has to fire.
+
 ## v0.13.8 — 2026-04-27
 
 ### Fixed
