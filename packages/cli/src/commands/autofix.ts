@@ -1050,7 +1050,36 @@ export async function runAutofix(args: AutofixArgs, deps: AutofixDeps = {}): Pro
     // We always emit the marker when reworkCycle was passed > 0 OR
     // when the env signal CONCLAVE_AUTONOMY_LOOP=1 is set (the
     // consumer rework workflow sets this, see rework.yml).
-    await git("git", ["add", "-A"], { cwd: args.cwd });
+    // v0.13.4 — stage ONLY the files autofix actually patched.
+    //
+    // Pre-fix this used `git add -A` which staged any unrelated
+    // working-tree noise — most notably new package-lock.json files
+    // created by an upstream dependency-install step in the rework
+    // workflow. eventbadge#25 commit 22a0b99 surfaced this: the
+    // autofix commit included frontend_old/package-lock.json (3018
+    // lines), which the next review correctly flagged as
+    // environment/compatibility blocker, blocking loop closure.
+    //
+    // Build the file list from:
+    //   - applyPaths from `git apply --recount` (patches autofix authored)
+    //   - appliedFiles from special-handler results (e.g. binary-encoding)
+    // Files explicitly added through these channels are exactly what
+    // the autofix WANTED to commit; everything else was incidental.
+    const filesToStage = new Set<string>();
+    for (const p of appliedPaths) filesToStage.add(p);
+    for (const hf of stillReadyHandlerStaged) {
+      for (const f of hf.appliedFiles ?? []) filesToStage.add(f);
+    }
+    if (filesToStage.size === 0) {
+      // Defense-in-depth: no scoped files identified but stillReady is
+      // non-empty. Fall back to staging any modified files git already
+      // tracks — still scoped enough that a brand-new pkg-lock.json
+      // doesn't sneak in (untracked files require an explicit add).
+      stderr("autofix: no scoped files to stage from patches/handlers — falling back to `git add -u` (tracked-only)\n");
+      await git("git", ["add", "-u"], { cwd: args.cwd });
+    } else {
+      await git("git", ["add", "--", ...Array.from(filesToStage)], { cwd: args.cwd });
+    }
     const committedFixes = [...stillReady, ...stillReadyHandlerStaged];
     const title =
       committedFixes[0]?.commitMessage ?? `autofix: ${committedFixes.length} blockers (conclave-ai)`;
