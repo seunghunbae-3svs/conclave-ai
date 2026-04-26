@@ -63,6 +63,12 @@ interface ReviewArgs {
   domain?: ReviewDomainInput;
   noPlainSummary: boolean;
   plainSummaryOnly: boolean;
+  /** v0.13.2 — suppress all notifyReview + notifyProgress emissions.
+   * Used by `conclave autofix`'s spawned `conclave review --json` so
+   * the autofix-internal verdict fetch doesn't push a duplicate
+   * verdict message to Telegram (the upstream review already
+   * notified). Affects: Telegram, Discord, Slack, Email. */
+  noNotify: boolean;
   plainSummaryLocale?: PlainSummaryLocale;
   /** v0.7.1 — structured JSON output on stdout (for autofix + downstream tools). */
   json: boolean;
@@ -89,6 +95,7 @@ export function parseArgv(argv: string[]): ReviewArgs {
     plainSummaryOnly: false,
     json: false,
     skipDeployWait: false,
+    noNotify: false,
   };
   for (let i = 0; i < argv.length; i += 1) {
     const a = argv[i];
@@ -99,6 +106,7 @@ export function parseArgv(argv: string[]): ReviewArgs {
     else if (a === "--plain-summary-only") out.plainSummaryOnly = true;
     else if (a === "--json") out.json = true;
     else if (a === "--skip-deploy-wait") out.skipDeployWait = true;
+    else if (a === "--no-notify") out.noNotify = true;
     else if (a === "--visual-routes" && argv[i + 1]) {
       out.visualRoutes = argv[i + 1]!
         .split(",")
@@ -524,7 +532,10 @@ export async function review(argv: string[]): Promise<void> {
   // 4a-bis. v0.11 — build notifiers up-front so notifyProgress can fire
   //     during phase boundaries (visual capture, deliberation). The same
   //     instances are reused for the final notifyReview call below.
-  const notifiers: Notifier[] = buildNotifiers(config);
+  // v0.13.2 — `--no-notify` produces an empty array so emitProgress
+  //     and the final notifyReview both no-op. Used by autofix's
+  //     spawned review to avoid double-notifying the same verdict.
+  const notifiers: Notifier[] = args.noNotify ? [] : buildNotifiers(config);
 
   // v0.11 — review-started progress stage. Fires before any work that
   // a user would notice (visual capture, deliberation). Carries the

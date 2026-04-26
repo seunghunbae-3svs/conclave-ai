@@ -300,7 +300,10 @@ export async function defaultSpawnReview(input: {
   // conclave's bin, re-exec it via the same node. Otherwise trust PATH.
   const entry = process.argv[1];
   const isConclaveEntry = typeof entry === "string" && /conclave(\.js)?$/.test(entry);
-  const args = ["review", "--pr", String(input.prNumber), "--json"];
+  // v0.13.2 — pass --no-notify so the spawned verdict-fetch review
+  // doesn't push a duplicate verdict message to Telegram. The
+  // upstream rework workflow's earlier review already notified.
+  const args = ["review", "--pr", String(input.prNumber), "--json", "--no-notify"];
   try {
     const { stdout, stderr } = isConclaveEntry
       ? await execFile(process.execPath, [entry!, ...args], {
@@ -929,7 +932,18 @@ export async function runAutofix(args: AutofixArgs, deps: AutofixDeps = {}): Pro
       // Roll back: hard reset working tree to HEAD. We do NOT touch the
       // commit graph — only the index + worktree.
       await git("git", ["reset", "--hard", "HEAD"], { cwd: args.cwd }).catch(() => undefined);
-      stderr(`autofix: apply conflict mid-iteration — rolled back staged changes\n`);
+      // v0.13.2 — surface the actual git apply reason. Pre-fix, the
+      // log just said "apply conflict mid-iteration" with no context;
+      // operators couldn't tell whether it was a context-mismatch
+      // (line ending / encoding), a missing file, or a real merge
+      // collision. Now we dump the rejecting fix's file + reason tail
+      // so the failure mode is debuggable from CI logs alone.
+      const conflicting = fixes.filter((f) => f.status === "conflict");
+      stderr(`autofix: apply conflict mid-iteration — rolled back staged changes (${conflicting.length} fix(es) rejected)\n`);
+      for (const cf of conflicting) {
+        const reasonTail = (cf.reason ?? "").slice(-500);
+        stderr(`autofix:   reject — ${cf.blocker.file ?? "<unknown>"}: ${reasonTail}\n`);
+      }
       iterations.push(finalizeIteration(i, fixes, false, ["apply-conflict"]));
       return {
         code: 1,
