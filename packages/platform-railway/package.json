@@ -1,6 +1,6 @@
 {
   "name": "@conclave-ai/platform-railway",
-  "version": "0.5.17",
+  "version": "0.5.18",
   "description": "Conclave AI Railway adapter — resolve preview URL for a commit SHA via Railway's GraphQL API.",
   "license": "MIT",
   "type": "module",
