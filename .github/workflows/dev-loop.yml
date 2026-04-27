@@ -36,7 +36,8 @@ on:
         type: string
         default: ''
   schedule:
-    - cron: '0 */12 * * *'  # every 12 hours
+    - cron: '*/15 * * * *'  # every 15 minutes — concurrency:dev-loop
+                             # below queues runs so back-to-back is safe
 
 concurrency:
   group: dev-loop
