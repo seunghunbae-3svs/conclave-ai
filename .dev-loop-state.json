@@ -1,8 +1,8 @@
 {
   "version": 1,
-  "currentItem": "H1.5 A",
-  "lastShipped": "H1 #5",
-  "lastShippedAt": "2026-04-27T05:36:00Z",
+  "currentItem": "H1.5 B",
+  "lastShipped": "H1.5 A",
+  "lastShippedAt": "2026-04-27T07:29:38Z",
   "consecutiveFailures": 0,
   "totalSpentUsdToday": 0,
   "lastSpendResetDate": null,
@@ -15,6 +15,7 @@
     { "item": "H1 #2", "shippedAt": "2026-04-27T04:01Z", "version": "cli@0.13.17" },
     { "item": "H1 #3", "shippedAt": "2026-04-27T04:39Z", "version": "cli@0.13.18" },
     { "item": "H1 #4", "shippedAt": "2026-04-27T05:08Z", "version": "cli@0.13.19" },
-    { "item": "H1 #5", "shippedAt": "2026-04-27T05:36Z", "version": "cli@0.13.20" }
+    { "item": "H1 #5", "shippedAt": "2026-04-27T05:36Z", "version": "cli@0.13.20" },
+    { "item": "H1.5 A", "shippedAt": "2026-04-27T07:29Z", "version": "cli@0.13.21", "note": "shipped by dev-loop real run #1; orchestrator timed out before parsing result, manually reconciled" }
   ]
 }
