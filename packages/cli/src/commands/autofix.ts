@@ -13,6 +13,7 @@ import {
   MetricsRecorder,
   OutcomeWriter,
   dedupeBlockersAcrossAgents,
+  isFuzzyDuplicate,
   summarizeAutofixPatches,
   type AutofixIteration,
   type AutofixResult,
@@ -1419,15 +1420,31 @@ function finalizeIteration(
   };
 }
 
-function remainingBlockersFrom(reviews: readonly ReviewResult[]): Blocker[] {
+export function remainingBlockersFrom(reviews: readonly ReviewResult[]): Blocker[] {
+  // v0.13.14 — match dedupeBlockersAcrossAgents exactly: drop category
+  // from the key (agents disagree on taxonomy for the same bug — RC
+  // from v0.13.6) and apply the fuzzy ±1-line same-token collapse
+  // (RC from v0.13.13). Pre-fix this function still keyed on
+  // `category|file|message[:60]` and called blockers "remaining" that
+  // the autofix planner had already collapsed into one applied fix —
+  // so operators reading the "bailed: N remaining" log saw a confusing
+  // count even when the underlying fix had landed cleanly. Live-caught
+  // on eventbadge#31 (cli@0.13.13 + core@0.11.14): autofix committed
+  // 459fd5e correctly removing the console.log, but the bailed message
+  // still said "remaining blockers: 2" because the same bug was reported
+  // by Claude+OpenAI with different message-prefix wording.
   const out: Blocker[] = [];
+  const accepted: Array<{ agent: string; blocker: Blocker }> = [];
   const seen = new Set<string>();
   for (const r of reviews) {
     for (const b of r.blockers) {
       if (b.severity === "nit") continue;
-      const key = `${b.category}|${b.file ?? ""}|${b.message.slice(0, 60)}`;
+      const lineKey = typeof b.line === "number" ? String(b.line) : "";
+      const key = `${b.file ?? ""}|${lineKey}|${b.message.slice(0, 60)}`;
       if (seen.has(key)) continue;
+      if (isFuzzyDuplicate(b, accepted)) continue;
       seen.add(key);
+      accepted.push({ agent: r.agent, blocker: b });
       out.push(b);
     }
   }

@@ -1,5 +1,37 @@
 # Changelog
 
+## v0.13.14 — 2026-04-27
+
+### Fixed
+- **`remainingBlockersFrom` count now matches the planner's dedupe
+  (cli@0.13.14).** Live RC: eventbadge#31 ran with cli@0.13.13 and
+  the v0.13.13 fuzzy dedupe correctly collapsed two reports of the
+  same `console.log` into one applied fix (commit `459fd5e` landed,
+  bug removed). But the bailed log still said
+  `remaining blockers: 2`, and a confusing PR comment listed the
+  same blocker twice.
+
+  Root cause: `remainingBlockersFrom()` in `autofix.ts` still keyed
+  on the pre-v0.13.6 `category|file|message[:60]`. v0.13.6 dropped
+  `category` from the planner key; v0.13.13 added the fuzzy ±1-line
+  same-token pass. This function never followed.
+
+  Now `remainingBlockersFrom()` uses the same exact `file|line|
+  message[:60]` + fuzzy `isFuzzyDuplicate` rule as
+  `dedupeBlockersAcrossAgents`. Operators see one count whether
+  they're reading the planner output or the bailed log.
+
+  `remainingBlockersFrom` is now exported from `autofix.ts` so the
+  test suite can drive it directly without spinning up the full
+  autofix loop. **Tests:** 5 cases in
+  `packages/cli/test/autofix-remaining-count.test.mjs` cover the
+  eventbadge#31 case, the eventbadge#29 cycle 3 ±1-line variant, the
+  must-NOT-collapse counter-case, the nit filter, and the
+  category-disagreement regression.
+
+  This was the bookkeeping layer of the cycle-3 stall — the planner
+  was already correct; the bailed message was the only thing lying.
+
 ## v0.13.13 — 2026-04-27
 
 ### Fixed
