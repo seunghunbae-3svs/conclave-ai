@@ -354,3 +354,145 @@ test("audit-discovery: DEFAULT_UI_SIGNALS includes the core frameworks", () => {
   assert.match(joined, /svelte/);
   assert.match(joined, /css/);
 });
+
+// ─── RC audit-1: gh issue create always passes --repo ────────────────
+// When `--cwd` points to a directory other than process.cwd() the issue
+// must land in the target repo, not the invoker's repo. We verify the
+// compiled code passes --repo to `gh issue create`.
+
+test("RC audit-1: gh issue create call includes --repo flag", () => {
+  const src = fs.readFileSync(
+    new URL("../dist/commands/audit.js", import.meta.url),
+    "utf8",
+  );
+  // The gh issue create invocation must spread ["--repo", repo] into the args.
+  assert.match(src, /["']--repo["']/, "gh issue create must include --repo");
+});
+
+// ─── RC audit-2: --output both doesn't double-write stdout on failure ─
+// When --output both is used and issue creation fails, stdout has already
+// been written by the earlier stdout-or-both branch; the fallback must
+// NOT write it again.
+
+test("RC audit-2: output=both fallback is guarded against double-write", () => {
+  const src = fs.readFileSync(
+    new URL("../dist/commands/audit.js", import.meta.url),
+    "utf8",
+  );
+  // The fallback in the issue-creation catch block must check output !== "both"
+  // before writing stdout. Look for the guard pattern.
+  assert.match(
+    src,
+    /output\s*!==\s*["']both["']/,
+    "issue-creation fallback must skip stdout when output=both",
+  );
+});
+
+// ─── dry-run end-to-end: audit() exits cleanly without LLM calls ──────
+// The --dry-run flag must return without calling any LLMs. We verify
+// this by calling audit() directly; the dry-run path returns early before
+// any agent or gh calls are made. Note: stdout interception is intentionally
+// avoided here to prevent interference with the concurrent test runner.
+
+test("audit() --dry-run: resolves without throwing on a minimal repo", async () => {
+  const root = tmpRepo();
+  try {
+    touch(root, "src/app.ts", 'console.log("hello")');
+    touch(root, "src/Button.tsx", "<button>click</button>");
+    touch(root, "README.md", "# readme");
+
+    const { audit } = await import("../dist/commands/audit.js");
+    // Should resolve without throwing (dry-run never calls LLMs or gh).
+    await assert.doesNotReject(
+      () => audit(["--dry-run", "--cwd", root, "--scope", "all"]),
+      "audit() --dry-run should not throw",
+    );
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// ─── parseArgv: default values and explicit flags ─────────────────────
+
+test("audit-parseArgv: exports HARD_BUDGET_CEILING_USD = 10", () => {
+  assert.equal(HARD_BUDGET_CEILING_USD, 10);
+});
+
+test("audit-discovery: --include restricts to matching files only", async () => {
+  const root = tmpRepo();
+  try {
+    touch(root, "src/app.ts", "x");
+    touch(root, "src/Button.tsx", "x");
+    touch(root, "lib/util.ts", "x");
+
+    const result = await discoverAuditFiles({
+      cwd: root,
+      scope: "all",
+      include: ["src/**"],
+      useGitRecency: false,
+    });
+    const paths = result.files.map((f) => f.path).sort();
+    assert.ok(paths.every((p) => p.startsWith("src/")), "only src/ files should be returned");
+    assert.ok(!paths.includes("lib/util.ts"), "lib/util.ts should be excluded");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("audit-output: renderAuditStdout shows 'no findings' when findings list is empty", () => {
+  const report = {
+    repo: "acme/x",
+    sha: "abc",
+    scope: "all",
+    domain: "code",
+    filesAudited: 3,
+    filesInScope: 3,
+    sampled: false,
+    discoveryReason: "3 matched",
+    findings: [],
+    perAgentVerdict: [],
+    budgetUsd: 2,
+    spentUsd: 0.05,
+    budgetExhausted: false,
+    batchesRun: 1,
+    batchesTotal: 1,
+    metrics: {
+      callCount: 1,
+      totalInputTokens: 500,
+      totalOutputTokens: 100,
+      totalCostUsd: 0.05,
+      totalLatencyMs: 200,
+      cacheHitRate: 0,
+      byAgent: {},
+      byModel: {},
+    },
+  };
+  const out = renderAuditStdout(report);
+  assert.match(out, /no findings/i);
+  assert.match(out, /0 blockers/);
+});
+
+test("audit-aggregate: unknown file path falls back to inferred subsystem", () => {
+  const perBatch = [
+    {
+      batchIndex: 0,
+      files: [],
+      costUsd: 0,
+      latencyMs: 0,
+      results: [
+        {
+          agent: "claude",
+          verdict: "rework",
+          summary: "",
+          blockers: [
+            { severity: "minor", category: "a11y", message: "contrast", file: "components/Hero.tsx" },
+          ],
+        },
+      ],
+    },
+  ];
+  // fileToCategory map intentionally empty — subsystem should be inferred from ext
+  const findings = aggregateFindings(perBatch, new Map());
+  assert.equal(findings.length, 1);
+  assert.equal(findings[0].subsystem, "ui", "tsx should infer subsystem=ui");
+});

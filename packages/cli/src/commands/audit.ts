@@ -587,10 +587,13 @@ export async function audit(argv: string[]): Promise<void> {
     if (!args.plainSummaryOnly && appendPlainToIssue) body = body + "\n\n" + plainSection.trim();
     const date = new Date().toISOString().slice(0, 10);
     const title = `Conclave Project Audit — ${date}`;
+    // RC audit-1: always pass --repo so the issue lands in the right repo
+    // even when the user passes --cwd pointing at a different directory than
+    // process.cwd(). `repo` is resolved from the --cwd target's git remote.
     try {
       const { stdout } = await execFile(
         "gh",
-        ["issue", "create", "--title", title, "--body", body],
+        ["issue", "create", "--title", title, "--body", body, "--repo", repo],
         { maxBuffer: 4 * 1024 * 1024 },
       );
       process.stdout.write(`\nconclave audit: opened issue — ${stdout.trim()}\n`);
@@ -598,9 +601,13 @@ export async function audit(argv: string[]): Promise<void> {
       process.stderr.write(
         `conclave audit: could not open GitHub issue (${(err as Error).message}). Falling back to stdout.\n`,
       );
-      process.stdout.write("\n");
-      process.stdout.write(renderAuditStdout(report));
-      if (appendPlainToIssue) process.stdout.write(plainSection);
+      // RC audit-2: when output=both we already wrote stdout above; don't
+      // double-write on issue-creation failure.
+      if (output !== "both") {
+        process.stdout.write("\n");
+        process.stdout.write(renderAuditStdout(report));
+        if (appendPlainToIssue) process.stdout.write(plainSection);
+      }
     }
   }
 

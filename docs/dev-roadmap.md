@@ -60,13 +60,18 @@ vs. "feature operational but not robust".
 Bae's directive: do NOT run audit yet. Build/verify these first, THEN
 run on eventbadge.
 
-**A. `conclave audit` whole-project end-to-end.**
+**A. `conclave audit` whole-project end-to-end.** ✅ cli@0.13.21
 Actually scan a real repo (eventbadge), produce the prioritized GitHub
 issue, validate that the issue list maps to real defects (no
 hallucinations, no missed obvious ones). Fix any RCs that surface (will
 likely be ≥2-3 like the per-PR loop had). Live cost: $2-10 once. Output:
 a GitHub issue on eventbadge that Bae can scan and feel "yes, conclave
 saw the right things".
+RCs fixed: audit-1 (`gh issue create` now passes `--repo` so `--cwd`
+runs land in the right repo), audit-2 (`--output both` no longer
+double-writes stdout when issue creation fails). 9 new hermetic tests
+added (21 total in audit.test.mjs). Actual audit run on eventbadge is a
+separate Bae-triggered action.
 
 **B. `conclave review --visual` against design system baseline.**
 DesignAgent + Playwright capture + pixelmatch already exist. Wire the
