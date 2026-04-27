@@ -1,5 +1,33 @@
 # Changelog
 
+## v0.13.15 — 2026-04-27
+
+### Fixed
+- **Cycle counter displays as 1-based instead of 0-based (core@0.11.16).**
+  Live RC: PR #32 ready-to-merge notification showed
+  `Cycle 0/3 — worker generates a patch...` which Bae read as a
+  broken counter ("first attempt should be 1/3, not 0/3"). The
+  internal `ctx.cycle` is 0-based (0 = first attempt, just before
+  autofix runs); humans expect 1-based counting.
+
+  `renderAutonomyMessage` now displays `(cycle ?? 0) + 1` for the
+  reworking state — first attempt reads "1/3", second "2/3", third
+  "3/3". When `cycle === maxCycles` the state flips to
+  `max-cycles-reached` (uses raw `maxCycles` for the "After N cycles…"
+  copy — that one is already correct since N is a count, not an
+  index). 1 new test asserts the first-attempt rendering and 2
+  existing tests updated to the new shape.
+
+### Tooling (no source change)
+- **Wrangler deploy of central-plane**: live Worker was on v0.11.0
+  (pre-v0.13.7), missing the webhook self-heal scheduled handler
+  AND the `/admin/webhook-status` route. Without webhook-heal,
+  Telegram-dropped webhooks never recovered automatically — explains
+  why callback_query buttons (`✅ Merge & Push`) silently failed for
+  Bae on PR #32 even though the message + keyboard were rendered.
+  This release ships a `wrangler deploy` so the live Worker matches
+  the source tree.
+
 ## v0.13.14 — 2026-04-27
 
 ### Fixed

@@ -142,7 +142,14 @@ const COPY = {
       [
         "<b>🔄 Conclave is auto-fixing…</b>",
         "",
-        `Cycle ${ctx.cycle ?? 0}/${ctx.maxCycles ?? AUTONOMY_DEFAULT_MAX_CYCLES} — worker generates a patch, pushes it back to the PR branch, and the next review runs automatically.`,
+        // v0.13.15 — display cycle as 1-based human counting. The
+        // internal `ctx.cycle` is 0-based (0 = first attempt, just
+        // before autofix runs); humans expect the FIRST attempt to
+        // read "1/3", not "0/3". Live RC: PR #32 ready-to-merge
+        // notification showed "Cycle 0/3" which Bae read as
+        // "the cycle counter is broken" — the math was right, just
+        // the display was wrong by one.
+        `Cycle ${(ctx.cycle ?? 0) + 1}/${ctx.maxCycles ?? AUTONOMY_DEFAULT_MAX_CYCLES} — worker generates a patch, pushes it back to the PR branch, and the next review runs automatically.`,
         ...(typeof ctx.blockerCountBefore === "number"
           ? [
               "",
@@ -156,7 +163,7 @@ const COPY = {
       [
         "<b>🔄 Conclave가 자동 수정 중…</b>",
         "",
-        `${ctx.cycle ?? 0}/${ctx.maxCycles ?? AUTONOMY_DEFAULT_MAX_CYCLES} 사이클 — 워커가 패치를 생성해 PR 브랜치에 푸시하고, 다음 리뷰가 자동으로 돌아간다.`,
+        `${(ctx.cycle ?? 0) + 1}/${ctx.maxCycles ?? AUTONOMY_DEFAULT_MAX_CYCLES} 사이클 — 워커가 패치를 생성해 PR 브랜치에 푸시하고, 다음 리뷰가 자동으로 돌아간다.`,
         ...(typeof ctx.blockerCountBefore === "number"
           ? [
               "",

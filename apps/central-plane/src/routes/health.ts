@@ -13,7 +13,7 @@ healthRoutes.get("/health", (c) => {
   return c.json({
     ok: true,
     service: "conclave-central-plane",
-    version: "0.11.0",
+    version: "0.13.15",
     environment: c.env.ENVIRONMENT ?? "unknown",
     time: new Date().toISOString(),
   });
@@ -43,7 +43,7 @@ healthRoutes.get("/healthz", async (c) => {
   return c.json({
     ok: dbStatus !== "down",
     service: "conclave-central-plane",
-    version: "0.11.0",
+    version: "0.13.15",
     environment: c.env.ENVIRONMENT ?? "unknown",
     db: dbStatus,
     time: new Date().toISOString(),

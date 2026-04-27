@@ -86,27 +86,43 @@ test("renderAutonomyMessage: approved (ko) → 평어, 병합 준비 완료", ()
   assert.match(r.buttons[0].text, /병합/);
 });
 
-test("renderAutonomyMessage: reworking → no buttons + cycle/max prose", () => {
+test("renderAutonomyMessage: reworking → no buttons + cycle/max prose (1-based display)", () => {
+  // v0.13.15 — internal cycle is 0-based (0 = first attempt, just
+  // before autofix runs). Display is 1-based to match human counting:
+  // ctx.cycle=2 (the 3rd attempt internally) → "3/3" on screen.
   const r = renderAutonomyMessage(
     { ...baseCtx, state: "reworking", cycle: 2, maxCycles: 3, blockerCountBefore: 4 },
     "en",
     "ep-1",
   );
   assert.match(r.text, /auto-fixing/i);
-  assert.match(r.text, /2\/3/);
+  assert.match(r.text, /3\/3/, "ctx.cycle=2 should render as '3/3' for the user (1-based)");
   assert.match(r.text, /4 issues/);
   assert.equal(r.buttons.length, 0);
 });
 
-test("renderAutonomyMessage: reworking (ko) — 자동 수정 중", () => {
+test("renderAutonomyMessage: reworking (ko) — 자동 수정 중 (1-based display)", () => {
   const r = renderAutonomyMessage(
     { ...baseCtx, state: "reworking", cycle: 1, maxCycles: 3 },
     "ko",
     "ep-1",
   );
   assert.match(r.text, /자동 수정 중/);
-  assert.match(r.text, /1\/3/);
+  assert.match(r.text, /2\/3/, "ctx.cycle=1 should render as '2/3' (1-based)");
   assert.equal(r.buttons.length, 0);
+});
+
+test("renderAutonomyMessage: reworking — first attempt (cycle=0) renders as 1/3 not 0/3", () => {
+  // Live RC: PR #32 first review-after-push showed "Cycle 0/3" which
+  // Bae read as "the cycle counter is broken". The math is right
+  // (first attempt is index 0); the display needs to be 1-based.
+  const r = renderAutonomyMessage(
+    { ...baseCtx, state: "reworking", cycle: 0, maxCycles: 3 },
+    "en",
+    "ep-1",
+  );
+  assert.match(r.text, /1\/3/, "first attempt (cycle=0) must render as '1/3'");
+  assert.doesNotMatch(r.text, /0\/3/, "must NOT render as '0/3' — that's the pre-fix bug");
 });
 
 test("renderAutonomyMessage: max-cycles-reached → 3 buttons (unsafe + close + open PR)", () => {
