@@ -3,6 +3,7 @@ import type { Env } from "../env.js";
 import { requireInstallAuth, type AuthedVariables } from "../auth.js";
 import { resolveWebhookUrl, checkWebhookBound, rebindWebhook } from "../webhook-heal.js";
 import { TelegramClient } from "../telegram.js";
+import { readMonthlySpend } from "../db/installs.js";
 
 /**
  * v0.13.11 — admin/diagnostic routes.
@@ -242,6 +243,11 @@ export function createAdminRoutes(
       // not have the table populated yet.
     }
 
+    // v0.13.20 (H1 #5) — surface monthly spend so `conclave status`
+    // and any future dashboard can show "this install has spent $X
+    // of $Y this month".
+    const spend = await readMonthlySpend(env, installId);
+
     return c.json({
       ok: true,
       install: {
@@ -259,6 +265,9 @@ export function createAdminRoutes(
       },
       linkedChats,
       recentCycles,
+      monthlySpend: spend
+        ? { usd: spend.usd, capUsd: spend.capUsd, periodStart: spend.periodStart }
+        : null,
     });
   });
 

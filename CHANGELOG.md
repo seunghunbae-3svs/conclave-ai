@@ -1,5 +1,49 @@
 # Changelog
 
+## v0.13.20 — 2026-04-27 (H1 #5)
+
+### Added
+- **Per-install monthly cost cap + alert (cli@0.13.20 + worker, H1 #5).**
+  Track LLM spend per install in D1 and fire a Telegram alert when
+  the soft cap is crossed. Replaces the silent runaway-spend risk
+  that was the H1 #5 line in the roadmap.
+
+  **Schema** (migration `0008_monthly_spend.sql`): three new columns
+  on `installs`:
+  - `monthly_spend_usd REAL NOT NULL DEFAULT 0.0`
+  - `monthly_spend_cap_usd REAL NOT NULL DEFAULT 50.0`
+  - `monthly_spend_period_start TEXT` (ISO `YYYY-MM-01`)
+
+  **Flow:** CLI's TelegramNotifier passes `cost_usd` on `/review/notify`.
+  Worker reads the install's current spend, auto-rolls over on a new
+  calendar month, accumulates, and writes back. When this delta pushes
+  the total across 80% or 100% of the cap, the worker sends a Telegram
+  alert (one per crossing, not on every notify).
+
+  Defensive: every DB call is wrapped in try/catch — if the migration
+  isn't applied yet, both `readMonthlySpend` and `addMonthlySpend`
+  return `null` and `/review/notify` stays operational. Operators
+  apply the migration with `wrangler d1 migrations apply conclave-ai
+  --remote` whenever ready; the cap activates automatically thereafter.
+
+  **Surfaced in** `/admin/install-summary` (so `conclave status` and
+  any future dashboard sees `monthlySpend: { usd, capUsd, periodStart }`).
+  `conclave status` headline gains a `spend=$X.XX/$Y.YY` segment;
+  `--verbose` adds `monthly spend: $X of $Y cap (NN%) since YYYY-MM-DD`.
+
+  **Cap policy** (this iteration is SOFT only):
+  - 80% crossed → "approaching cap" warning
+  - 100% crossed → "cap reached" warning, but reviews continue to fire
+  - Hard pre-flight gate (refuse to invoke LLM when over cap) is
+    deferred — needs CLI-side change so the gate triggers BEFORE
+    Anthropic calls happen, not after.
+
+  **Tests:** 10 unit cases in `apps/central-plane/test/monthly-spend.test.mjs`
+  (accumulate / month-rollover / null-period-on-first-call / invalid
+  delta no-op / migration-pending graceful null / write-fail graceful
+  null / floating-point rounding). 158/158 worker + 508/508 cli tests
+  pass.
+
 ## v0.13.19 — 2026-04-27 (H1 #4)
 
 ### Added

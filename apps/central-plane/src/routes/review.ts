@@ -11,7 +11,7 @@ import {
 import type { PlainSummary, PlainSummaryLocale } from "@conclave-ai/core/plain-summary";
 import type { Env } from "../env.js";
 import type { FetchLike } from "../github.js";
-import { findInstallByTokenHash, touchInstall } from "../db/installs.js";
+import { findInstallByTokenHash, touchInstall, addMonthlySpend } from "../db/installs.js";
 import { getInstallForDispatch } from "../db/telegram.js";
 import {
   findProgressMessage,
@@ -89,6 +89,7 @@ export function createReviewRoutes(
           allow_unsafe_merge?: unknown;
           blocker_count?: unknown;
           pr_url?: unknown;
+          cost_usd?: unknown;
         }
       | null;
     if (!body || typeof body !== "object") {
@@ -160,6 +161,15 @@ export function createReviewRoutes(
     }
     if (body.pr_url !== undefined && typeof body.pr_url !== "string") {
       return c.json({ error: "pr_url: expected string" }, 400);
+    }
+    // v0.13.20 (H1 #5) — per-episodic LLM cost in USD. Optional for
+    // backward compat with pre-v0.13.20 CLIs; when present, drives
+    // the install's monthly_spend_usd accumulator + soft-cap alert.
+    if (
+      body.cost_usd !== undefined &&
+      (typeof body.cost_usd !== "number" || !Number.isFinite(body.cost_usd) || body.cost_usd < 0)
+    ) {
+      return c.json({ error: "cost_usd: expected non-negative finite number" }, 400);
     }
 
     // ---- auth: SHA-256(token) → installs.token_hash ----
@@ -370,6 +380,39 @@ export function createReviewRoutes(
       }
     }
 
+    // v0.13.20 (H1 #5) — accumulate monthly spend + alert on cap
+    // crossings. Best-effort: any DB error degrades to a warning so
+    // /review/notify stays operational even if migration 0008 isn't
+    // applied yet.
+    let monthlySpend: { newSpendUsd: number; capUsd: number; rolledOver: boolean } | null = null;
+    if (typeof body.cost_usd === "number" && body.cost_usd > 0) {
+      monthlySpend = await addMonthlySpend(c.env, install.id, body.cost_usd);
+      if (monthlySpend) {
+        // Cap-crossing alert: when this episodic just pushed total
+        // over 80% or 100% of the cap, send a one-shot Telegram alert.
+        // Detection: was previous total below threshold AND new total
+        // is at/above. We approximate "previous" as newSpend - delta.
+        const prevSpend = Math.max(0, monthlySpend.newSpendUsd - body.cost_usd);
+        const threshold80 = monthlySpend.capUsd * 0.8;
+        const threshold100 = monthlySpend.capUsd;
+        let alert: string | null = null;
+        if (prevSpend < threshold100 && monthlySpend.newSpendUsd >= threshold100) {
+          alert = `🛑 <b>Monthly LLM cost cap reached</b>\n\nThis install has spent <b>$${monthlySpend.newSpendUsd.toFixed(2)}</b> of the <b>$${monthlySpend.capUsd.toFixed(2)}</b> cap on <b>${body.repo_slug}</b>.\n\nFurther reviews will continue to fire (the cap is a soft alert), but consider pausing the autonomy loop to avoid runaway spend.`;
+        } else if (prevSpend < threshold80 && monthlySpend.newSpendUsd >= threshold80) {
+          alert = `⚠️ <b>Monthly LLM cost approaching cap</b>\n\nThis install has spent <b>$${monthlySpend.newSpendUsd.toFixed(2)}</b> (80%+ of <b>$${monthlySpend.capUsd.toFixed(2)}</b>) on <b>${body.repo_slug}</b>.`;
+        }
+        if (alert) {
+          for (const chatId of chatIds) {
+            try {
+              await telegram.sendMessage({ chatId, text: alert, parseMode: "HTML" });
+            } catch (err) {
+              console.warn(`monthly-spend alert to chat ${chatId} failed:`, err);
+            }
+          }
+        }
+      }
+    }
+
     return c.json({
       ok: true,
       delivered,
@@ -378,6 +421,15 @@ export function createReviewRoutes(
       maxCycles: maxReworkCycles,
       dispatched: state === "reworking" && dispatchError === null,
       ...(dispatchError ? { dispatchError } : {}),
+      ...(monthlySpend
+        ? {
+            monthlySpend: {
+              usd: monthlySpend.newSpendUsd,
+              capUsd: monthlySpend.capUsd,
+              rolledOver: monthlySpend.rolledOver,
+            },
+          }
+        : {}),
       _defaultMax: AUTONOMY_DEFAULT_MAX_CYCLES,
     });
   });

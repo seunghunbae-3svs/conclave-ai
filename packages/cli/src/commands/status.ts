@@ -48,6 +48,12 @@ export interface StatusRecentCycle {
   at: string;
 }
 
+export interface StatusMonthlySpend {
+  usd: number;
+  capUsd: number;
+  periodStart: string | null;
+}
+
 export interface StatusSummary {
   ok: boolean;
   install: { id: string; repo: string };
@@ -55,6 +61,8 @@ export interface StatusSummary {
   webhook: StatusWebhook;
   linkedChats: number;
   recentCycles: StatusRecentCycle[];
+  /** v0.13.20 (H1 #5) — null if migration 0008 not applied yet. */
+  monthlySpend?: StatusMonthlySpend | null;
 }
 
 /**
@@ -138,7 +146,10 @@ export function formatStatusOneLine(s: StatusSummary): string {
       : `webhook=${wh.outcome}`;
   const chats = `${s.linkedChats} chat${s.linkedChats === 1 ? "" : "s"}`;
   const recent = `${s.recentCycles.length} recent cycle${s.recentCycles.length === 1 ? "" : "s"}`;
-  return `conclave install: ${s.install.repo} | ${bot} | ${whBadge} | ${chats} | ${recent}`;
+  const spendSegment = s.monthlySpend
+    ? ` | spend=$${s.monthlySpend.usd.toFixed(2)}/$${s.monthlySpend.capUsd.toFixed(2)}`
+    : "";
+  return `conclave install: ${s.install.repo} | ${bot} | ${whBadge} | ${chats} | ${recent}${spendSegment}`;
 }
 
 /**
@@ -170,6 +181,14 @@ export function formatStatusVerbose(s: StatusSummary): string {
     for (const c of s.recentCycles) {
       lines.push(`    PR #${c.pr}  ${c.episodic.slice(0, 14)}…  ${c.at}`);
     }
+  }
+  if (s.monthlySpend) {
+    const pct = s.monthlySpend.capUsd > 0
+      ? Math.round((s.monthlySpend.usd / s.monthlySpend.capUsd) * 100)
+      : 0;
+    lines.push(`  monthly spend: $${s.monthlySpend.usd.toFixed(2)} of $${s.monthlySpend.capUsd.toFixed(2)} cap (${pct}%)${
+      s.monthlySpend.periodStart ? ` since ${s.monthlySpend.periodStart}` : ""
+    }`);
   }
   return lines.join("\n") + "\n";
 }

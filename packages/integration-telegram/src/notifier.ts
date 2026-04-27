@@ -271,6 +271,7 @@ export class TelegramNotifier implements Notifier {
       allow_unsafe_merge?: boolean;
       blocker_count?: number;
       pr_url?: string;
+      cost_usd?: number;
     } = {
       repo_slug: repoSlug,
       message: text,
@@ -292,6 +293,11 @@ export class TelegramNotifier implements Notifier {
     if (typeof input.allowUnsafeMerge === "boolean") body.allow_unsafe_merge = input.allowUnsafeMerge;
     if (typeof input.blockerCount === "number") body.blocker_count = input.blockerCount;
     if (input.prUrl) body.pr_url = input.prUrl;
+    // v0.13.20 (H1 #5) — pipe LLM cost so the central plane can
+    // accumulate monthly_spend_usd and fire cap-crossing alerts.
+    if (typeof input.totalCostUsd === "number" && input.totalCostUsd > 0) {
+      body.cost_usd = input.totalCostUsd;
+    }
 
     const fetchFn: HttpFetch | typeof fetch =
       this.centralFetch ??
