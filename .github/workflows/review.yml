@@ -177,11 +177,13 @@ jobs:
           version: 10.33.0
 
       - name: Setup Node.js
+        if: steps.skip-guard.outputs.skip != 'true'
         uses: actions/setup-node@v4
         with:
           node-version: '22'
 
       - name: Install @conclave-ai/cli
+        if: steps.skip-guard.outputs.skip != 'true'
         run: pnpm add -g "@conclave-ai/cli@${{ inputs.cli-version }}"
 
       # v0.9.0: install Playwright browsers only when visual review is
