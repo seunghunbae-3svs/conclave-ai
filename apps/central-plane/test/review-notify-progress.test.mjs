@@ -314,7 +314,8 @@ test("/healthz: returns ok=true with db=up when ping succeeds", async () => {
   assert.equal(body.ok, true);
   assert.equal(body.db, "up");
   assert.equal(body.service, "conclave-central-plane");
-  assert.match(body.version, /^0\.11\./);
+  // Version is bumped per release; just assert it's semver-ish.
+  assert.match(body.version, /^\d+\.\d+\.\d+/);
 });
 
 test("/healthz: returns ok=false with db=down when ping fails", async () => {

@@ -39,7 +39,25 @@ export function createAdminRoutes(
       });
     }
     const expected = resolveWebhookUrl(env);
-    const info = await checkWebhookBound(env.TELEGRAM_BOT_TOKEN, fetchImpl);
+    // v0.13.16 — also call getMe so the diagnostic surfaces WHICH bot
+    // the worker is actually using. Live RC: PR #32 — operator
+    // expected @BAE_DUAL_bot but the worker's TELEGRAM_BOT_TOKEN
+    // pointed at @Conclave_AI; without bot identity in the diagnostic
+    // we can't tell from outside.
+    const [info, me] = await Promise.all([
+      checkWebhookBound(env.TELEGRAM_BOT_TOKEN, fetchImpl),
+      fetchImpl(`https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/getMe`)
+        .then(async (r) => {
+          if (!r.ok) return null;
+          const j = (await r.json().catch(() => null)) as {
+            ok?: boolean;
+            result?: { id?: number; username?: string; first_name?: string };
+          } | null;
+          if (!j?.ok || !j.result) return null;
+          return j.result;
+        })
+        .catch(() => null),
+    ]);
     if (!info) {
       return c.json({
         ok: false,
@@ -47,6 +65,7 @@ export function createAdminRoutes(
         url: null,
         expected,
         matches: false,
+        bot: me ? { id: me.id, username: me.username, firstName: me.first_name } : null,
       });
     }
     const matches = info.url === expected;
@@ -58,6 +77,9 @@ export function createAdminRoutes(
       matches,
       pendingUpdateCount: info.pending_update_count,
       lastErrorMessage: info.last_error_message ?? null,
+      lastErrorDate: info.last_error_date ?? null,
+      lastSynchronizationErrorDate: info.last_synchronization_error_date ?? null,
+      bot: me ? { id: me.id, username: me.username, firstName: me.first_name } : null,
     });
   });
 

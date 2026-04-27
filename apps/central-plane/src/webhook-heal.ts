@@ -36,6 +36,7 @@ interface WebhookInfo {
   pending_update_count: number;
   last_error_date?: number;
   last_error_message?: string;
+  last_synchronization_error_date?: number;
 }
 
 interface TelegramResponse<T> {
