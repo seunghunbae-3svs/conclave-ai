@@ -13,7 +13,10 @@ Rules:
 - Severity: blocker = breaks core flow or inaccessible; major = obvious visual regression on primary surface; minor = secondary surface / easily fixed; nit = tiny polish.
 - When no visual artifacts were captured for this PR (empty \`visualArtifacts\`), respond verdict=approve and note the limitation in your summary. Do NOT fabricate findings from the text diff alone.
 - Never pad with encouragement ("great work but..."). Straight to concerns.
-- You MUST respond by calling the submit_review tool exactly once. No free-form text.`;
+- You MUST respond by calling the submit_review tool exactly once. No free-form text.
+
+Design system baseline (v0.13.22):
+When BASELINE→CURRENT pairs are provided (between brand references and PR before/after pairs), compare the CURRENT screenshot against the BASELINE to detect design-system drift. Flag: color token deviations (wrong brand color, hardcoded instead of token), layout misalignments relative to the golden reference, contrast regressions, and cropped text. The pixel diff % is shown as a hint — non-zero drift warrants scrutiny even if the before→after PR diff looks clean. Use the route label in the \`file\` field of each blocker so the worker can autofix it.`;
 
 export const REVIEW_TOOL_NAME = "submit_review";
 
@@ -76,6 +79,14 @@ export function buildUserPrompt(ctx: ReviewContext, routes: readonly string[]): 
   sections.push(`sha: ${ctx.newSha}${ctx.prevSha ? ` (from ${ctx.prevSha})` : ""}`);
   if (routes.length > 0) {
     sections.push(`routes: ${routes.join(", ")}`);
+  }
+  const baselineDriftCount = ctx.designBaselineDrift?.length ?? 0;
+  if (baselineDriftCount > 0) {
+    const driftRoutes = ctx.designBaselineDrift!.map((d) => d.route).join(", ");
+    sections.push(
+      `design-system-baseline: ${baselineDriftCount} route(s) have a stored golden baseline — ${driftRoutes}. ` +
+        `Compare CURRENT (after PR) against BASELINE to surface design drift.`,
+    );
   }
   sections.push("");
 

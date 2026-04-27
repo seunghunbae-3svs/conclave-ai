@@ -50,6 +50,7 @@ import { resolveTierIds } from "../lib/tier-resolver.js";
 import { buildReviewJson, serializeReviewJson } from "../lib/review-json-output.js";
 import { resolveKey } from "../lib/credentials.js";
 import { runVisualCapture, type VisualCaptureResult } from "../lib/visual-capture.js";
+import { matchBaselinesToArtifacts, saveDesignBaseline } from "../lib/design-baseline.js";
 import type { ViewportSpec } from "@conclave-ai/visual-review";
 
 type ReviewDomainInput = "code" | "design";
@@ -85,6 +86,13 @@ interface ReviewArgs {
   visualRoutes?: string[];
   /** v0.9.0 — bypass the deploy-status=success gate (local dev). */
   skipDeployWait: boolean;
+  /**
+   * v0.13.22 — after visual capture, save the "after" screenshots as the
+   * new design system baseline in `.conclave/design/baseline/`. The review
+   * still runs normally; this just also records the result as the new
+   * golden reference for future baseline-drift comparisons.
+   */
+  captureBaseline: boolean;
 }
 export function parseArgv(argv: string[]): ReviewArgs {
   const out: ReviewArgs = {
@@ -96,12 +104,14 @@ export function parseArgv(argv: string[]): ReviewArgs {
     json: false,
     skipDeployWait: false,
     noNotify: false,
+    captureBaseline: false,
   };
   for (let i = 0; i < argv.length; i += 1) {
     const a = argv[i];
     if (a === "--help" || a === "-h") out.help = true;
     else if (a === "--visual") out.visual = true;
     else if (a === "--no-visual") out.noVisual = true;
+    else if (a === "--capture-baseline") out.captureBaseline = true;
     else if (a === "--no-plain-summary") out.noPlainSummary = true;
     else if (a === "--plain-summary-only") out.plainSummaryOnly = true;
     else if (a === "--json") out.json = true;
@@ -162,6 +172,10 @@ Options:
                  (e.g. "/,/login,/dashboard"). Bypasses auto-detection.
   --skip-deploy-wait  v0.9.0 — capture screenshots even if deploy-status isn't "success".
                  Useful during local dev when no deploy system is wired up.
+  --capture-baseline  v0.13.22 — after visual capture, save the "after" screenshots as
+                 the new design system baseline in .conclave/design/baseline/. The
+                 review still runs normally. Use on a known-good PR to establish
+                 the golden reference for future baseline-drift comparisons.
   --no-plain-summary  Disable the plain-language (non-dev) summary for this run.
   --plain-summary-locale <en|ko>  Override the summary locale (default from .conclaverc.json).
   --plain-summary-only  Post ONLY the plain summary to the PR comment, skip the technical block.
@@ -646,6 +660,79 @@ export async function review(argv: string[]): Promise<void> {
             infoOut(
               `conclave review: visual capture done — ${visualCaptureResult.artifacts.length} before/after pair(s), ${visualCaptureResult.totalMs}ms\n`,
             );
+            // v0.13.22 — design system baseline comparison. Match captured
+            // "after" screenshots against stored baselines to populate
+            // ReviewContext.designBaselineDrift for DesignAgent Mode A.
+            // Runs after artifact logging so the UI flow is:
+            //   1. visual capture done (N pairs)
+            //   2. baseline matched (M / N routes)
+            //   3. council deliberates with both PR diff + baseline drift
+            try {
+              const baselineMatches = await matchBaselinesToArtifacts(
+                configDir,
+                visualCaptureResult.artifacts,
+              );
+              if (baselineMatches.length > 0) {
+                // Pre-compute pixel diff ratios for each baseline→after pair
+                // so DesignAgent sees a quantitative drift signal alongside
+                // the image. Failures per-route are non-fatal.
+                const visualMod = await import("@conclave-ai/visual-review");
+                const { PixelmatchDiff } = visualMod;
+                const diffEngine = new PixelmatchDiff();
+                const driftPairs: NonNullable<typeof reviewCtx.designBaselineDrift> = [];
+                for (const m of baselineMatches) {
+                  let diffRatio: number | undefined;
+                  try {
+                    const baselineU8 = new Uint8Array(m.baseline);
+                    const afterU8 = new Uint8Array(m.after);
+                    const dres = await diffEngine.diff(baselineU8, afterU8, {
+                      threshold: config.visual?.diffThreshold ?? 0.1,
+                    });
+                    diffRatio = dres.diffRatio;
+                  } catch {
+                    // Non-fatal — still pass the pair without a ratio
+                  }
+                  driftPairs.push({
+                    route: m.route,
+                    baseline: m.baseline,
+                    after: m.after,
+                    ...(diffRatio !== undefined ? { diffRatio } : {}),
+                  });
+                }
+                reviewCtx.designBaselineDrift = driftPairs;
+                const driftSummary = driftPairs
+                  .map((p) =>
+                    p.diffRatio !== undefined
+                      ? `${p.route} ${(p.diffRatio * 100).toFixed(1)}%`
+                      : p.route,
+                  )
+                  .join(", ");
+                infoOut(
+                  `conclave review: baseline matched ${driftPairs.length}/${visualCaptureResult.artifacts.length} route(s) — ${driftSummary}\n`,
+                );
+              } else {
+                infoOut(
+                  `conclave review: no design baseline found — run with --capture-baseline to record a golden reference\n`,
+                );
+              }
+              // v0.13.22 — save "after" captures as the new baseline when
+              // --capture-baseline is set. Overwrites existing files.
+              // Always runs after matching so the new baseline takes effect
+              // for the NEXT review (not the current one's drift detection).
+              if (args.captureBaseline) {
+                const { saved } = await saveDesignBaseline(
+                  configDir,
+                  visualCaptureResult.artifacts,
+                );
+                infoOut(
+                  `conclave review: baseline saved — ${saved.length} route(s) written to .conclave/design/baseline/\n`,
+                );
+              }
+            } catch (err) {
+              process.stderr.write(
+                `conclave review: baseline check failed — ${(err as Error).message}\n`,
+              );
+            }
           } else {
             process.stderr.write(
               `conclave review: visual capture produced no artifacts — ${visualCaptureResult.reason}\n`,

@@ -136,6 +136,26 @@ export interface ReviewContext {
    * missing.
    */
   designReferences?: Array<{ filename: string; bytes: Buffer | Uint8Array }>;
+  /**
+   * v0.13.22 — design system baseline drift pairs. Each entry is a
+   * (baseline, after) screenshot pair for a route where a stored baseline
+   * exists in `.conclave/design/baseline/`. DesignAgent uses these to
+   * detect color token mismatch, layout regression, contrast changes, and
+   * cropped text relative to the golden design system state.
+   *
+   * `diffRatio` is an optional pre-computed pixelmatch ratio (0..1) for
+   * the baseline→after pair — included as a fast quantitative signal.
+   * Absent when the pixel diff step was skipped.
+   *
+   * Populated by `conclave review --visual` when baselines exist on disk.
+   * Absent when no baselines have been captured yet.
+   */
+  designBaselineDrift?: Array<{
+    route: string;
+    baseline: Buffer | string;
+    after: Buffer | string;
+    diffRatio?: number;
+  }>;
 }
 
 export interface ReviewResult {

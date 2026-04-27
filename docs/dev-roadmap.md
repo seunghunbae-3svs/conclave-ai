@@ -73,7 +73,7 @@ double-writes stdout when issue creation fails). 9 new hermetic tests
 added (21 total in audit.test.mjs). Actual audit run on eventbadge is a
 separate Bae-triggered action.
 
-**B. `conclave review --visual` against design system baseline.**
+**B. `conclave review --visual` against design system baseline.** ✅ cli@0.13.22
 DesignAgent + Playwright capture + pixelmatch already exist. Wire the
 design-spec input (`.conclave/design/baseline/`) so DesignAgent compares
 the PR's preview URL screenshots against a stored baseline (or against
@@ -82,6 +82,12 @@ on a UI PR, surfaces design-drift blockers (color token mismatch,
 layout regression, contrast, cropped text), AND those blockers can be
 autofixed by the worker (v0.13.7 already enabled design-domain autofix
 when blocker.file is set).
+Implementation: new `design-baseline.ts` module (routeToFilename, saveDesignBaseline,
+matchBaselinesToArtifacts), `ReviewContext.designBaselineDrift` field in core,
+DesignAgent buildVisionContent updated to interleave BASELINE→CURRENT pairs
+before PR before→after pairs, SYSTEM_PROMPT updated with baseline-drift guidance,
+`--capture-baseline` CLI flag to save golden reference. 17 new hermetic tests
+(10 in design-baseline.test.mjs, 7 in vision-mode.test.mjs).
 
 **C. `conclave audit --spec docs/spec.md`** (spec-vs-code gap analysis).
 Audit reads a spec file (markdown bullet list of intended features) and

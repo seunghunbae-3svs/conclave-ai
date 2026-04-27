@@ -189,3 +189,156 @@ test("vision-mode: passes deploy-status=failure context so DesignAgent sees the 
   assert.ok(userText.text.includes("deploy: FAILURE"), "deploy-failure wording propagated");
   assert.equal(r.verdict, "rework");
 });
+
+// ---- Design system baseline drift (v0.13.22) ---------------------------------
+
+test("vision-mode: designBaselineDrift pairs appear in content blocks before PR artifacts", async () => {
+  const client = makeMockClient([toolUseResponse({ verdict: "approve", summary: "LGTM" })]);
+  const agent = new DesignAgent({
+    apiKey: "test-key",
+    gate: new EfficiencyGate({ perPrUsd: 1 }),
+    client,
+  });
+  await agent.review({
+    ...baseCtx,
+    domain: "design",
+    visualArtifacts: [{ route: "/", before: tinyPng, after: tinyPng }],
+    designBaselineDrift: [{ route: "/", baseline: tinyPng, after: tinyPng }],
+  });
+  const content = client.calls[0].messages[0].content;
+  const baselineHeaderIdx = content.findIndex(
+    (b) => b.type === "text" && b.text.includes("Design system baseline comparison"),
+  );
+  const prBeforeIdx = content.findIndex(
+    (b) => b.type === "text" && b.text.includes("Route: / — BEFORE"),
+  );
+  assert.ok(baselineHeaderIdx >= 0, "baseline section header present");
+  assert.ok(prBeforeIdx >= 0, "PR before label present");
+  assert.ok(baselineHeaderIdx < prBeforeIdx, "baseline section appears before PR artifacts");
+});
+
+test("vision-mode: baseline pair sends two images (BASELINE + CURRENT) per route", async () => {
+  const client = makeMockClient([toolUseResponse({ verdict: "approve", summary: "LGTM" })]);
+  const agent = new DesignAgent({
+    apiKey: "test-key",
+    gate: new EfficiencyGate({ perPrUsd: 1 }),
+    client,
+  });
+  await agent.review({
+    ...baseCtx,
+    domain: "design",
+    visualArtifacts: [{ route: "/", before: tinyPng, after: tinyPng }],
+    designBaselineDrift: [
+      { route: "/dashboard", baseline: tinyPng, after: tinyPng },
+      { route: "/login", baseline: tinyPng, after: tinyPng },
+    ],
+  });
+  const content = client.calls[0].messages[0].content;
+  const baselineLabels = content.filter(
+    (b) => b.type === "text" && b.text.includes("BASELINE (design system golden"),
+  );
+  // Use "— CURRENT" (em dash) to match only the per-route labels, not the
+  // section header or the user prompt which also contain "CURRENT (after PR".
+  const currentLabels = content.filter(
+    (b) => b.type === "text" && b.text.includes("— CURRENT (after PR"),
+  );
+  assert.equal(baselineLabels.length, 2, "one BASELINE label per route");
+  assert.equal(currentLabels.length, 2, "one CURRENT label per route");
+  // Total images: 2 baseline routes × 2 + 1 PR route × 2 = 6
+  const images = content.filter((b) => b.type === "image");
+  assert.equal(images.length, 6, "2 baseline pairs × 2 images + 1 PR pair × 2 = 6");
+});
+
+test("vision-mode: diffRatio shown in BASELINE label when provided", async () => {
+  const client = makeMockClient([toolUseResponse({ verdict: "approve", summary: "LGTM" })]);
+  const agent = new DesignAgent({
+    apiKey: "test-key",
+    gate: new EfficiencyGate({ perPrUsd: 1 }),
+    client,
+  });
+  await agent.review({
+    ...baseCtx,
+    domain: "design",
+    visualArtifacts: [{ route: "/", before: tinyPng, after: tinyPng }],
+    designBaselineDrift: [{ route: "/", baseline: tinyPng, after: tinyPng, diffRatio: 0.0523 }],
+  });
+  const content = client.calls[0].messages[0].content;
+  const baselineLabel = content.find(
+    (b) => b.type === "text" && b.text.includes("BASELINE") && b.text.includes("pixel diff:"),
+  );
+  assert.ok(baselineLabel, "pixel diff percentage shown in baseline label");
+  assert.ok(baselineLabel.text.includes("5.23%"), "diffRatio formatted correctly");
+});
+
+test("vision-mode: no designBaselineDrift → no baseline section in content", async () => {
+  const client = makeMockClient([toolUseResponse({ verdict: "approve", summary: "LGTM" })]);
+  const agent = new DesignAgent({
+    apiKey: "test-key",
+    gate: new EfficiencyGate({ perPrUsd: 1 }),
+    client,
+  });
+  await agent.review({
+    ...baseCtx,
+    domain: "design",
+    visualArtifacts: [{ route: "/", before: tinyPng, after: tinyPng }],
+  });
+  const content = client.calls[0].messages[0].content;
+  const baselineHeader = content.find(
+    (b) => b.type === "text" && b.text.includes("Design system baseline comparison"),
+  );
+  assert.equal(baselineHeader, undefined, "no baseline section when no drift provided");
+});
+
+test("vision-mode: designBaselineDrift route mentioned in user prompt header", async () => {
+  const client = makeMockClient([toolUseResponse({ verdict: "approve", summary: "LGTM" })]);
+  const agent = new DesignAgent({
+    apiKey: "test-key",
+    gate: new EfficiencyGate({ perPrUsd: 1 }),
+    client,
+  });
+  await agent.review({
+    ...baseCtx,
+    domain: "design",
+    visualArtifacts: [{ route: "/", before: tinyPng, after: tinyPng }],
+    designBaselineDrift: [{ route: "/dashboard", baseline: tinyPng, after: tinyPng }],
+  });
+  const userText = client.calls[0].messages[0].content[0];
+  assert.ok(
+    userText.text.includes("design-system-baseline"),
+    "baseline section appears in user prompt",
+  );
+  assert.ok(userText.text.includes("/dashboard"), "drift route named in prompt");
+});
+
+test("vision-mode: blockers with file set to route can be autofixed by worker", async () => {
+  const client = makeMockClient([
+    toolUseResponse({
+      verdict: "rework",
+      blockers: [
+        {
+          severity: "major",
+          category: "color-token-drift",
+          message:
+            "Primary button color drifted from design system baseline — current #3B82F6 vs baseline #2563EB.",
+          file: "/dashboard",
+        },
+      ],
+      summary: "Color token drift detected on /dashboard relative to design system baseline.",
+    }),
+  ]);
+  const agent = new DesignAgent({
+    apiKey: "test-key",
+    gate: new EfficiencyGate({ perPrUsd: 1 }),
+    client,
+  });
+  const r = await agent.review({
+    ...baseCtx,
+    domain: "design",
+    visualArtifacts: [{ route: "/dashboard", before: tinyPng, after: tinyPng }],
+    designBaselineDrift: [{ route: "/dashboard", baseline: tinyPng, after: tinyPng, diffRatio: 0.03 }],
+  });
+  assert.equal(r.verdict, "rework");
+  assert.equal(r.blockers.length, 1);
+  assert.equal(r.blockers[0].category, "color-token-drift");
+  assert.equal(r.blockers[0].file, "/dashboard", "file set enables worker autofix");
+});

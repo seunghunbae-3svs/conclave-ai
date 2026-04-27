@@ -250,6 +250,12 @@ export class DesignAgent implements Agent {
    * (ctx.designReferences) rendered ahead of the PR before/after pairs
    * so the model sees "what this brand looks like when it's right"
    * before judging the diff.
+   *
+   * v0.13.22 adds optional design-system baseline drift pairs
+   * (ctx.designBaselineDrift) rendered between brand references and PR
+   * artifacts so the model can surface color-token mismatch, layout
+   * regression, contrast changes, and cropped text relative to the
+   * golden design system state.
    */
   private async reviewVision(
     ctx: ReviewContext,
@@ -258,13 +264,14 @@ export class DesignAgent implements Agent {
     const routes = artifacts.map((a) => a.route);
     const userText = buildUserPrompt(ctx, routes);
     const designRefs = ctx.designReferences ?? [];
+    const baselineDrift = ctx.designBaselineDrift ?? [];
     // Rough token estimate for budget reservation. Images cost ~1.5k tokens
     // each for Anthropic vision; we over-estimate to stay safe.
     const perImageTokens = 1_500;
     const inputTokenEstimate =
       estimateTokens(SYSTEM_PROMPT) +
       estimateTokens(userText) +
-      (artifacts.length * 2 + designRefs.length) * perImageTokens;
+      (artifacts.length * 2 + designRefs.length + baselineDrift.length * 2) * perImageTokens;
     // Rough pre-flight cost. EfficiencyGate only uses this to reserve
     // against the per-PR budget; it does not gate on the exact number.
     // We pick a conservative USD/1M-input-tokens figure for Opus vision.
@@ -281,7 +288,7 @@ export class DesignAgent implements Agent {
       async ({ model }) => {
         const started = Date.now();
         const client = await this.getClient();
-        const content = buildVisionContent(userText, artifacts, designRefs);
+        const content = buildVisionContent(userText, artifacts, designRefs, baselineDrift);
         const response = await client.messages.create({
           model,
           max_tokens: this.maxTokens,
@@ -409,11 +416,24 @@ export class DesignAgent implements Agent {
  * sequence, prefaced by the textual prompt. Anthropic's vision API
  * accepts multiple images per user message; we clearly label each so the
  * model doesn't confuse ordering.
+ *
+ * Block ordering:
+ *   1. Prompt text
+ *   2. Brand reference images (v0.6.4) — "what this brand looks like when right"
+ *   3. Design system baseline pairs (v0.13.22) — "golden baseline vs current after"
+ *   4. PR before/after pairs — "what changed in this PR"
+ *   5. submit_review instruction
  */
 function buildVisionContent(
   userText: string,
   artifacts: ReadonlyArray<{ before: Buffer | string; after: Buffer | string; route: string }>,
   designReferences: ReadonlyArray<{ filename: string; bytes: Buffer | Uint8Array }> = [],
+  baselineDrift: ReadonlyArray<{
+    route: string;
+    baseline: Buffer | string;
+    after: Buffer | string;
+    diffRatio?: number;
+  }> = [],
 ): Array<
   | { type: "text"; text: string }
   | { type: "image"; source: { type: "base64"; media_type: "image/png"; data: string } }
@@ -440,7 +460,50 @@ function buildVisionContent(
     }
     blocks.push({
       type: "text",
-      text: `--- End brand references. PR-specific before/after pairs follow. ---`,
+      text: `--- End brand references. Design system baseline pairs follow. ---`,
+    });
+  }
+  // v0.13.22 — design system baseline pairs. Baseline = the stored golden
+  // screenshot; after = current state after this PR. The model compares
+  // these to surface drift (color tokens, layout, contrast, cropped text)
+  // that wasn't already caught by the BEFORE→AFTER pair below.
+  if (baselineDrift.length > 0) {
+    blocks.push({
+      type: "text",
+      text: `--- Design system baseline comparison (${baselineDrift.length} route(s)) — compare BASELINE (golden) to CURRENT (after PR) ---`,
+    });
+    for (const pair of baselineDrift) {
+      const diffLabel =
+        pair.diffRatio !== undefined
+          ? ` — pixel diff: ${(pair.diffRatio * 100).toFixed(2)}%`
+          : "";
+      blocks.push({
+        type: "text",
+        text: `--- Route: ${pair.route} — BASELINE (design system golden${diffLabel}) ---`,
+      });
+      blocks.push({
+        type: "image",
+        source: { type: "base64", media_type: "image/png", data: toBase64(pair.baseline) },
+      });
+      blocks.push({
+        type: "text",
+        text: `--- Route: ${pair.route} — CURRENT (after PR; flag drift from BASELINE above) ---`,
+      });
+      blocks.push({
+        type: "image",
+        source: { type: "base64", media_type: "image/png", data: toBase64(pair.after) },
+      });
+    }
+    blocks.push({
+      type: "text",
+      text: `--- End baseline pairs. PR before→after pairs follow. ---`,
+    });
+  } else if (designReferences.length === 0) {
+    // No brand refs and no baseline — still need a separator before PR artifacts
+  } else {
+    blocks.push({
+      type: "text",
+      text: `--- PR-specific before/after pairs follow. ---`,
     });
   }
   for (const art of artifacts) {
