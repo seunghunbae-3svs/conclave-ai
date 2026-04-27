@@ -77,6 +77,33 @@ function gitOutput(args) {
 }
 
 /**
+ * Send a Telegram message to Bae's configured chat. Silent no-op when
+ * TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID env vars are missing — so the
+ * dev-loop keeps working even before notification is wired.
+ *
+ * Plain text only (no parse_mode) to avoid Markdown/HTML escaping pain
+ * with version strings, slashes, etc.
+ */
+async function notifyTelegram(text) {
+  const token = process.env.TELEGRAM_BOT_TOKEN;
+  const chatId = process.env.TELEGRAM_CHAT_ID;
+  if (!token || !chatId) return;
+  try {
+    const res = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ chat_id: chatId, text, disable_web_page_preview: true }),
+    });
+    if (!res.ok) {
+      const body = await res.text().catch(() => "");
+      process.stderr.write(`Telegram notify failed: ${res.status} ${body.slice(0, 200)}\n`);
+    }
+  } catch (err) {
+    process.stderr.write(`Telegram notify error: ${err instanceof Error ? err.message : String(err)}\n`);
+  }
+}
+
+/**
  * Parse the roadmap markdown to extract the ordered list of items
  * (e.g. "H1.5 A", "H1.5 B", "H1.5 C", "H2 #6", ...). Used both to
  * advance currentItem when an item ships AND to validate that
@@ -240,10 +267,16 @@ async function main() {
     state.frozenReason = `auto-freeze after ${state.consecutiveFailures} consecutive failures`;
     writeJson(STATE_FILE, state);
     process.stdout.write(`dev-loop AUTO-FROZEN after ${state.consecutiveFailures} failures.\n`);
+    await notifyTelegram(
+      `🚨 dev-loop AUTO-FROZEN\n${state.consecutiveFailures} consecutive failures. Manual intervention needed.\n\nFix the underlying issue, then:\n  - Edit .dev-loop-state.json: frozen=false, consecutiveFailures=0\n  - Or trigger: gh workflow run dev-loop.yml -f mode=real`,
+    );
     return;
   }
   if (state.totalSpentUsdToday >= state.perDayCapUsd) {
     process.stdout.write(`dev-loop DAY-CAP REACHED ($${state.totalSpentUsdToday}/$${state.perDayCapUsd}). Try again tomorrow.\n`);
+    await notifyTelegram(
+      `💸 dev-loop day cap reached\nSpent: $${state.totalSpentUsdToday.toFixed(2)} / $${state.perDayCapUsd}\nResumes tomorrow (UTC).`,
+    );
     return;
   }
 
@@ -260,6 +293,9 @@ async function main() {
   }
   if (!nextItem) {
     process.stdout.write("dev-loop: roadmap exhausted — no pending items 🎉\n");
+    await notifyTelegram(
+      `🎉 Roadmap complete!\nAll ${items.length} items shipped. Conclave AI is feature-complete per the H1–H4 plan.`,
+    );
     return;
   }
 
@@ -274,6 +310,10 @@ async function main() {
     process.stdout.write(`Next item: ${nextItem.id}\n`);
     return;
   }
+
+  await notifyTelegram(
+    `🚀 dev-loop run started\nItem: ${nextItem.id} — ${nextItem.label}\nSpent today: $${state.totalSpentUsdToday.toFixed(2)} / $${state.perDayCapUsd}\nFailures so far: ${state.consecutiveFailures}/3`,
+  );
 
   // Spawn Claude Code in headless / non-interactive mode.
   // --dangerously-skip-permissions because the workflow's git/test
@@ -297,6 +337,9 @@ async function main() {
     state.consecutiveFailures += 1;
     writeJson(STATE_FILE, state);
     process.stderr.write(`claude exited ${r.status}; consecutiveFailures=${state.consecutiveFailures}\n`);
+    await notifyTelegram(
+      `❌ ${nextItem.id} failed\nclaude exited with status ${r.status} (no DEVLOOP_RESULT parsed).\nFailures: ${state.consecutiveFailures}/3`,
+    );
     return;
   }
 
@@ -305,6 +348,9 @@ async function main() {
     state.consecutiveFailures += 1;
     writeJson(STATE_FILE, state);
     process.stderr.write(`agent stdout did not contain DEVLOOP_RESULT line; treating as failure\n`);
+    await notifyTelegram(
+      `❌ ${nextItem.id} failed\nNo DEVLOOP_RESULT line in stdout (likely workflow timeout — check Actions log).\nFailures: ${state.consecutiveFailures}/3`,
+    );
     return;
   }
 
@@ -321,10 +367,16 @@ async function main() {
     });
     writeJson(STATE_FILE, state);
     process.stdout.write(`✓ ${nextItem.id} shipped (commit ${headSha.slice(0, 8)}, ${result.version ?? "?"})\n`);
+    await notifyTelegram(
+      `✅ ${nextItem.id} shipped\n${nextItem.label}\nVersion: ${result.version ?? "?"}\nCommit: ${headSha.slice(0, 8)}\nSummary: ${result.summary ?? "(no summary)"}\n\nNext run in ~12h.`,
+    );
   } else {
     state.consecutiveFailures += 1;
     writeJson(STATE_FILE, state);
     process.stdout.write(`✗ ${nextItem.id} not shipped — ${result.reason ?? "(no reason)"}; consecutiveFailures=${state.consecutiveFailures}\n`);
+    await notifyTelegram(
+      `❌ ${nextItem.id} not shipped\nReason: ${result.reason ?? "(no reason)"}\nWhat got done: ${result.summary ?? "(none)"}\nFailures: ${state.consecutiveFailures}/3`,
+    );
   }
 }
 

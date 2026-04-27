@@ -7,7 +7,7 @@
   "totalSpentUsdToday": 0,
   "lastSpendResetDate": null,
   "perRunCapUsd": 1.0,
-  "perDayCapUsd": 5.0,
+  "perDayCapUsd": 10.0,
   "frozen": false,
   "frozenReason": null,
   "history": [
