@@ -1,0 +1,136 @@
+# Conclave AI — reusable merge workflow (v0.13.17)
+#
+# Closes the autonomy loop's terminal leg. Fired by the central plane
+# via `repository_dispatch` of type `conclave-merge` when the user
+# clicks ✅ Merge & Push in Telegram. This workflow:
+#
+#   1. Resolves the PR number (from the dispatch payload, falling back
+#      to a local episodic file lookup for legacy installs).
+#   2. Merges the PR with `gh pr merge --squash --delete-branch`.
+#   3. POSTs to /merge/notify on the central plane so a final
+#      "✅ Merged" message lands in every linked Telegram chat —
+#      this is the loop-closure signal Bae sees when everything has
+#      worked end-to-end.
+#   4. Best-effort `conclave record-outcome` (continue-on-error so a
+#      missing local episodic file doesn't fail the whole run; the
+#      central plane already has the anchor).
+#
+# Branch protection on the target PR still applies — this workflow
+# can't force a merge past required reviews/checks. Telegram is
+# convenience, not authorisation bypass.
+#
+# Trust model:
+#   `repository_dispatch` is sent by the install's stored OAuth token
+#   that only the central plane holds. A dispatch arriving here means
+#   it came from our infrastructure on behalf of an authenticated
+#   install + a user click on a Telegram inline keyboard.
+#
+# Secrets the caller MUST provide (or inherit):
+#   ORCHESTRATOR_PAT  required — used to merge the PR + record outcome
+#                     (the default GITHUB_TOKEN cannot trigger
+#                     downstream workflows).
+#   CONCLAVE_TOKEN    required for the final Telegram notification.
+#                     Without it, merge succeeds but no terminal
+#                     "✅ Merged" message lands.
+
+name: Conclave AI Merge (reusable)
+
+on:
+  workflow_call:
+    inputs:
+      cli-version:
+        description: 'npm version tag for @conclave-ai/cli (record-outcome step). Keep in lockstep with review.yml/rework.yml default.'
+        required: false
+        type: string
+        default: 0.13.14
+      central-url:
+        description: 'Override the central-plane base URL. Leave blank for production.'
+        required: false
+        type: string
+        default: ""
+
+jobs:
+  merge:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Resolve PR + merge
+        id: merge
+        env:
+          GH_TOKEN: ${{ secrets.ORCHESTRATOR_PAT }}
+          EPISODIC: ${{ github.event.client_payload.episodic }}
+          PR_HINT: ${{ github.event.client_payload.pr_number }}
+        run: |
+          set -euo pipefail
+          # v0.9.2 — central plane injects pr_number into the dispatch
+          # payload. Prefer it; fall back to legacy grep on
+          # .conclave/episodic/ only when absent.
+          if [ -n "${PR_HINT:-}" ] && [ "${PR_HINT}" != "null" ] && [ "${PR_HINT}" -gt 0 ] 2>/dev/null; then
+            PR="${PR_HINT}"
+          else
+            EP_FILE=$(grep -rl "\"id\": \"${EPISODIC}\"" .conclave/episodic 2>/dev/null | head -1 || true)
+            if [ -z "${EP_FILE:-}" ]; then
+              echo "::error::No pr_number in payload and no episodic file on default branch for ${EPISODIC}"
+              exit 1
+            fi
+            PR=$(jq -r '.pullNumber' "${EP_FILE}")
+          fi
+          echo "Merging PR ${PR} on behalf of Telegram approval"
+          gh pr merge --repo "${{ github.repository }}" "${PR}" --squash --delete-branch
+          echo "pr_number=${PR}" >> "$GITHUB_OUTPUT"
+
+      # v0.13.17 — final merge-success notification. The loop-closure
+      # signal Bae sees when everything has worked end-to-end. Without
+      # this, GitHub merges succeed silently and the user has to
+      # check the PR page to know what happened.
+      - name: Notify central plane (merged)
+        if: success()
+        env:
+          CONCLAVE_TOKEN: ${{ secrets.CONCLAVE_TOKEN }}
+          CONCLAVE_CENTRAL_URL: ${{ inputs.central-url }}
+          EPISODIC: ${{ github.event.client_payload.episodic }}
+          PR_NUMBER: ${{ steps.merge.outputs.pr_number }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          BASE="${CONCLAVE_CENTRAL_URL:-https://conclave-ai.seunghunbae.workers.dev}"
+          if [ -z "${CONCLAVE_TOKEN:-}" ]; then
+            echo "::warning::CONCLAVE_TOKEN not set — skipping merge notification"
+            exit 0
+          fi
+          PAYLOAD=$(jq -n \
+            --arg ep "$EPISODIC" \
+            --argjson pr "${PR_NUMBER:-0}" \
+            --arg url "https://github.com/${REPO}/pull/${PR_NUMBER}" \
+            '{outcome: "merged", episodic_id: $ep, pr_number: $pr, pr_url: $url}')
+          echo "Notifying ${BASE}/merge/notify"
+          curl -fsS -X POST \
+            -H "Authorization: Bearer ${CONCLAVE_TOKEN}" \
+            -H "Content-Type: application/json" \
+            -d "$PAYLOAD" \
+            "${BASE}/merge/notify" | head -c 300 || \
+            echo "::warning::merge/notify call failed (non-fatal — PR is already merged)"
+
+      # v0.13.17 — record-outcome runs LAST, best-effort. If no local
+      # .conclave/episodic file exists on the runner, skip silently
+      # rather than failing the workflow. The central plane already
+      # has the episodic anchored.
+      - name: Record outcome = merged (best-effort)
+        if: always() && steps.merge.outcome == 'success'
+        env:
+          GH_TOKEN: ${{ secrets.ORCHESTRATOR_PAT }}
+          CLI_VERSION: ${{ inputs.cli-version }}
+        continue-on-error: true
+        run: |
+          npx -y -p "@conclave-ai/cli@${CLI_VERSION}" conclave record-outcome \
+            --id ${{ github.event.client_payload.episodic }} \
+            --result merged || \
+            echo "::notice::record-outcome skipped (no local episodic — central plane already has anchor)"

@@ -3,8 +3,10 @@ import { writeConfig, CONFIG_FILENAME } from "./init/config-writer.js";
 import {
   writeWorkflow,
   writeReworkWorkflow,
+  writeMergeWorkflow,
   WORKFLOW_PATH,
   REWORK_WORKFLOW_PATH,
+  MERGE_WORKFLOW_PATH,
   REUSABLE_REF,
 } from "./init/workflow-writer.js";
 import { createPrompter, createNonInteractivePrompter, type Prompter } from "./init/prompts.js";
@@ -233,6 +235,22 @@ export async function runInit(args: InitArgs, deps: RunInitDeps = {}): Promise<n
       stdout(`• wrote: ${reworkResult.path}\n`);
     }
 
+    // Step 7c — v0.13.17: write the consumer-side merge dispatcher so
+    // central-plane's `conclave-merge` repository_dispatch (fired
+    // when the user clicks ✅ Merge & Push in Telegram) actually has
+    // a listener. Without this file the dispatch lands but no
+    // workflow runs; the user-visible loop feels broken even though
+    // everything upstream worked.
+    const mergeResult = await writeMergeWorkflow({
+      cwd: args.cwd,
+      force: args.reconfigure,
+    });
+    if (mergeResult.skipped) {
+      stdout(`• skip:  ${MERGE_WORKFLOW_PATH} exists (pass --reconfigure to overwrite)\n`);
+    } else {
+      stdout(`• wrote: ${mergeResult.path}\n`);
+    }
+
     // Step 8 — next steps.
     const needsApiKeySetup = Boolean(anthropic || openai || gemini);
     stdout(
@@ -250,7 +268,7 @@ export async function runInit(args: InitArgs, deps: RunInitDeps = {}): Promise<n
               : "")
           : `Next steps:\n  • Set at least one LLM API key secret on ${repoSlug} before opening a PR (ANTHROPIC_API_KEY required).\n`) +
         `  • Commit:\n` +
-        `       git add ${CONFIG_FILENAME} ${WORKFLOW_PATH} ${REWORK_WORKFLOW_PATH}\n` +
+        `       git add ${CONFIG_FILENAME} ${WORKFLOW_PATH} ${REWORK_WORKFLOW_PATH} ${MERGE_WORKFLOW_PATH}\n` +
         `       git commit -m "chore: install conclave-ai review"\n` +
         `  • Open a PR — the council will comment with a verdict, and Telegram notifications arrive` +
         (oauthOutcome === "success" ? ` in the chat you /link'd.\n` : `. (OAuth skipped — Telegram notifications disabled.)\n`),

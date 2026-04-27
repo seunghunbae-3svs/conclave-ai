@@ -44,14 +44,22 @@ export function createTelegramRoutes(
     // Optional webhook-secret check — set by `wrangler secret put
     // TELEGRAM_WEBHOOK_SECRET` and passed at setWebhook time as
     // `secret_token`. If unset we skip the check (acceptable for alpha).
+    const providedSecret = c.req.header("x-telegram-bot-api-secret-token");
+    console.log(JSON.stringify({
+      event: "webhook.received",
+      has_secret_env: !!c.env.TELEGRAM_WEBHOOK_SECRET,
+      secret_header_present: !!providedSecret,
+      secret_match: c.env.TELEGRAM_WEBHOOK_SECRET ? providedSecret === c.env.TELEGRAM_WEBHOOK_SECRET : null,
+    }));
     if (c.env.TELEGRAM_WEBHOOK_SECRET) {
-      const provided = c.req.header("x-telegram-bot-api-secret-token");
-      if (provided !== c.env.TELEGRAM_WEBHOOK_SECRET) {
+      if (providedSecret !== c.env.TELEGRAM_WEBHOOK_SECRET) {
+        console.warn("webhook: secret mismatch — returning 401");
         return c.json({ error: "invalid webhook secret" }, 401);
       }
     }
 
-    const update = (await c.req.json().catch(() => null)) as {
+    const rawBody = await c.req.text();
+    let update: {
       update_id?: number;
       message?: { chat?: { id?: number }; text?: string; from?: { username?: string; first_name?: string } };
       callback_query?: {
@@ -61,6 +69,19 @@ export function createTelegramRoutes(
         message?: { chat?: { id?: number } };
       };
     } | null;
+    try {
+      update = JSON.parse(rawBody);
+    } catch {
+      update = null;
+    }
+    console.log(JSON.stringify({
+      event: "webhook.body_parsed",
+      body_len: rawBody.length,
+      body_keys: update ? Object.keys(update) : null,
+      has_message: !!update?.message,
+      has_callback_query: !!update?.callback_query,
+      callback_data: update?.callback_query?.data ?? null,
+    }));
     if (!update) return c.json({ ok: true });
 
     const telegram = new TelegramClient({ token: botToken, fetch: fetchImpl });
@@ -135,17 +156,33 @@ export function createTelegramRoutes(
       const chatId = cq.message?.chat?.id;
       const user = cq.from?.username ?? cq.from?.first_name ?? null;
 
+      console.log(JSON.stringify({
+        event: "callback_query.received",
+        cq_id: cq.id,
+        cq_data: cq.data,
+        chat_id: chatId,
+        from_username: cq.from?.username,
+      }));
       if (!parsed) {
+        console.warn("callback_query: parsed=null (unknown button)");
         await telegram.answerCallbackQuery({ id: cq.id!, text: "Unknown button" });
         return c.json({ ok: true });
       }
       if (!chatId) {
+        console.warn("callback_query: chatId missing");
         await telegram.answerCallbackQuery({ id: cq.id!, text: "Missing chat context" });
         return c.json({ ok: true });
       }
 
       const link = await findLinkByChatId(c.env, chatId);
+      console.log(JSON.stringify({
+        event: "callback_query.link_lookup",
+        chat_id: chatId,
+        found: !!link,
+        install_id: link?.installId ?? null,
+      }));
       if (!link) {
+        console.warn("callback_query: link not found for chat_id=" + chatId);
         await telegram.answerCallbackQuery({
           id: cq.id!,
           text: "This chat is not linked. DM /link <token> first.",
@@ -212,7 +249,16 @@ export function createTelegramRoutes(
       }
 
       const install = await getInstallForDispatch(c.env, link.installId);
+      console.log(JSON.stringify({
+        event: "callback_query.install_lookup",
+        install_id: link.installId,
+        found: !!install,
+        repo_slug: install?.repoSlug ?? null,
+        has_token: !!install?.githubAccessToken,
+        needs_lazy_encrypt: install?.needsLazyEncrypt ?? null,
+      }));
       if (!install || !install.githubAccessToken) {
+        console.warn("callback_query: install or githubAccessToken missing");
         await telegram.answerCallbackQuery({
           id: cq.id!,
           text: "Install missing GitHub token — re-run `conclave init` to refresh.",
@@ -254,6 +300,14 @@ export function createTelegramRoutes(
         clientPayload.pr_number = prNumber;
       }
 
+      console.log(JSON.stringify({
+        event: "callback_query.dispatch_attempt",
+        repo_slug: install.repoSlug,
+        event_type: eventType,
+        episodic_id: parsed.episodicId,
+        outcome: parsed.outcome,
+        pr_number: prNumber,
+      }));
       try {
         await dispatchRepositoryEvent(
           fetchImpl,
@@ -262,6 +316,11 @@ export function createTelegramRoutes(
           eventType,
           clientPayload,
         );
+        console.log(JSON.stringify({
+          event: "callback_query.dispatch_success",
+          repo_slug: install.repoSlug,
+          event_type: eventType,
+        }));
         if (install.needsLazyEncrypt) {
           try {
             await upgradeInstallTokenEncryption(c.env, install.id, install.githubAccessToken);

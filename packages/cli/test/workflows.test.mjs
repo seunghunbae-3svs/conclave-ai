@@ -53,6 +53,7 @@ const ROOT = path.resolve(
 );
 const REVIEW_YML = readFileSync(path.join(ROOT, ".github/workflows/review.yml"), "utf8");
 const REWORK_YML = readFileSync(path.join(ROOT, ".github/workflows/rework.yml"), "utf8");
+const MERGE_YML = readFileSync(path.join(ROOT, ".github/workflows/merge.yml"), "utf8");
 const RELEASE_YML = readFileSync(path.join(ROOT, ".github/workflows/release.yml"), "utf8");
 
 // ---- RC #4 — `gh pr view` always carries --repo --------------------------
@@ -189,6 +190,42 @@ test("v0.13.9: .release-floating-tag exists at repo root and names a valid float
     /^v[0-9]+(\.[0-9]+)?$/,
     `.release-floating-tag must contain a vMAJOR or vMAJOR.MINOR string, got "${tagFile}"`,
   );
+});
+
+// ---- v0.13.17 — reusable merge workflow ---------------------------------
+
+test("v0.13.17: merge.yml exists as a reusable workflow_call workflow", () => {
+  assert.match(MERGE_YML, /^on:\s*\n\s*workflow_call:/m, "merge.yml must be invoked via workflow_call (reusable)");
+  assert.match(MERGE_YML, /repository_dispatch.*conclave-merge|conclave-merge/, "merge.yml must mention the conclave-merge dispatch path");
+});
+
+test("v0.13.17: merge.yml has a step that calls /merge/notify", () => {
+  // Without this step the autonomy loop's terminal "✅ Merged"
+  // notification never reaches Telegram and the user-visible loop
+  // feels broken even when the merge succeeded.
+  assert.match(MERGE_YML, /\/merge\/notify/, "merge.yml must POST to /merge/notify after a successful merge");
+  assert.match(MERGE_YML, /Notify central plane/, "the merge-notify step's name must be present so operators can find it in run logs");
+});
+
+test("v0.13.17: merge.yml uses --repo on the executable `gh pr merge` invocation (parity with rework.yml RC #4)", () => {
+  // RC #4 lesson: gh CLI tries to infer repo from cwd, but workflows
+  // sometimes run before checkout completes. Be explicit. We match
+  // executable lines (start with optional whitespace then `gh pr
+  // merge`), not prose mentions in comments / step descriptions.
+  const cmdLines = MERGE_YML
+    .split("\n")
+    .filter((l) => /^\s*gh pr merge\b/.test(l));
+  assert.ok(cmdLines.length >= 1, "merge.yml must invoke `gh pr merge` at least once as a real command");
+  for (const line of cmdLines) {
+    assert.match(line, /--repo\b/, `gh pr merge invocation without --repo: "${line.trim()}"`);
+  }
+});
+
+test("v0.13.17: record-outcome step is best-effort (continue-on-error)", () => {
+  // Live RC eventbadge#32: record-outcome failed because no local
+  // .conclave/episodic file existed on the runner, marking the whole
+  // run red despite the merge having succeeded. Now best-effort.
+  assert.match(MERGE_YML, /Record outcome[^\n]*\n[^]*?continue-on-error:\s*true/m, "record-outcome must be wrapped with continue-on-error: true");
 });
 
 test("RC #11: skip-guard runs near the top of the review job (before secret-bearing steps)", () => {

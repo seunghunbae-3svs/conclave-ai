@@ -1,5 +1,48 @@
 # Changelog
 
+## v0.13.17 — 2026-04-27
+
+### Added
+- **Reusable `merge.yml` workflow + `/merge/notify` route + auto-rebind
+  on stale webhook secret + cli@0.13.17 init template.** Closes the
+  autonomy loop's terminal leg. Live RC eventbadge#32: ✅ Merge & Push
+  click → GitHub merged the PR cleanly → silence on Telegram. The
+  `conclave-merge.yml` had no `notify` step and `record-outcome` was
+  hard-failing the run. Three coordinated fixes:
+
+  1. **`.github/workflows/merge.yml`** in conclave-ai — new reusable
+     workflow consumers invoke via `seunghunbae-3svs/conclave-ai/.github/workflows/merge.yml@v0.4`.
+     Resolves PR → merges → POSTs `/merge/notify` → records outcome
+     (best-effort, `continue-on-error: true`).
+  2. **`POST /merge/notify`** on the central plane (Bearer-CONCLAVE_TOKEN
+     auth, same gate as `/review/notify`). Sends "✅ Merged" /
+     "❌ Closed" / "🔧 Reworked" message into every linked Telegram chat.
+  3. **`conclave init` template** now writes a thin
+     `conclave-merge.yml` wrapper (parity with the existing
+     conclave-rework.yml wrapper) so new installs get the merge leg
+     automatically. Existing installs bump by re-running
+     `conclave init --reconfigure` OR by adopting the @v0.4-tracked
+     wrapper manually once.
+
+### Fixed
+- **`selfHealWebhook` re-binds when Telegram reports a recent 401**
+  (apps/central-plane/src/webhook-heal.ts). URL-only equality let the
+  cron silently skip when `TELEGRAM_WEBHOOK_SECRET` had been rotated
+  on the worker but Telegram still held the old secret. Live RC: PR
+  #32 ✅ button never registered for ~30 min after deploy because
+  every callback got 401-rejected and the cron kept saying "bound-already".
+  Now the cron also re-binds when `last_error_message` matches `/401|unauthor/i`
+  AND the error happened within the last hour. Plus a manual escape
+  hatch: `POST /admin/rebind-webhook` (Bearer-CONCLAVE_TOKEN).
+
+### Tooling
+- `/admin/webhook-status` now also returns the bot identity
+  (`{ id, username, firstName }` via `getMe`) and `lastErrorDate` /
+  `lastSynchronizationErrorDate` so operators can verify which bot
+  the worker is actually using and whether errors are old or fresh.
+- `health.ts` version string is now updated per release (was hardcoded
+  `0.11.0` for two months).
+
 ## v0.13.15 — 2026-04-27
 
 ### Fixed

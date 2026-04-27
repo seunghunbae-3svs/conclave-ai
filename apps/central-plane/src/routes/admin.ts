@@ -1,7 +1,8 @@
 import { Hono } from "hono";
 import type { Env } from "../env.js";
 import { requireInstallAuth, type AuthedVariables } from "../auth.js";
-import { resolveWebhookUrl, checkWebhookBound } from "../webhook-heal.js";
+import { resolveWebhookUrl, checkWebhookBound, rebindWebhook } from "../webhook-heal.js";
+import { TelegramClient } from "../telegram.js";
 
 /**
  * v0.13.11 — admin/diagnostic routes.
@@ -80,6 +81,111 @@ export function createAdminRoutes(
       lastErrorDate: info.last_error_date ?? null,
       lastSynchronizationErrorDate: info.last_synchronization_error_date ?? null,
       bot: me ? { id: me.id, username: me.username, firstName: me.first_name } : null,
+    });
+  });
+
+  // v0.13.17 — POST /merge/notify: final merge-outcome notification
+  // path. Called by the consumer's conclave-merge / conclave-reject
+  // workflow after the underlying `gh pr merge` (or close) lands.
+  // Sends a "✅ Merged" / "❌ Rejected" / "🔧 Reworked" message into
+  // every linked Telegram chat for the install. No keyboard — this
+  // is a terminal status update, not an actionable button.
+  //
+  // Live RC: PR #32 — autonomy loop closed (REWORK→autofix→APPROVE→
+  // ✅ Merge & Push click→GitHub merge succeeded), but Bae never saw
+  // the FINAL "Merged" confirmation in @Conclave_AI DM, only the
+  // intermediate "Merge queued" toast/follow-up. The merge workflow
+  // had no notify step. Now it does.
+  app.post("/merge/notify", requireInstallAuth, async (c) => {
+    const env = c.env;
+    if (!env.TELEGRAM_BOT_TOKEN) {
+      return c.json({ ok: false, error: "TELEGRAM_BOT_TOKEN unset on worker" }, 500);
+    }
+    const installId = c.get("installId");
+    const installRepo = c.get("installRepo");
+    const body = (await c.req.json().catch(() => null)) as {
+      episodic_id?: string;
+      pr_number?: number;
+      outcome?: "merged" | "rejected" | "reworked";
+      pr_url?: string;
+      details?: string;
+    } | null;
+    if (!body || !body.outcome) {
+      return c.json({ ok: false, error: "outcome (merged/rejected/reworked) required" }, 400);
+    }
+    const outcome = body.outcome;
+    const prNumber = body.pr_number;
+    const prUrl = body.pr_url;
+    // Look up linked chats for this install.
+    const rows = await env.DB
+      .prepare("SELECT chat_id FROM telegram_links WHERE install_id = ?")
+      .bind(installId)
+      .all<{ chat_id: number }>();
+    const chatIds = (rows.results ?? []).map((r) => r.chat_id);
+    if (chatIds.length === 0) {
+      return c.json({ ok: true, delivered: 0, reason: "no_linked_chat" });
+    }
+    const headlineByOutcome: Record<typeof outcome, string> = {
+      merged: "✅ <b>Merged</b>",
+      rejected: "❌ <b>Closed</b>",
+      reworked: "🔧 <b>Reworked</b>",
+    } as const;
+    const text = [
+      headlineByOutcome[outcome],
+      "",
+      prNumber
+        ? `PR #${prNumber} on <b>${installRepo}</b>`
+        : `On <b>${installRepo}</b>`,
+      ...(prUrl ? ["", `<a href="${prUrl}">View on GitHub</a>`] : []),
+      ...(body.details ? ["", `<i>${body.details}</i>`] : []),
+    ].join("\n");
+    const client = new TelegramClient({
+      token: env.TELEGRAM_BOT_TOKEN,
+      fetch: fetchImpl,
+    });
+    let delivered = 0;
+    const errors: string[] = [];
+    for (const chatId of chatIds) {
+      try {
+        await client.sendMessage({ chatId, text, parseMode: "HTML" });
+        delivered += 1;
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        errors.push(`chat ${chatId}: ${msg}`);
+        console.warn(`merge/notify sendMessage to chat ${chatId} failed:`, msg);
+      }
+    }
+    return c.json({ ok: true, delivered, ...(errors.length ? { errors } : {}) });
+  });
+
+  // v0.13.16 — POST /admin/rebind-webhook: force setWebhook with the
+  // current TELEGRAM_WEBHOOK_SECRET, regardless of whether the URL
+  // already matches. Use this when the cron's automatic re-bind
+  // detection isn't enough (e.g., right after a secret rotation, or
+  // when the operator wants an immediate sync).
+  app.post("/admin/rebind-webhook", requireInstallAuth, async (c) => {
+    const env = c.env;
+    if (!env.TELEGRAM_BOT_TOKEN) {
+      return c.json({ ok: false, outcome: "no-bot-token" });
+    }
+    if (!env.TELEGRAM_WEBHOOK_SECRET) {
+      return c.json({ ok: false, outcome: "no-webhook-secret" });
+    }
+    const expected = resolveWebhookUrl(env);
+    const before = await checkWebhookBound(env.TELEGRAM_BOT_TOKEN, fetchImpl);
+    const result = await rebindWebhook(
+      env.TELEGRAM_BOT_TOKEN,
+      expected,
+      env.TELEGRAM_WEBHOOK_SECRET,
+      fetchImpl,
+    );
+    return c.json({
+      ok: result.ok,
+      outcome: result.ok ? "rebound" : "failed",
+      expected,
+      previousUrl: before?.url ?? null,
+      previousLastError: before?.last_error_message ?? null,
+      description: result.description ?? null,
     });
   });
 

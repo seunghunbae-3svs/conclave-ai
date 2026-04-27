@@ -124,7 +124,23 @@ export async function selfHealWebhook(
   if (!info) {
     return { outcome: "failed", expected, reason: "getWebhookInfo failed" };
   }
-  if (info.url === expected) {
+  // v0.13.16 — also re-bind when the URL matches but Telegram is
+  // reporting a recent 401 from us. That means the secret_token
+  // Telegram is sending doesn't match TELEGRAM_WEBHOOK_SECRET on the
+  // worker — usually because the secret was rotated after the last
+  // setWebhook call. URL-only equality lets selfHealWebhook silently
+  // skip in that case, leaving callback_query buttons inert. Live RC:
+  // PR #32 ✅ Merge & Push button never registered because every
+  // callback Telegram sent got 401-rejected; selfHeal kept saying
+  // "bound-already" because the URL was right.
+  const has401LastError =
+    typeof info.last_error_message === "string" &&
+    /401|unauthor/i.test(info.last_error_message) &&
+    typeof info.last_error_date === "number" &&
+    // Only treat as actionable if the error happened in the last 60 min
+    // — older errors may already be resolved by an unrelated rebind.
+    Date.now() / 1000 - info.last_error_date < 3600;
+  if (info.url === expected && !has401LastError) {
     return {
       outcome: "bound-already",
       expected,
