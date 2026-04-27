@@ -10,4 +10,4 @@ export { parsePatchToolUse, looksLikeUnifiedDiff, WorkerParseError } from "./pat
 export { actualCost, estimateCallCost, PRICING } from "./pricing.js";
 export type { ModelPricing, UsageBreakdown } from "./pricing.js";
 export type { AnthropicLike, AnthropicCreateParams, AnthropicResponse } from "./anthropic-types.js";
-export type { WorkerContext, WorkerOutcome, FileSnapshot } from "./types.js";
+export type { WorkerContext, WorkerOutcome, FileSnapshot, WorkerRejectedAttempt } from "./types.js";

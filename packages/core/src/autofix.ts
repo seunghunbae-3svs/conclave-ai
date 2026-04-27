@@ -44,6 +44,15 @@ export interface BlockerFix {
   reason?: string;
   tokensUsed?: number;
   costUsd?: number;
+  /**
+   * v0.13.19 (H1 #4) — number of worker calls made for this blocker
+   * before reaching the final status. 1 = first attempt was the
+   * accepted patch; >1 = retry-with-feedback loop was needed
+   * (each retry is another worker call costing ~$0.20). Operators
+   * use this to decide whether the worker prompt needs further
+   * tuning. Absent on first-attempt-success for backward compat.
+   */
+  workerAttempts?: number;
 }
 
 /**

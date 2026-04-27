@@ -1,5 +1,39 @@
 # Changelog
 
+## v0.13.19 — 2026-04-27 (H1 #4)
+
+### Added
+- **Autofix worker retry-with-feedback (cli@0.13.19, H1 #4).** When
+  `git apply --check --recount` rejects a worker-emitted patch (and
+  the GNU `patch -p1 --fuzz=3` fallback also rejects),
+  `runPerBlocker` now calls the worker AGAIN with the rejection
+  reason in the prompt — capped at 2 retries by default (3 total
+  worker calls per blocker per iteration; hard cap 4).
+
+  Live RC: eventbadge#29 burnt all 3 OUTER cycles ($0.60) because
+  each cycle's single worker call emitted a bad patch and the loop
+  bailed. With this retry, the second call sees "your last patch
+  landed at line 17 but the deletion is at line 18" and corrects
+  in-cycle — the outer cycle ceiling never has to be exhausted.
+
+  Each retry costs roughly $0.20. New fields:
+  - `WorkerContext.previousAttempts: WorkerRejectedAttempt[]` —
+    populated on retry calls. Worker prompt renders a "Previous
+    attempts that were REJECTED" section with the rejected patch +
+    the apply-layer's stderr (capped 800 chars).
+  - `BlockerFix.workerAttempts: number` — how many worker calls were
+    needed before reaching the final status. Absent on first-try
+    success for backward compat.
+  - `AutofixWorkerDeps.workerRetries: number` — caller-tunable; 0 =
+    legacy single-shot behaviour, default 2, hard cap 4.
+
+  **Tests:** 8 cases in `packages/cli/test/autofix-worker-retry.test.mjs`
+  (first-try success, retry success, retry-feedback in prompt,
+  all-retries-exhausted → conflict, workerRetries=0 short-circuit,
+  hard-cap of 4, worker-throws-on-retry preserves prior cost,
+  previousAttempts grows monotonically). 508/508 cli + 25/25
+  agent-worker tests pass.
+
 ## v0.13.18 — 2026-04-27 (H1 #3)
 
 ### Added

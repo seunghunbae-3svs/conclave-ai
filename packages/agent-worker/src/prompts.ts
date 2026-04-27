@@ -89,6 +89,31 @@ export function buildWorkerPrompt(ctx: WorkerContext): string {
     sections.push("");
   }
 
+  // v0.13.19 (H1 #4) — when the apply layer rejected a previous
+  // attempt, inline that feedback so the worker can correct the
+  // specific failure mode (off-by-N start line, miscounted header,
+  // hallucinated context). Keeps the retry loop cheap because the
+  // worker doesn't have to re-derive what's wrong.
+  if (ctx.previousAttempts && ctx.previousAttempts.length > 0) {
+    sections.push(`# Previous attempts that were REJECTED`);
+    sections.push(
+      `Your earlier patch(es) for this exact blocker did not apply. Read the rejection reason carefully and emit a corrected patch. Common failure modes: off-by-N starting line in the @@ -A,B @@ header, hunk B/D counts that don't match the body, hallucinated context lines, or context with subtly different whitespace. Do NOT repeat the same shape.`,
+    );
+    sections.push("");
+    ctx.previousAttempts.forEach((att, idx) => {
+      sections.push(`## Attempt ${idx + 1} (rejected)`);
+      sections.push("Patch you submitted:");
+      sections.push("```diff");
+      sections.push(att.patch);
+      sections.push("```");
+      sections.push("Rejection reason from `git apply --check --recount`:");
+      sections.push("```");
+      sections.push(att.rejectReason);
+      sections.push("```");
+      sections.push("");
+    });
+  }
+
   sections.push(
     `Call submit_patch exactly once with a unified diff, a commit message, the list of files touched, and a one-paragraph summary.`,
   );

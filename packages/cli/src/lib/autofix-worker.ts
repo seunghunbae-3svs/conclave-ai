@@ -11,6 +11,7 @@ import type {
   FileSnapshot,
   WorkerContext,
   WorkerOutcome,
+  WorkerRejectedAttempt,
 } from "@conclave-ai/agent-worker";
 import { recountHunkHeaders } from "./patch-fixup.js";
 
@@ -39,7 +40,28 @@ export interface AutofixWorkerDeps {
   /** Write + delete the temp patch file used for `git apply --check`. */
   writeTempPatch?: (absPath: string, contents: string) => Promise<void>;
   removeTempPatch?: (absPath: string) => Promise<void>;
+  /**
+   * v0.13.19 (H1 #4) — when the validate step rejects a worker patch,
+   * call the worker AGAIN with the rejection reason in the prompt so
+   * it can correct the specific failure mode (off-by-N start line,
+   * miscounted hunk header, hallucinated context). Default 2 (so up
+   * to 3 total worker calls per blocker per iteration). Hard-capped at
+   * 4 inside `runPerBlocker` to keep per-blocker cost bounded.
+   *
+   * Each retry costs roughly $0.20 (one extra worker call). Live RC:
+   * eventbadge#29 burnt 3 OUTER cycles because each cycle's first
+   * worker call emitted a bad patch and the loop bailed. With this
+   * retry, the second call sees "your last patch landed at line 17
+   * but the deletion is at line 18" and corrects in-cycle — so the
+   * outer loop doesn't have to be exhausted.
+   */
+  workerRetries?: number;
+  /** stderr sink for retry-progress logs. Default: process.stderr. */
+  stderr?: (s: string) => void;
 }
+
+const HARD_MAX_WORKER_RETRIES = 4;
+const DEFAULT_WORKER_RETRIES = 2;
 
 export interface BuildPerBlockerContextInput {
   repo: string;
@@ -168,54 +190,23 @@ export async function runPerBlocker(
     }
   }
 
-  const ctx = buildPerBlockerContext(input, fileSnapshots);
+  // v0.13.19 (H1 #4) — retry-with-feedback loop. On apply-validation
+  // failure, call the worker AGAIN with the rejection reason in the
+  // prompt. Capped at workerRetries (default 2 → up to 3 total worker
+  // calls per blocker). Each retry is roughly $0.20.
+  const maxRetries = Math.min(
+    HARD_MAX_WORKER_RETRIES,
+    Math.max(0, deps.workerRetries ?? DEFAULT_WORKER_RETRIES),
+  );
+  const stderr = deps.stderr ?? ((s: string) => process.stderr.write(s));
+  const previousAttempts: WorkerRejectedAttempt[] = [];
+  let totalCostUsd = 0;
+  let totalTokensUsed = 0;
+  // Hold the last validation error so the conflict-path return can
+  // include it after all retries are exhausted.
+  let lastValidationError: string | undefined;
+  let lastValidationOutcome: WorkerOutcome | undefined;
 
-  let outcome: WorkerOutcome;
-  try {
-    outcome = await deps.worker.work(ctx);
-  } catch (err) {
-    return {
-      agent: input.agent,
-      blocker: input.blocker,
-      status: "worker-error",
-      reason: err instanceof Error ? err.message : String(err),
-    };
-  }
-
-  if (!outcome.patch || outcome.patch.trim().length === 0) {
-    return {
-      agent: input.agent,
-      blocker: input.blocker,
-      status: "worker-error",
-      reason: "worker returned empty patch",
-      ...(outcome.costUsd !== undefined ? { costUsd: outcome.costUsd } : {}),
-      ...(outcome.tokensUsed !== undefined ? { tokensUsed: outcome.tokensUsed } : {}),
-    };
-  }
-
-  // Also apply deny-list to every file the patch touches — the worker
-  // might report a fix on `src/x.ts` but have snuck changes into
-  // `.env.production` as part of the same hunk set.
-  for (const f of outcome.appliedFiles ?? []) {
-    if (isFileDenied(f, deps.denyPatterns)) {
-      return {
-        agent: input.agent,
-        blocker: input.blocker,
-        status: "skipped",
-        reason: `worker patch touches deny-listed file "${f}"`,
-        patch: outcome.patch,
-        appliedFiles: outcome.appliedFiles,
-        ...(outcome.costUsd !== undefined ? { costUsd: outcome.costUsd } : {}),
-        ...(outcome.tokensUsed !== undefined ? { tokensUsed: outcome.tokensUsed } : {}),
-      };
-    }
-  }
-
-  // Validate with `git apply --check --recount`. We write the patch to a
-  // temp file in the worktree root (git can read it), check, then
-  // unlink. The caller will re-apply for real later — we don't stage
-  // here because the diff-budget guard runs AFTER this loop.
-  const tempPath = path.join(deps.cwd, `.conclave-autofix-${randomId()}.patch`);
   const writeTemp = deps.writeTempPatch ?? (async (p: string, c: string) => {
     const { writeFile } = await import("node:fs/promises");
     await writeFile(p, c, "utf8");
@@ -225,62 +216,146 @@ export async function runPerBlocker(
     await unlink(p);
   });
 
-  // v0.13.10 — recount hunk headers before validate. Worker miscounts
-  // (B too large) trip `git apply --recount` with "corrupt patch at
-  // line N" before --recount can do its job. Idempotent for already-
-  // correct patches.
-  const validatedPatch = recountHunkHeaders(outcome.patch);
-  try {
-    await writeTemp(tempPath, validatedPatch);
+  for (let attempt = 0; attempt <= maxRetries; attempt += 1) {
+    const baseCtx = buildPerBlockerContext(input, fileSnapshots);
+    // Snapshot the rejected-attempts array so the worker sees the
+    // history at the moment of THIS call. Without the slice, later
+    // pushes mutate the same array reference the worker captured —
+    // which breaks both unit-test inspection AND any worker mock that
+    // re-reads ctx after returning.
+    const ctx: WorkerContext = previousAttempts.length > 0
+      ? { ...baseCtx, previousAttempts: previousAttempts.slice() }
+      : baseCtx;
+
+    let outcome: WorkerOutcome;
     try {
-      await deps.git("git", ["apply", "--check", "--recount", tempPath], { cwd: deps.cwd });
+      outcome = await deps.worker.work(ctx);
     } catch (err) {
-      // v0.13.8 — fall back to GNU `patch -p1 --fuzz=3 --dry-run`. The
-      // worker can emit hunk headers with off-by-N starting line
-      // numbers (eventbadge#29 sha 279cb22 surfaced this: "@@ -17,..."
-      // vs actual line 18); `git apply --recount` only fixes COUNTS,
-      // not the start line, and on Linux runners the offset tolerance
-      // isn't enough. patch(1) accepts off-by-N starts; --dry-run
-      // mirrors --check semantics (validate without writing).
-      let fuzzOk = false;
-      try {
-        await deps.git(
-          "patch",
-          ["-p1", "--fuzz=3", "-F", "3", "--dry-run", "--no-backup-if-mismatch", "-i", tempPath],
-          { cwd: deps.cwd },
-        );
-        fuzzOk = true;
-      } catch {
-        // patch(1) also rejected (or not on PATH) — fall through to the
-        // existing conflict response so operators see the original git
-        // apply error in the CI logs.
-      }
-      if (!fuzzOk) {
+      return {
+        agent: input.agent,
+        blocker: input.blocker,
+        status: "worker-error",
+        reason: err instanceof Error ? err.message : String(err),
+        ...(totalCostUsd > 0 ? { costUsd: totalCostUsd } : {}),
+        ...(totalTokensUsed > 0 ? { tokensUsed: totalTokensUsed } : {}),
+      };
+    }
+    if (outcome.costUsd !== undefined) totalCostUsd += outcome.costUsd;
+    if (outcome.tokensUsed !== undefined) totalTokensUsed += outcome.tokensUsed;
+
+    if (!outcome.patch || outcome.patch.trim().length === 0) {
+      return {
+        agent: input.agent,
+        blocker: input.blocker,
+        status: "worker-error",
+        reason: "worker returned empty patch",
+        costUsd: totalCostUsd,
+        tokensUsed: totalTokensUsed,
+      };
+    }
+
+    // Also apply deny-list to every file the patch touches — the
+    // worker might report a fix on `src/x.ts` but have snuck changes
+    // into `.env.production` as part of the same hunk set.
+    let denyHit = false;
+    for (const f of outcome.appliedFiles ?? []) {
+      if (isFileDenied(f, deps.denyPatterns)) {
         return {
           agent: input.agent,
           blocker: input.blocker,
-          status: "conflict",
-          reason: err instanceof Error ? err.message : String(err),
+          status: "skipped",
+          reason: `worker patch touches deny-listed file "${f}"`,
           patch: outcome.patch,
           appliedFiles: outcome.appliedFiles,
-          ...(outcome.costUsd !== undefined ? { costUsd: outcome.costUsd } : {}),
-          ...(outcome.tokensUsed !== undefined ? { tokensUsed: outcome.tokensUsed } : {}),
+          costUsd: totalCostUsd,
+          tokensUsed: totalTokensUsed,
         };
       }
     }
-  } finally {
-    await removeTemp(tempPath).catch(() => undefined);
+    if (denyHit) break;
+
+    // Validate with `git apply --check --recount` then GNU patch fuzz
+    // fallback. Same shape as pre-v0.13.19, just inside the retry loop
+    // so we can re-prompt on validation failure.
+    const tempPath = path.join(deps.cwd, `.conclave-autofix-${randomId()}.patch`);
+    // v0.13.10 — recount hunk headers. Worker miscounts (B too large)
+    // trip `git apply --recount` with "corrupt patch at line N" before
+    // --recount can do its job.
+    const validatedPatch = recountHunkHeaders(outcome.patch);
+    let validateErr: Error | undefined;
+    try {
+      await writeTemp(tempPath, validatedPatch);
+      try {
+        await deps.git("git", ["apply", "--check", "--recount", tempPath], { cwd: deps.cwd });
+      } catch (err) {
+        let fuzzOk = false;
+        try {
+          await deps.git(
+            "patch",
+            ["-p1", "--fuzz=3", "-F", "3", "--dry-run", "--no-backup-if-mismatch", "-i", tempPath],
+            { cwd: deps.cwd },
+          );
+          fuzzOk = true;
+        } catch {
+          /* patch(1) also rejected — fall through to retry / conflict */
+        }
+        if (!fuzzOk) {
+          validateErr = err instanceof Error ? err : new Error(String(err));
+        }
+      }
+    } finally {
+      await removeTemp(tempPath).catch(() => undefined);
+    }
+
+    if (!validateErr) {
+      // 🎯 patch validates. Done.
+      return {
+        agent: input.agent,
+        blocker: input.blocker,
+        status: "ready",
+        patch: outcome.patch,
+        commitMessage: outcome.message,
+        appliedFiles: outcome.appliedFiles,
+        costUsd: totalCostUsd,
+        tokensUsed: totalTokensUsed,
+        ...(attempt > 0 ? { workerAttempts: attempt + 1 } : {}),
+      };
+    }
+
+    // Validation failed. Either retry with feedback, or give up.
+    lastValidationError = validateErr.message;
+    lastValidationOutcome = outcome;
+    if (attempt < maxRetries) {
+      stderr(
+        `runPerBlocker: worker attempt ${attempt + 1} produced an invalid patch (${
+          validateErr.message.split("\n")[0]
+        }) — retrying with apply-error feedback (${maxRetries - attempt} retries left)\n`,
+      );
+      previousAttempts.push({
+        patch: outcome.patch,
+        // Cap reject reason at 800 chars so the worker prompt doesn't
+        // bloat (typical git apply messages are well under 200).
+        rejectReason: validateErr.message.slice(0, 800),
+      });
+      continue;
+    }
+    // Retries exhausted — surface the conflict.
+    break;
   }
 
+  // All retries failed.
   return {
     agent: input.agent,
     blocker: input.blocker,
-    status: "ready",
-    patch: outcome.patch,
-    commitMessage: outcome.message,
-    appliedFiles: outcome.appliedFiles,
-    ...(outcome.costUsd !== undefined ? { costUsd: outcome.costUsd } : {}),
-    ...(outcome.tokensUsed !== undefined ? { tokensUsed: outcome.tokensUsed } : {}),
+    status: "conflict",
+    reason: lastValidationError ?? "patch validation failed across all retries",
+    ...(lastValidationOutcome ? { patch: lastValidationOutcome.patch } : {}),
+    ...(lastValidationOutcome?.appliedFiles
+      ? { appliedFiles: lastValidationOutcome.appliedFiles }
+      : {}),
+    costUsd: totalCostUsd,
+    tokensUsed: totalTokensUsed,
+    workerAttempts: previousAttempts.length + 1,
   };
 }
 
