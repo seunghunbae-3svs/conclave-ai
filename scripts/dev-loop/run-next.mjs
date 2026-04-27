@@ -77,22 +77,30 @@ function gitOutput(args) {
 }
 
 /**
- * Send a Telegram message to Bae's configured chat. Silent no-op when
- * TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID env vars are missing — so the
- * dev-loop keeps working even before notification is wired.
+ * Send a Telegram message to every chat linked to the conclave-ai
+ * install. Goes through the central plane's `/dev-loop/notify` route
+ * (added in v0.13.22) so we reuse the existing TELEGRAM_BOT_TOKEN +
+ * telegram_links wiring instead of registering separate bot
+ * credentials in GitHub.
  *
- * Plain text only (no parse_mode) to avoid Markdown/HTML escaping pain
- * with version strings, slashes, etc.
+ * Auth: CONCLAVE_TOKEN — the same install token review/rework/merge
+ * workflows already use, no new secret needed.
+ *
+ * Silent no-op when CONCLAVE_TOKEN is missing, so the loop keeps
+ * working even before notification is wired.
  */
 async function notifyTelegram(text) {
-  const token = process.env.TELEGRAM_BOT_TOKEN;
-  const chatId = process.env.TELEGRAM_CHAT_ID;
-  if (!token || !chatId) return;
+  const token = process.env.CONCLAVE_TOKEN;
+  const apiBase = process.env.CONCLAVE_CENTRAL_URL || "https://conclave-ai.seunghunbae.workers.dev";
+  if (!token) return;
   try {
-    const res = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+    const res = await fetch(`${apiBase}/dev-loop/notify`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ chat_id: chatId, text, disable_web_page_preview: true }),
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({ event: "dev-loop", text }),
     });
     if (!res.ok) {
       const body = await res.text().catch(() => "");

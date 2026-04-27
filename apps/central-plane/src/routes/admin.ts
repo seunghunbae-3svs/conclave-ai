@@ -271,6 +271,55 @@ export function createAdminRoutes(
     });
   });
 
+  // v0.13.22 — POST /dev-loop/notify: free-text Telegram dispatch for
+  // the autonomous dev-loop GitHub Action. Same auth + chat-lookup
+  // pattern as /merge/notify but accepts a generic text body so the
+  // orchestrator can post run-start, ship-success, failure, freeze,
+  // and roadmap-complete events without each one being a custom route.
+  //
+  // Live use: scripts/dev-loop/run-next.mjs calls this with the
+  // CONCLAVE_TOKEN already wired into review/merge/rework.yml — no new
+  // secret to register.
+  app.post("/dev-loop/notify", requireInstallAuth, async (c) => {
+    const env = c.env;
+    if (!env.TELEGRAM_BOT_TOKEN) {
+      return c.json({ ok: false, error: "TELEGRAM_BOT_TOKEN unset on worker" }, 500);
+    }
+    const installId = c.get("installId");
+    const body = (await c.req.json().catch(() => null)) as {
+      event?: string;
+      text?: string;
+    } | null;
+    if (!body || !body.text) {
+      return c.json({ ok: false, error: "text required" }, 400);
+    }
+    const rows = await env.DB
+      .prepare("SELECT chat_id FROM telegram_links WHERE install_id = ?")
+      .bind(installId)
+      .all<{ chat_id: number }>();
+    const chatIds = (rows.results ?? []).map((r) => r.chat_id);
+    if (chatIds.length === 0) {
+      return c.json({ ok: true, delivered: 0, reason: "no_linked_chat" });
+    }
+    const client = new TelegramClient({
+      token: env.TELEGRAM_BOT_TOKEN,
+      fetch: fetchImpl,
+    });
+    let delivered = 0;
+    const errors: string[] = [];
+    for (const chatId of chatIds) {
+      try {
+        await client.sendMessage({ chatId, text: body.text });
+        delivered += 1;
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        errors.push(`chat ${chatId}: ${msg}`);
+        console.warn(`dev-loop/notify sendMessage to chat ${chatId} failed:`, msg);
+      }
+    }
+    return c.json({ ok: true, delivered, ...(errors.length ? { errors } : {}) });
+  });
+
   // v0.13.16 — POST /admin/rebind-webhook: force setWebhook with the
   // current TELEGRAM_WEBHOOK_SECRET, regardless of whether the URL
   // already matches. Use this when the cron's automatic re-bind

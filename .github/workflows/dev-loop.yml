@@ -86,8 +86,8 @@ jobs:
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           GH_TOKEN: ${{ secrets.ORCHESTRATOR_PAT || secrets.GITHUB_TOKEN }}
-          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          CONCLAVE_TOKEN: ${{ secrets.CONCLAVE_TOKEN }}
+          CONCLAVE_CENTRAL_URL: ${{ vars.CONCLAVE_CENTRAL_URL }}
           DEV_LOOP_DRY_RUN: ${{ inputs.mode == 'dry-run' && 'true' || 'false' }}
           DEV_LOOP_ITEM: ${{ inputs.override-item }}
         run: |
