@@ -4,6 +4,7 @@ import {
   writeWorkflow,
   writeReworkWorkflow,
   writeMergeWorkflow,
+  formatWorkflowStatusLine,
   WORKFLOW_PATH,
   REWORK_WORKFLOW_PATH,
   MERGE_WORKFLOW_PATH,
@@ -213,12 +214,12 @@ export async function runInit(args: InitArgs, deps: RunInitDeps = {}): Promise<n
     }
 
     // Step 7 — write wrapper workflow.
+    // v0.13.18 — output rendering uses the new 4-state status so the
+    // user can tell apart "skip because nothing to do" vs "skip
+    // because we found a customised file we won't touch" vs
+    // "auto-migrated a stale managed file" vs "fresh write".
     const wfResult = await writeWorkflow({ cwd: args.cwd, force: args.reconfigure });
-    if (wfResult.skipped) {
-      stdout(`• skip:  ${WORKFLOW_PATH} exists (pass --reconfigure to overwrite)\n`);
-    } else {
-      stdout(`• wrote: ${wfResult.path}\n`);
-    }
+    stdout(formatWorkflowStatusLine(WORKFLOW_PATH, wfResult.status));
 
     // Step 7b — v0.10: write the consumer-side rework dispatcher so
     // central-plane's `conclave-rework` repository_dispatch actually
@@ -229,11 +230,7 @@ export async function runInit(args: InitArgs, deps: RunInitDeps = {}): Promise<n
       cwd: args.cwd,
       force: args.reconfigure,
     });
-    if (reworkResult.skipped) {
-      stdout(`• skip:  ${REWORK_WORKFLOW_PATH} exists (pass --reconfigure to overwrite)\n`);
-    } else {
-      stdout(`• wrote: ${reworkResult.path}\n`);
-    }
+    stdout(formatWorkflowStatusLine(REWORK_WORKFLOW_PATH, reworkResult.status));
 
     // Step 7c — v0.13.17: write the consumer-side merge dispatcher so
     // central-plane's `conclave-merge` repository_dispatch (fired
@@ -245,11 +242,7 @@ export async function runInit(args: InitArgs, deps: RunInitDeps = {}): Promise<n
       cwd: args.cwd,
       force: args.reconfigure,
     });
-    if (mergeResult.skipped) {
-      stdout(`• skip:  ${MERGE_WORKFLOW_PATH} exists (pass --reconfigure to overwrite)\n`);
-    } else {
-      stdout(`• wrote: ${mergeResult.path}\n`);
-    }
+    stdout(formatWorkflowStatusLine(MERGE_WORKFLOW_PATH, mergeResult.status));
 
     // Step 8 — next steps.
     const needsApiKeySetup = Boolean(anthropic || openai || gemini);
