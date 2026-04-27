@@ -1,5 +1,32 @@
 # Changelog
 
+## v0.13.17 — 2026-04-27 (H1 #2)
+
+### Added
+- **`conclave status` + `GET /admin/install-summary`** (cli@0.13.17,
+  H1 #2). Single-call install diagnostic. Replaces the 4-hour PR #32
+  debug session ("did the click reach the worker? is the bot the
+  right bot? are chats linked? are recent cycles passing?") with one
+  HTTP call.
+
+  Worker side: `GET /admin/install-summary` (Bearer-CONCLAVE_TOKEN
+  auth). Returns `{ install, bot, webhook, linkedChats, recentCycles }`
+  in one envelope — no second roundtrip needed for the per-install
+  diagnostic story.
+
+  CLI side: `conclave status` (default = one-line headline,
+  `--verbose` = breakdown, `--json` = raw envelope for scripting).
+  One-line example:
+  ```
+  conclave install: acme/x | bot=@Conclave_AI | webhook=bound (0 pending) | 1 chat | 5 recent cycles
+  ```
+
+  **Tests:** 6 worker-side cases (auth gate, happy path, dropped
+  webhook, no-bot-token, zero-chats edge) + 15 CLI-side cases (4
+  one-line variants, 4 verbose-format cases, 5 runStatus orchestrator
+  paths incl. token-not-in-URL leak guard, `--json` flag, `--verbose`
+  flag). 496/496 cli tests + 148/148 central-plane tests pass.
+
 ## v0.13.16 — 2026-04-27
 
 ### Added

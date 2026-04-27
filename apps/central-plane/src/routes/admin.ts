@@ -158,6 +158,110 @@ export function createAdminRoutes(
     return c.json({ ok: true, delivered, ...(errors.length ? { errors } : {}) });
   });
 
+  // v0.13.16 — GET /admin/install-summary (H1 #2): one-call diagnostic
+  // for `conclave status`. Replaces the 4-hour PR #32 debug session
+  // ("did the click register? is the bot the right bot? is the chat
+  // linked? what's our spend?") with a single JSON response.
+  app.get("/admin/install-summary", requireInstallAuth, async (c) => {
+    const env = c.env;
+    const installId = c.get("installId");
+    const installRepo = c.get("installRepo");
+
+    // Bot identity + webhook health (parity with /admin/webhook-status,
+    // but here we report it as part of the per-install summary).
+    let botInfo: { id: number; username?: string; firstName?: string } | null = null;
+    let webhookOutcome: "bound" | "dropped" | "wrong-url" | "no-bot-token" | "telegram-unreachable" = "no-bot-token";
+    let webhookExpected: string | null = null;
+    let webhookActual: string | null = null;
+    let pendingUpdates = 0;
+    let lastErrorMessage: string | null = null;
+    let lastErrorDate: number | null = null;
+    if (env.TELEGRAM_BOT_TOKEN) {
+      webhookExpected = resolveWebhookUrl(env);
+      const [info, me] = await Promise.all([
+        checkWebhookBound(env.TELEGRAM_BOT_TOKEN, fetchImpl),
+        fetchImpl(`https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/getMe`)
+          .then(async (r) => {
+            if (!r.ok) return null;
+            const j = (await r.json().catch(() => null)) as {
+              ok?: boolean;
+              result?: { id?: number; username?: string; first_name?: string };
+            } | null;
+            if (!j?.ok || !j.result) return null;
+            return j.result;
+          })
+          .catch(() => null),
+      ]);
+      if (me) {
+        botInfo = { id: me.id ?? 0, username: me.username, firstName: me.first_name };
+      }
+      if (info) {
+        webhookActual = info.url;
+        pendingUpdates = info.pending_update_count;
+        lastErrorMessage = info.last_error_message ?? null;
+        lastErrorDate = info.last_error_date ?? null;
+        webhookOutcome = info.url === webhookExpected
+          ? "bound"
+          : info.url === ""
+          ? "dropped"
+          : "wrong-url";
+      } else {
+        webhookOutcome = "telegram-unreachable";
+      }
+    }
+
+    // Telegram-link count for this install.
+    const linkRows = await env.DB
+      .prepare("SELECT COUNT(*) AS n FROM telegram_links WHERE install_id = ?")
+      .bind(installId)
+      .first<{ n: number }>();
+    const linkedChats = linkRows?.n ?? 0;
+
+    // Recent cycle outcomes — last 5 review_notify_dedupe rows for
+    // this install (each row is a verdict notification, so it's the
+    // closest proxy to "what reviews has this install seen lately").
+    let recentCycles: Array<{ pr: number; episodic: string; at: string }> = [];
+    try {
+      const rows = await env.DB
+        .prepare(
+          `SELECT pr_number, episodic_id, notified_at
+           FROM review_notify_dedupe
+           WHERE install_id = ?
+           ORDER BY notified_at DESC
+           LIMIT 5`,
+        )
+        .bind(installId)
+        .all<{ pr_number: number; episodic_id: string; notified_at: string }>();
+      recentCycles = (rows.results ?? []).map((r) => ({
+        pr: r.pr_number,
+        episodic: r.episodic_id,
+        at: r.notified_at,
+      }));
+    } catch {
+      // review_notify_dedupe is non-fatal — pre-v0.7.5 installs may
+      // not have the table populated yet.
+    }
+
+    return c.json({
+      ok: true,
+      install: {
+        id: installId,
+        repo: installRepo,
+      },
+      bot: botInfo,
+      webhook: {
+        outcome: webhookOutcome,
+        expected: webhookExpected,
+        actual: webhookActual,
+        pendingUpdates,
+        lastErrorMessage,
+        lastErrorDate,
+      },
+      linkedChats,
+      recentCycles,
+    });
+  });
+
   // v0.13.16 — POST /admin/rebind-webhook: force setWebhook with the
   // current TELEGRAM_WEBHOOK_SECRET, regardless of whether the URL
   // already matches. Use this when the cron's automatic re-bind

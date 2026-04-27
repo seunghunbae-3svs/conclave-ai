@@ -14,6 +14,7 @@ import { mcpServer } from "./commands/mcp-server.js";
 import { repos } from "./commands/repos.js";
 import { watch } from "./commands/watch.js";
 import { doctor } from "./commands/doctor.js";
+import { status } from "./commands/status.js";
 import { CLI_VERSION } from "./version.js";
 import { hydrateEnvFromStorage } from "./lib/credentials.js";
 
@@ -39,6 +40,7 @@ Commands:
   repos                 Manage the multi-repo watch list (v0.12)
   watch                 Local daemon — poll watched repos for new PRs and dispatch reviews (v0.12)
   doctor                Diagnose env keys / worker health / workflow pin / CLI freshness (v0.13.7)
+  status                One-line install summary (bot / webhook / chats / recent cycles) — pass --verbose for breakdown (v0.13.16)
   --help, -h            Show this
   --version, -v         Show version
 
@@ -132,6 +134,9 @@ export async function run(argv: string[]): Promise<void> {
       return;
     case "doctor":
       await doctor(rest);
+      return;
+    case "status":
+      await status(rest);
       return;
     default:
       process.stderr.write(`Unknown command: ${cmd}\n\n${HELP}`);
