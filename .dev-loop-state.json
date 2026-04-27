@@ -1,0 +1,20 @@
+{
+  "version": 1,
+  "currentItem": "H1.5 A",
+  "lastShipped": "H1 #5",
+  "lastShippedAt": "2026-04-27T05:36:00Z",
+  "consecutiveFailures": 0,
+  "totalSpentUsdToday": 0,
+  "lastSpendResetDate": null,
+  "perRunCapUsd": 1.0,
+  "perDayCapUsd": 5.0,
+  "frozen": false,
+  "frozenReason": null,
+  "history": [
+    { "item": "H1 #1", "shippedAt": "2026-04-27T03:13Z", "version": "cli@0.13.16" },
+    { "item": "H1 #2", "shippedAt": "2026-04-27T04:01Z", "version": "cli@0.13.17" },
+    { "item": "H1 #3", "shippedAt": "2026-04-27T04:39Z", "version": "cli@0.13.18" },
+    { "item": "H1 #4", "shippedAt": "2026-04-27T05:08Z", "version": "cli@0.13.19" },
+    { "item": "H1 #5", "shippedAt": "2026-04-27T05:36Z", "version": "cli@0.13.20" }
+  ]
+}

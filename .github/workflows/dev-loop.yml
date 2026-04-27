@@ -1,0 +1,108 @@
+# Autonomous development cron — runs `scripts/dev-loop/run-next.mjs`
+# which reads `docs/dev-roadmap.md` + `.dev-loop-state.json`, picks the
+# next pending item, and spawns Claude Code headless to ship it.
+#
+# Cron is COMMENTED OUT by default. To activate:
+#   1. Run once via `gh workflow run dev-loop.yml -f mode=dry-run` to
+#      verify the prompt + state machinery without burning credits.
+#   2. Run once via `gh workflow run dev-loop.yml -f mode=real` to
+#      verify the agent actually ships an item.
+#   3. Uncomment the schedule block below.
+#
+# Cost guards (all in `.dev-loop-state.json`):
+#   perRunCapUsd:  default $1   — exit early when a single run goes over
+#   perDayCapUsd:  default $5   — auto-freeze for the day when crossed
+#   consecutiveFailures >= 3    — auto-freeze, requires manual unfreeze
+#
+# Manually unfreeze: edit `.dev-loop-state.json`, set
+# `frozen: false, frozenReason: null, consecutiveFailures: 0` and push.
+
+name: dev-loop
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 'dry-run = print prompt only, no LLM call. real = full run.'
+        required: true
+        default: 'dry-run'
+        type: choice
+        options:
+          - dry-run
+          - real
+      override-item:
+        description: 'Optional: skip the next-item picker and run this exact item id (e.g. "H1.5 A"). Leave blank to use the picker.'
+        required: false
+        type: string
+        default: ''
+  # schedule:
+  #   - cron: '0 */12 * * *'  # every 12 hours
+
+concurrency:
+  group: dev-loop
+  cancel-in-progress: false
+
+permissions:
+  contents: write       # commit + push state file and any roadmap progress
+  pull-requests: write  # for the agent's potential PR work
+
+jobs:
+  run-next:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.ORCHESTRATOR_PAT || secrets.GITHUB_TOKEN }}
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.33.0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install repo dependencies (lock-frozen)
+        run: pnpm install --frozen-lockfile
+
+      - name: Install Claude Code CLI (real mode only)
+        if: inputs.mode == 'real'
+        run: |
+          # The dev-loop spawns `claude --print` headlessly. We install
+          # the published CLI into the runner's PATH.
+          # If the package isn't published yet (pre-release window),
+          # this step is the canary: it'll fail clearly instead of the
+          # later spawn returning ENOENT.
+          npm i -g @anthropic-ai/claude-code || \
+            (echo "::warning::Claude Code CLI not installable — falling back to dry-run shape" && exit 0)
+          claude --version || true
+
+      - name: Configure git identity for state-file commits
+        run: |
+          git config user.name "conclave-dev-loop[bot]"
+          git config user.email "noreply@conclave-ai"
+
+      - name: Run next dev-loop item
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          GH_TOKEN: ${{ secrets.ORCHESTRATOR_PAT || secrets.GITHUB_TOKEN }}
+          DEV_LOOP_DRY_RUN: ${{ inputs.mode == 'dry-run' && 'true' || 'false' }}
+          DEV_LOOP_ITEM: ${{ inputs.override-item }}
+        run: |
+          set -euo pipefail
+          node scripts/dev-loop/run-next.mjs
+
+      - name: Commit + push state file (real-mode only)
+        if: inputs.mode == 'real' && always()
+        run: |
+          set -euo pipefail
+          if [ -n "$(git status --porcelain .dev-loop-state.json)" ]; then
+            git add .dev-loop-state.json
+            git commit -m "chore(dev-loop): advance state [skip conclave]" || true
+            git push origin HEAD:main || \
+              echo "::warning::dev-loop state push failed (non-fatal — the agent's own commits already landed)"
+          else
+            echo "no .dev-loop-state.json changes to commit"
+          fi
