@@ -336,3 +336,90 @@ test("checkTelegramWebhook: passes Bearer header verbatim (no leakage in URL)", 
   await checkTelegramWebhook(WEBHOOK_BASE, "secret-tok", fetchImpl);
   assert.doesNotMatch(fetchImpl.calls[0].url, /secret-tok/, "token must NOT be in the URL");
 });
+
+// ---- v0.13.17 H1 #3 — secret-drift detection ----------------------------
+
+test("checkTelegramWebhook: WARN when matches=true but recent 401 last_error_date (secret drift)", async () => {
+  // Live RC: PR #32 — webhook URL matched, but Telegram still held
+  // the old secret_token (TELEGRAM_WEBHOOK_SECRET on the worker had
+  // been rotated). Every callback got 401-rejected. doctor must
+  // surface this BEFORE the user clicks ✅ and gets stuck.
+  const fiveMinutesAgo = Math.floor(Date.now() / 1000) - 300;
+  const fetchImpl = makeFetchOnce(async () => ({
+    ok: true,
+    status: 200,
+    json: async () => ({
+      outcome: "bound",
+      matches: true,
+      url: WEBHOOK_BASE + "/telegram/webhook",
+      expected: WEBHOOK_BASE + "/telegram/webhook",
+      lastErrorMessage: "Wrong response from the webhook: 401 Unauthorized",
+      lastErrorDate: fiveMinutesAgo,
+      bot: { username: "Conclave_AI" },
+    }),
+  }));
+  const r = await checkTelegramWebhook(WEBHOOK_BASE, "tok", fetchImpl);
+  assert.equal(r.status, "warn", "secret drift must downgrade OK to WARN");
+  assert.match(r.detail, /401/);
+  assert.match(r.detail, /\d+m ago/);
+  assert.match(r.hint, /secret-drift|rebind-webhook|selfHealWebhook/i);
+});
+
+test("checkTelegramWebhook: stays OK when matches=true and the only 401 is more than an hour old", async () => {
+  // Once the cron's auto-rebind has fired (within 10 min), Telegram
+  // logs a fresh successful callback and stops re-reporting the old
+  // 401. But the lastErrorDate field on the worker side may still
+  // hold a stale timestamp from > 1h ago. Don't false-fire on that.
+  const twoHoursAgo = Math.floor(Date.now() / 1000) - 7200;
+  const fetchImpl = makeFetchOnce(async () => ({
+    ok: true,
+    status: 200,
+    json: async () => ({
+      outcome: "bound",
+      matches: true,
+      url: WEBHOOK_BASE + "/telegram/webhook",
+      expected: WEBHOOK_BASE + "/telegram/webhook",
+      lastErrorMessage: "Wrong response from the webhook: 401 Unauthorized",
+      lastErrorDate: twoHoursAgo,
+      bot: { username: "Conclave_AI" },
+    }),
+  }));
+  const r = await checkTelegramWebhook(WEBHOOK_BASE, "tok", fetchImpl);
+  assert.equal(r.status, "ok", "stale (>1h) 401 must not downgrade to WARN");
+});
+
+test("checkTelegramWebhook: bot username surfaced in OK detail", async () => {
+  const fetchImpl = makeFetchOnce(async () => ({
+    ok: true,
+    status: 200,
+    json: async () => ({
+      outcome: "bound",
+      matches: true,
+      expected: WEBHOOK_BASE + "/telegram/webhook",
+      bot: { username: "Conclave_AI" },
+    }),
+  }));
+  const r = await checkTelegramWebhook(WEBHOOK_BASE, "tok", fetchImpl);
+  assert.equal(r.status, "ok");
+  assert.match(r.detail, /@Conclave_AI/, "bot identity must surface so operators don't ask which bot is wired up");
+});
+
+test("checkTelegramWebhook: non-401 lastErrorMessage doesn't trigger drift WARN", async () => {
+  // Other transient errors (e.g., the worker briefly 500ing during
+  // a deploy) should NOT downgrade the OK status — only secret-drift
+  // (401/Unauthorized) does, since that's the one the cron fixes.
+  const recent = Math.floor(Date.now() / 1000) - 60;
+  const fetchImpl = makeFetchOnce(async () => ({
+    ok: true,
+    status: 200,
+    json: async () => ({
+      outcome: "bound",
+      matches: true,
+      expected: WEBHOOK_BASE + "/telegram/webhook",
+      lastErrorMessage: "Read timed out",
+      lastErrorDate: recent,
+    }),
+  }));
+  const r = await checkTelegramWebhook(WEBHOOK_BASE, "tok", fetchImpl);
+  assert.equal(r.status, "ok", "non-401 errors must not trigger secret-drift WARN");
+});

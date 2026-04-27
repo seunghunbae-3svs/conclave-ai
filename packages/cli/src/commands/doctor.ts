@@ -397,7 +397,15 @@ export async function checkTelegramWebhook(
       };
     }
     const body = (await res.json().catch(() => null)) as
-      | { outcome?: string; matches?: boolean; url?: string | null; expected?: string }
+      | {
+          outcome?: string;
+          matches?: boolean;
+          url?: string | null;
+          expected?: string;
+          lastErrorMessage?: string | null;
+          lastErrorDate?: number | null;
+          bot?: { username?: string } | null;
+        }
       | null;
     if (!body) {
       return { key: "telegram-webhook", label, status: "warn", detail: "non-JSON response" };
@@ -420,11 +428,35 @@ export async function checkTelegramWebhook(
       };
     }
     if (body.matches === true) {
+      // v0.13.17 (H1 #3) — even when the URL matches, surface a WARN
+      // when Telegram has logged a recent 401/Unauthorized against
+      // our worker. That signals secret-drift: TELEGRAM_WEBHOOK_SECRET
+      // on the worker has been rotated but Telegram still holds the
+      // old secret_token (set during a previous setWebhook). Live RC:
+      // PR #32 ✅ button never registered for ~30min after deploy
+      // because every callback got 401-rejected; the cron's URL-only
+      // match silently said "bound-already". The selfHealWebhook now
+      // re-binds on this signal (v0.13.16), but until the cron fires
+      // (within 10 min), button clicks may still inert. Doctor warns
+      // up-front so the operator can choose to manually rebind.
+      const errMsg = body.lastErrorMessage ?? "";
+      const errAt = body.lastErrorDate ?? 0;
+      const recentSec = Date.now() / 1000 - errAt;
+      const looks401 = /401|unauthor/i.test(errMsg);
+      if (looks401 && errAt > 0 && recentSec < 3600) {
+        return {
+          key: "telegram-webhook",
+          label,
+          status: "warn",
+          detail: `bound to ${body.expected}, but Telegram logged ${errMsg} ~${formatAgo(recentSec)} ago`,
+          hint: "secret-drift detected — selfHealWebhook will rebind within ~10 min, or POST /admin/rebind-webhook for an immediate fix",
+        };
+      }
       return {
         key: "telegram-webhook",
         label,
         status: "ok",
-        detail: `bound to ${body.expected}`,
+        detail: `bound to ${body.expected}${body.bot?.username ? ` (@${body.bot.username})` : ""}`,
       };
     }
     if (body.outcome === "dropped") {
@@ -455,6 +487,14 @@ export async function checkTelegramWebhook(
       detail: err instanceof Error ? err.message : String(err),
     };
   }
+}
+
+function formatAgo(deltaSec: number): string {
+  const d = Math.max(0, Math.floor(deltaSec));
+  if (d < 60) return `${d}s`;
+  if (d < 3600) return `${Math.floor(d / 60)}m`;
+  if (d < 86400) return `${Math.floor(d / 3600)}h`;
+  return `${Math.floor(d / 86400)}d`;
 }
 
 // ---- semver helper ------------------------------------------------------

@@ -1,5 +1,33 @@
 # Changelog
 
+## v0.13.18 — 2026-04-27 (H1 #3)
+
+### Added
+- **`conclave doctor` secret-drift detection (cli@0.13.18, H1 #3).**
+  When the webhook URL matches but Telegram has logged a recent
+  401/Unauthorized against our worker, `doctor` now downgrades the
+  telegram-webhook check from OK to WARN with a clear hint pointing
+  at `selfHealWebhook` (the cron will rebind within ~10 min) or
+  `POST /admin/rebind-webhook` for an immediate fix.
+
+  Live RC: PR #32 — `TELEGRAM_WEBHOOK_SECRET` had been rotated on
+  the worker but Telegram still held the old secret_token. Every
+  callback got 401-rejected. Pre-fix the cron silently said
+  "bound-already" because the URL matched. Without `doctor` warning
+  up-front, an operator clicks ✅ and gets stuck. Now `doctor`
+  surfaces the drift before the click.
+
+  Drift detection rule: `lastErrorMessage` matches `/401|unauthor/i`
+  AND `lastErrorDate` is within the last hour. Older 401 errors are
+  treated as resolved (the cron has likely already rebound).
+
+  OK detail now also surfaces the bot's `@username` so operators see
+  which bot is wired up at a glance.
+
+  **Tests:** 4 new doctor cases (recent 401 → WARN, stale >1h 401 →
+  OK, bot username surfaced, non-401 transient errors don't trigger
+  drift). 500/500 cli tests pass.
+
 ## v0.13.17 — 2026-04-27 (H1 #2)
 
 ### Added
