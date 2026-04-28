@@ -1,6 +1,6 @@
 import type { Blocker, ReviewContext, ReviewResult } from "../agent.js";
 import type { CouncilOutcome } from "../council.js";
-import type { FailureEntry } from "./schema.js";
+import type { CalibrationEntry, FailureEntry } from "./schema.js";
 
 export interface FailureGateOptions {
   /**
@@ -20,6 +20,16 @@ export interface FailureGateOptions {
    * the gate to high-severity stickies only.
    */
   minSeverity?: "blocker" | "major" | "minor";
+  /**
+   * H2 #8 — per-repo calibration map keyed by category. When the user
+   * has overridden the council on a category multiple times, the gate
+   * demotes / skips stickies for that category:
+   *   0–1 overrides → full strength
+   *   2 overrides    → demote one severity step (blocker→major, major→minor, minor→skip)
+   *   3+ overrides   → skip the sticky entirely
+   * Pass an empty map (or omit) for default behaviour.
+   */
+  calibration?: ReadonlyMap<string, CalibrationEntry>;
 }
 
 export interface FailureGateResult {
@@ -29,6 +39,13 @@ export interface FailureGateResult {
   stickyBlockers: Blocker[];
   /** Per-sticky reason (failure id + matching tokens) — useful for the renderer + tests. */
   matches: Array<{ failureId: string; tokens: string[] }>;
+  /**
+   * H2 #8 — categories whose stickies were suppressed entirely because
+   * the per-repo override count put them in the "skip" band. Reported
+   * for visibility (CLI logs, tests) so users can see what calibration
+   * is doing.
+   */
+  calibrationSkips: Array<{ failureId: string; category: string; overrideCount: number }>;
 }
 
 /**
@@ -64,6 +81,7 @@ export function applyFailureGate(
 
   const stickies: Blocker[] = [];
   const matches: FailureGateResult["matches"] = [];
+  const calibrationSkips: FailureGateResult["calibrationSkips"] = [];
   const seenStickyKeys = new Set<string>();
 
   for (const failure of retrievedFailures) {
@@ -78,10 +96,28 @@ export function applyFailureGate(
     if (seenStickyKeys.has(stickyKey)) continue;
     seenStickyKeys.add(stickyKey);
 
+    // H2 #8 — apply per-repo calibration before constructing the sticky.
+    // If overrides for this category have piled up, demote or skip.
+    const calEntry = opts.calibration?.get(failure.category);
+    const calibrated = applyCalibrationToSeverity(failure.severity, calEntry?.overrideCount ?? 0);
+    if (calibrated === null) {
+      calibrationSkips.push({
+        failureId: failure.id,
+        category: failure.category,
+        overrideCount: calEntry?.overrideCount ?? 0,
+      });
+      continue;
+    }
+
+    const calibratedNote =
+      calibrated !== failure.severity
+        ? ` (severity demoted ${failure.severity}→${calibrated} — repo overrode this category ${calEntry?.overrideCount ?? 0}x)`
+        : "";
     const sticky: Blocker = {
-      severity: failure.severity,
+      severity: calibrated,
       category: failure.category,
-      message: `[sticky from failure-catalog] ${failure.title} — ${truncate(failure.body, 240)}`,
+      message:
+        `[sticky from failure-catalog] ${failure.title} — ${truncate(failure.body, 240)}${calibratedNote}`,
       ...(failure.seedBlocker?.file ? { file: failure.seedBlocker.file } : {}),
       ...(failure.seedBlocker?.line ? { line: failure.seedBlocker.line } : {}),
     };
@@ -90,7 +126,7 @@ export function applyFailureGate(
   }
 
   if (stickies.length === 0) {
-    return { outcome, stickyBlockers: [], matches: [] };
+    return { outcome, stickyBlockers: [], matches: [], calibrationSkips };
   }
 
   const stickyVerdict = highestStickyVerdict(stickies);
@@ -107,7 +143,33 @@ export function applyFailureGate(
     results: [...outcome.results, synthetic],
     verdict: escalateVerdict(outcome.verdict, stickyVerdict),
   };
-  return { outcome: augmented, stickyBlockers: stickies, matches };
+  return { outcome: augmented, stickyBlockers: stickies, matches, calibrationSkips };
+}
+
+/**
+ * H2 #8 — step-function calibration. Predictable bands beat a continuous
+ * weight: a user can reason about "after I override 3 times the gate
+ * stops bothering me about this".
+ *
+ *   0–1 overrides → unchanged (full strength)
+ *   2 overrides    → demote one severity step (blocker→major, major→minor, minor→nit-skip)
+ *   3+ overrides   → skip entirely (returns null)
+ *
+ * Returning a "nit" is intentional: nits don't escalate verdicts in
+ * `highestStickyVerdict`. Returning null means caller should drop the
+ * sticky and record it under calibrationSkips for visibility.
+ */
+function applyCalibrationToSeverity(
+  base: "blocker" | "major" | "minor",
+  overrides: number,
+): "blocker" | "major" | "minor" | null {
+  if (overrides <= 1) return base;
+  if (overrides === 2) {
+    if (base === "blocker") return "major";
+    if (base === "major") return "minor";
+    return null; // minor → skip
+  }
+  return null; // 3+ → skip regardless of base
 }
 
 const STOP_WORDS = new Set([
@@ -184,21 +246,28 @@ function severityRank(s: "blocker" | "major" | "minor"): number {
   return s === "blocker" ? 3 : s === "major" ? 2 : 1;
 }
 
-function highestStickyVerdict(stickies: readonly Blocker[]): "rework" | "reject" {
+function highestStickyVerdict(stickies: readonly Blocker[]): "approve" | "rework" | "reject" {
   for (const s of stickies) {
     if (s.severity === "blocker") return "reject";
   }
-  return "rework";
+  for (const s of stickies) {
+    if (s.severity === "major") return "rework";
+  }
+  // Only minor stickies remain — surface them as informational, but
+  // don't override the council's verdict. (H2 #8 calibration relies on
+  // this so demoted stickies stop blocking merges over time.)
+  return "approve";
 }
 
 function escalateVerdict(
   current: CouncilOutcome["verdict"],
-  injected: "rework" | "reject",
+  injected: "approve" | "rework" | "reject",
 ): CouncilOutcome["verdict"] {
   // Strict ordering: reject > rework > approve. Never downgrade.
   if (current === "reject") return "reject";
   if (injected === "reject") return "reject";
-  return "rework";
+  if (injected === "rework") return "rework";
+  return current; // injected === "approve" — sticky is informational only.
 }
 
 function truncate(s: string, max: number): string {

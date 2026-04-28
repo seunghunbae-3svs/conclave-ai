@@ -108,6 +108,29 @@ export const FailureEntrySchema = z.object({
 export type FailureEntry = z.infer<typeof FailureEntrySchema>;
 
 /**
+ * CalibrationEntry — per-(repo, domain, category) record of how often a
+ * user has overridden the council on this category for this repo. An
+ * "override" is a merge that landed despite the council verdict being
+ * rework or reject. High override counts mean the repo's reviewer
+ * tolerates this category as a nit, so the failure-gate (H2 #7) demotes
+ * stickies for it (or skips entirely past the threshold).
+ *
+ * H2 #8 — adaptive calibration. The threshold rule is intentionally
+ * step-function rather than continuous so behavior is predictable and
+ * testable; tune the bands by editing applyCalibrationToSticky in
+ * failure-gate.ts.
+ */
+export const CalibrationEntrySchema = z.object({
+  repo: z.string().min(1),
+  domain: AnswerKeyDomainSchema,
+  category: z.string().min(1),
+  overrideCount: z.number().int().nonnegative(),
+  lastOverrideAt: z.string().datetime(),
+  lastSampleEpisodicId: z.string().optional(),
+});
+export type CalibrationEntry = z.infer<typeof CalibrationEntrySchema>;
+
+/**
  * SemanticRule — distilled cross-entry pattern. Weekly Haiku job.
  * Format kept intentionally narrow so rules are short, actionable, and
  * indexable by a tag vocabulary.

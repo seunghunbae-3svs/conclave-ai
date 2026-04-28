@@ -119,6 +119,8 @@ export {
   LegacyCatalogSchema,
   retrieve,
   applyFailureGate,
+  CalibrationEntrySchema,
+  FileSystemCalibrationStore,
 } from "./memory/index.js";
 export type {
   AnswerKey,
@@ -142,6 +144,10 @@ export type {
   NewFailureCategory,
   FailureGateOptions,
   FailureGateResult,
+  CalibrationEntry,
+  CalibrationStore,
+  RecordOverrideInput,
+  FsCalibrationStoreOptions,
 } from "./memory/index.js";
 
 // Federated sync (decision #21) — redact answer-keys + failures to the

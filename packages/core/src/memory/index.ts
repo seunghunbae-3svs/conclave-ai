@@ -6,13 +6,22 @@ export {
   FailureCategorySchema,
   FailureSeveritySchema,
   SemanticRuleSchema,
+  CalibrationEntrySchema,
 } from "./schema.js";
 export type {
   AnswerKey,
   EpisodicEntry,
   FailureEntry,
   SemanticRule,
+  CalibrationEntry,
 } from "./schema.js";
+
+export { FileSystemCalibrationStore } from "./calibration-store.js";
+export type {
+  CalibrationStore,
+  RecordOverrideInput,
+  FsCalibrationStoreOptions,
+} from "./calibration-store.js";
 
 export { formatAnswerKeyForPrompt, formatFailureForPrompt } from "./store.js";
 export type { MemoryStore, MemoryReadQuery, MemoryRetrieval } from "./store.js";

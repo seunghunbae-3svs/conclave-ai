@@ -1,4 +1,9 @@
-import { FileSystemMemoryStore, OutcomeWriter, type OutcomeResult } from "@conclave-ai/core";
+import {
+  FileSystemCalibrationStore,
+  FileSystemMemoryStore,
+  OutcomeWriter,
+  type OutcomeResult,
+} from "@conclave-ai/core";
 import { loadConfig, resolveMemoryRoot } from "../lib/config.js";
 
 const HELP = `conclave record-outcome — close the self-evolve loop
@@ -48,7 +53,11 @@ export async function recordOutcome(argv: string[]): Promise<void> {
   const { config, configDir } = await loadConfig();
   const memoryRoot = resolveMemoryRoot(config, configDir);
   const store = new FileSystemMemoryStore({ root: memoryRoot });
-  const writer = new OutcomeWriter({ store });
+  // H2 #8 — when the merge is an override of a rework/reject verdict,
+  // OutcomeWriter writes a calibration entry per blocker category so the
+  // next review's failure-gate demotes them.
+  const calibration = new FileSystemCalibrationStore({ root: memoryRoot });
+  const writer = new OutcomeWriter({ store, calibration });
 
   const output = await writer.recordOutcome({ episodicId: args.id, outcome: args.result });
 

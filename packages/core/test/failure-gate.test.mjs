@@ -294,3 +294,98 @@ test("applyFailureGate: only +++ headers (no added content lines) → no stickie
   const result = applyFailureGate(outcome, [failure], ctx);
   assert.equal(result.stickyBlockers.length, 0);
 });
+
+// H2 #8 — calibration demote / skip behaviour
+
+function calibrationFor(category, overrideCount) {
+  return new Map([
+    [
+      category,
+      {
+        repo: "acme/app",
+        domain: "code",
+        category,
+        overrideCount,
+        lastOverrideAt: now(),
+      },
+    ],
+  ]);
+}
+
+const stickyFailure = {
+  id: "fc-cal",
+  createdAt: new Date().toISOString(),
+  domain: "code",
+  category: "debug-noise",
+  severity: "major",
+  title: "console.log debug calls",
+  body: "console.log debug calls leak operational data frontend production",
+  tags: ["debug-noise"],
+};
+const matchingDiff = ["+++ b/x.js", "+console.log('debug operational frontend production data');"].join("\n");
+
+test("applyFailureGate calibration: 0 overrides → unchanged", () => {
+  const outcome = mkOutcome("approve", [
+    { agent: "claude", verdict: "approve", blockers: [], summary: "" },
+  ]);
+  const result = applyFailureGate(outcome, [stickyFailure], { ...baseCtx, diff: matchingDiff }, {
+    calibration: new Map(),
+  });
+  assert.equal(result.stickyBlockers.length, 1);
+  assert.equal(result.stickyBlockers[0].severity, "major");
+  assert.equal(result.outcome.verdict, "rework");
+});
+
+test("applyFailureGate calibration: 2 overrides on major → demote to minor + verdict approve preserved", () => {
+  const outcome = mkOutcome("approve", [
+    { agent: "claude", verdict: "approve", blockers: [], summary: "" },
+  ]);
+  const result = applyFailureGate(outcome, [stickyFailure], { ...baseCtx, diff: matchingDiff }, {
+    calibration: calibrationFor("debug-noise", 2),
+  });
+  assert.equal(result.stickyBlockers.length, 1);
+  assert.equal(result.stickyBlockers[0].severity, "minor");
+  // Demoted to minor → verdict not escalated, council "approve" stands.
+  assert.equal(result.outcome.verdict, "approve");
+  // Sticky message annotates the demote reason.
+  assert.match(result.stickyBlockers[0].message, /severity demoted major→minor/);
+});
+
+test("applyFailureGate calibration: 3+ overrides on major → skip entirely", () => {
+  const outcome = mkOutcome("approve", [
+    { agent: "claude", verdict: "approve", blockers: [], summary: "" },
+  ]);
+  const result = applyFailureGate(outcome, [stickyFailure], { ...baseCtx, diff: matchingDiff }, {
+    calibration: calibrationFor("debug-noise", 3),
+  });
+  assert.equal(result.stickyBlockers.length, 0);
+  assert.equal(result.calibrationSkips.length, 1);
+  assert.equal(result.calibrationSkips[0].category, "debug-noise");
+  assert.equal(result.calibrationSkips[0].overrideCount, 3);
+  assert.equal(result.outcome.verdict, "approve");
+});
+
+test("applyFailureGate calibration: 2 overrides on blocker → demote to major (still rework, no longer reject)", () => {
+  const blockerFailure = { ...stickyFailure, severity: "blocker" };
+  const outcome = mkOutcome("approve", [
+    { agent: "claude", verdict: "approve", blockers: [], summary: "" },
+  ]);
+  const result = applyFailureGate(outcome, [blockerFailure], { ...baseCtx, diff: matchingDiff }, {
+    calibration: calibrationFor("debug-noise", 2),
+  });
+  assert.equal(result.stickyBlockers.length, 1);
+  assert.equal(result.stickyBlockers[0].severity, "major");
+  assert.equal(result.outcome.verdict, "rework"); // not reject anymore
+});
+
+test("applyFailureGate calibration: 2 overrides on minor → skip", () => {
+  const minorFailure = { ...stickyFailure, severity: "minor" };
+  const outcome = mkOutcome("approve", [
+    { agent: "claude", verdict: "approve", blockers: [], summary: "" },
+  ]);
+  const result = applyFailureGate(outcome, [minorFailure], { ...baseCtx, diff: matchingDiff }, {
+    calibration: calibrationFor("debug-noise", 2),
+  });
+  assert.equal(result.stickyBlockers.length, 0);
+  assert.equal(result.calibrationSkips.length, 1);
+});

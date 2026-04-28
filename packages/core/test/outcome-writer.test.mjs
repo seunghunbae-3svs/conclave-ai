@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { FileSystemMemoryStore, OutcomeWriter } from "../dist/index.js";
+import { FileSystemMemoryStore, FileSystemCalibrationStore, OutcomeWriter } from "../dist/index.js";
 
 function freshFs() {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "aic-outcome-"));
@@ -220,6 +220,112 @@ test("recordOutcome merged: missing prior in chain is treated as 'no further his
     const out = await writer.recordOutcome({ episodicId: cycle2.id, outcome: "merged" });
     assert.equal(out.answerKeys.length, 1);
     assert.equal(out.answerKeys[0].removedBlockers.length, 0);
+  } finally {
+    cleanup(root);
+  }
+});
+
+// H2 #8 — calibration auto-recording on merge that overrides a rework/reject verdict
+
+test("recordOutcome merged on rework verdict: writes calibration override per blocker category", async () => {
+  const { store, root } = freshFs();
+  try {
+    const calibration = new FileSystemCalibrationStore({ root });
+    const writer = new OutcomeWriter({ store, calibration });
+    const ep = await writer.writeReview({
+      ctx: baseCtx,
+      reviews: [
+        {
+          agent: "claude",
+          verdict: "rework",
+          blockers: [
+            { severity: "major", category: "debug-noise", message: "console.log left in" },
+            { severity: "major", category: "missing-test", message: "no test for new branch" },
+            { severity: "nit", category: "style", message: "trailing whitespace" }, // should be skipped
+          ],
+          summary: "2 majors + 1 nit",
+        },
+      ],
+      councilVerdict: "rework",
+      costUsd: 0.01,
+    });
+    await writer.recordOutcome({ episodicId: ep.id, outcome: "merged" });
+
+    const cal = await calibration.load(baseCtx.repo, "code");
+    assert.equal(cal.size, 2); // nit excluded
+    assert.equal(cal.get("debug-noise").overrideCount, 1);
+    assert.equal(cal.get("missing-test").overrideCount, 1);
+    assert.equal(cal.get("debug-noise").lastSampleEpisodicId, ep.id);
+  } finally {
+    cleanup(root);
+  }
+});
+
+test("recordOutcome merged on approve verdict: NO calibration recorded", async () => {
+  const { store, root } = freshFs();
+  try {
+    const calibration = new FileSystemCalibrationStore({ root });
+    const writer = new OutcomeWriter({ store, calibration });
+    const ep = await writer.writeReview({
+      ctx: baseCtx,
+      reviews: [approveReview],
+      councilVerdict: "approve",
+      costUsd: 0.01,
+    });
+    await writer.recordOutcome({ episodicId: ep.id, outcome: "merged" });
+    const cal = await calibration.load(baseCtx.repo, "code");
+    assert.equal(cal.size, 0);
+  } finally {
+    cleanup(root);
+  }
+});
+
+test("recordOutcome rejected: NO calibration written even with rework verdict", async () => {
+  const { store, root } = freshFs();
+  try {
+    const calibration = new FileSystemCalibrationStore({ root });
+    const writer = new OutcomeWriter({ store, calibration });
+    const ep = await writer.writeReview({
+      ctx: baseCtx,
+      reviews: [rejectReview],
+      councilVerdict: "reject",
+      costUsd: 0.01,
+    });
+    await writer.recordOutcome({ episodicId: ep.id, outcome: "rejected" });
+    const cal = await calibration.load(baseCtx.repo, "code");
+    assert.equal(cal.size, 0);
+  } finally {
+    cleanup(root);
+  }
+});
+
+test("recordOutcome merged: dedupes the same category across agents in the same merge", async () => {
+  const { store, root } = freshFs();
+  try {
+    const calibration = new FileSystemCalibrationStore({ root });
+    const writer = new OutcomeWriter({ store, calibration });
+    const ep = await writer.writeReview({
+      ctx: baseCtx,
+      reviews: [
+        {
+          agent: "claude",
+          verdict: "rework",
+          blockers: [{ severity: "major", category: "debug-noise", message: "a" }],
+          summary: "",
+        },
+        {
+          agent: "openai",
+          verdict: "rework",
+          blockers: [{ severity: "major", category: "debug-noise", message: "b" }],
+          summary: "",
+        },
+      ],
+      councilVerdict: "rework",
+      costUsd: 0.01,
+    });
+    await writer.recordOutcome({ episodicId: ep.id, outcome: "merged" });
+    const cal = await calibration.load(baseCtx.repo, "code");
+    assert.equal(cal.get("debug-noise").overrideCount, 1); // not 2
   } finally {
     cleanup(root);
   }

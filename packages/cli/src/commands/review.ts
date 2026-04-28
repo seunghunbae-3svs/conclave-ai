@@ -3,6 +3,7 @@ import {
   BudgetTracker,
   Council,
   EfficiencyGate,
+  FileSystemCalibrationStore,
   FileSystemFederatedBaselineStore,
   FileSystemMemoryStore,
   InMemoryPlainSummaryCache,
@@ -778,17 +779,33 @@ export async function review(argv: string[]): Promise<void> {
   //     any known pattern the council didn't already flag. Deterministic
   //     and free (no LLM call). Off via `memory.activeFailureGate: false`.
   const gateEnabled = config.memory.activeFailureGate !== false;
+  // H2 #8 — load per-repo calibration so the gate can demote / skip
+  // stickies for categories the user has repeatedly overridden.
+  const calibrationStore = new FileSystemCalibrationStore({ root: memoryRoot });
+  const calibration = gateEnabled
+    ? await calibrationStore.load(loaded.repo, "code").catch(() => new Map())
+    : new Map();
   const failureGateOutput: FailureGateResult = gateEnabled
     ? applyFailureGate(rawOutcome, retrieval.failures, reviewCtx, {
         minTokenOverlap: config.memory.activeFailureGateMinOverlap ?? 2,
+        calibration,
       })
-    : { outcome: rawOutcome, stickyBlockers: [], matches: [] };
+    : { outcome: rawOutcome, stickyBlockers: [], matches: [], calibrationSkips: [] };
   const outcome = failureGateOutput.outcome;
   if (failureGateOutput.stickyBlockers.length > 0) {
     infoOut(
       `conclave review: failure-gate injected ${failureGateOutput.stickyBlockers.length} sticky blocker${
         failureGateOutput.stickyBlockers.length === 1 ? "" : "s"
       } (${failureGateOutput.matches.map((m) => m.failureId).join(", ")}); verdict → ${outcome.verdict}\n`,
+    );
+  }
+  if (failureGateOutput.calibrationSkips.length > 0) {
+    infoOut(
+      `conclave review: failure-gate skipped ${failureGateOutput.calibrationSkips.length} sticky` +
+        `${failureGateOutput.calibrationSkips.length === 1 ? "" : "s"} via calibration ` +
+        `(${failureGateOutput.calibrationSkips
+          .map((s) => `${s.category}@${s.overrideCount}x`)
+          .join(", ")})\n`,
     );
   }
 

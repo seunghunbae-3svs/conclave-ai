@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import type { EpisodicEntry, AnswerKey, FailureEntry } from "./schema.js";
 import type { MemoryStore } from "./store.js";
+import type { CalibrationStore } from "./calibration-store.js";
 import { RuleBasedClassifier, newEpisodicId, type Classifier, type OutcomeResult } from "./classifier.js";
 import type { ReviewContext, ReviewResult } from "../agent.js";
 
@@ -52,11 +53,23 @@ export class OutcomeWriter {
   private readonly store: MemoryStore;
   private readonly classifier: Classifier;
   private readonly episodicIndex: Map<string, EpisodicEntry>;
+  private readonly calibration: CalibrationStore | null;
 
-  constructor(opts: { store: MemoryStore; classifier?: Classifier }) {
+  constructor(opts: {
+    store: MemoryStore;
+    classifier?: Classifier;
+    /**
+     * H2 #8 — when supplied, recordOutcome auto-records a calibration
+     * override per (repo, domain, category) whenever a merge lands on
+     * an episodic with councilVerdict ∈ {rework, reject}. Optional;
+     * legacy callers keep working with no calibration tracking.
+     */
+    calibration?: CalibrationStore;
+  }) {
     this.store = opts.store;
     this.classifier = opts.classifier ?? new RuleBasedClassifier();
     this.episodicIndex = new Map();
+    this.calibration = opts.calibration ?? null;
   }
 
   async writeReview(input: WriteReviewInput): Promise<EpisodicEntry> {
@@ -97,6 +110,38 @@ export class OutcomeWriter {
     const classification = this.classifier.classify(updated, input.outcome, priors);
     for (const key of classification.answerKeys) await this.store.writeAnswerKey(key);
     for (const entry of classification.failures) await this.store.writeFailure(entry);
+
+    // H2 #8 — if a merge landed on a council verdict of rework or reject,
+    // each blocker category counts as one override of the gate for this
+    // repo. Walk the FINAL cycle's blockers (not the priors — those were
+    // already-resolved cycles). Skip nits (the gate doesn't surface them
+    // anyway). Best-effort: a calibration write failure does NOT
+    // propagate, since the user's merge has already happened.
+    if (
+      this.calibration &&
+      input.outcome === "merged" &&
+      (existing.councilVerdict === "rework" || existing.councilVerdict === "reject")
+    ) {
+      const seenCategories = new Set<string>();
+      for (const review of updated.reviews) {
+        for (const blocker of review.blockers) {
+          if (blocker.severity === "nit") continue;
+          if (seenCategories.has(blocker.category)) continue;
+          seenCategories.add(blocker.category);
+          try {
+            await this.calibration.recordOverride({
+              repo: updated.repo,
+              domain: "code",
+              category: blocker.category,
+              episodicId: updated.id,
+            });
+          } catch {
+            // swallow — calibration is advisory; merge succeeded already
+          }
+        }
+      }
+    }
+
     return classification;
   }
 
