@@ -92,18 +92,32 @@ export function applyFailureGate(
 
     if (alreadyCoveredByCouncil(failure, existingByCategory, changedFiles)) continue;
 
-    const stickyKey = `${failure.category}|${truncate(failure.title, 60)}`;
+    // Sticky uses the original FREE-FORM blocker category (preserved on
+    // seedBlocker) rather than the closed-enum FailureEntry.category, so
+    // (a) calibration can round-trip through OutcomeWriter recordOverride
+    //     keyed on the same string the gate looked up, and
+    // (b) end-users see the same category name they originally wrote in
+    //     blocker.category, not the mapCategory-coerced enum.
+    const stickyCategory = failure.seedBlocker?.category ?? failure.category;
+    const stickyKey = `${stickyCategory}|${truncate(failure.title, 60)}`;
     if (seenStickyKeys.has(stickyKey)) continue;
     seenStickyKeys.add(stickyKey);
 
     // H2 #8 — apply per-repo calibration before constructing the sticky.
-    // If overrides for this category have piled up, demote or skip.
-    const calEntry = opts.calibration?.get(failure.category);
+    // Calibration is keyed on the FREE-FORM blocker category (what the
+    // agent emitted, e.g. "debug-noise") because OutcomeWriter records
+    // overrides from blocker.category. FailureEntry.category is a closed
+    // enum (mapped via classifier.mapCategory) — using it here would miss
+    // calibrations recorded under free-form names. seedBlocker preserves
+    // the original; fall back to failure.category for legacy entries
+    // without a seedBlocker.
+    const calLookupCategory = failure.seedBlocker?.category ?? failure.category;
+    const calEntry = opts.calibration?.get(calLookupCategory);
     const calibrated = applyCalibrationToSeverity(failure.severity, calEntry?.overrideCount ?? 0);
     if (calibrated === null) {
       calibrationSkips.push({
         failureId: failure.id,
-        category: failure.category,
+        category: calLookupCategory,
         overrideCount: calEntry?.overrideCount ?? 0,
       });
       continue;
@@ -111,11 +125,11 @@ export function applyFailureGate(
 
     const calibratedNote =
       calibrated !== failure.severity
-        ? ` (severity demoted ${failure.severity}→${calibrated} — repo overrode this category ${calEntry?.overrideCount ?? 0}x)`
+        ? ` (severity demoted ${failure.severity}→${calibrated} — repo overrode "${calLookupCategory}" ${calEntry?.overrideCount ?? 0}x)`
         : "";
     const sticky: Blocker = {
       severity: calibrated,
-      category: failure.category,
+      category: stickyCategory,
       message:
         `[sticky from failure-catalog] ${failure.title} — ${truncate(failure.body, 240)}${calibratedNote}`,
       ...(failure.seedBlocker?.file ? { file: failure.seedBlocker.file } : {}),
