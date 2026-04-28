@@ -1,9 +1,9 @@
 {
   "version": 1,
-  "currentItem": "H1.5 B",
-  "lastShipped": "H1.5 A",
-  "lastShippedAt": "2026-04-27T07:29:38Z",
-  "consecutiveFailures": 1,
+  "currentItem": "H1.5 C",
+  "lastShipped": "H1.5 B",
+  "lastShippedAt": "2026-04-27T08:19:31Z",
+  "consecutiveFailures": 0,
   "totalSpentUsdToday": 0,
   "lastSpendResetDate": "2026-04-27T08:06:01.117Z",
   "perRunCapUsd": 1,
@@ -41,6 +41,13 @@
       "shippedAt": "2026-04-27T07:29Z",
       "version": "cli@0.13.21",
       "note": "shipped by dev-loop real run #1; orchestrator timed out before parsing result, manually reconciled"
+    },
+    {
+      "item": "H1.5 B",
+      "shippedAt": "2026-04-27T08:19Z",
+      "version": "cli@0.13.22",
+      "commit": "eb84fbf2b20001d1afb4ecd87cf1933a26c0d07e",
+      "note": "shipped by dev-loop run #24983649832 (commit eb84fbf, design-baseline + visual review); orchestrator marked shipped:false because DEVLOOP_RESULT line missing from stdout, then 5 subsequent retry runs all crashed (claude exited null) on the same item. Manually reconciled 2026-04-28; root cause of the null exit pattern to be investigated before tonight's session."
     }
   ]
 }
