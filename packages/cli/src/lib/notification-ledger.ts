@@ -84,21 +84,45 @@ export async function readLedger(
  * `{ alreadySent: false }` so a transient disk issue never silences
  * a real verdict.
  */
+/**
+ * Defense-in-depth — episodic ids are produced by `newEpisodicId` as
+ * `ep-<uuidv4>`. Anything else is anomalous and may carry leaked
+ * content (a regression upstream, or a malicious caller). We hash
+ * non-canonical ids before they enter the ledger BODY so the file
+ * never echoes back arbitrary input. The filename uses the same
+ * sanitization but additionally truncates to bound length.
+ *
+ * The canonical id is preserved verbatim — diagnostics are unchanged
+ * for normal callers — only adversarial inputs get hashed.
+ */
+const CANONICAL_EPISODIC_ID = /^ep-[a-fA-F0-9-]{1,72}$/;
+
+function safeEpisodicIdForBody(raw: string): string {
+  if (CANONICAL_EPISODIC_ID.test(raw)) return raw;
+  // Hash the original so duplicate-detection still works deterministically
+  // for the same anomalous input, but the original content never lands
+  // in the file body.
+  return `ep-anon-${createHash("sha256").update(raw).digest("hex").slice(0, 16)}`;
+}
+
 export async function checkAndRecordNotification(input: {
   memoryRoot: string;
   episodicId: string;
   fingerprint: string;
 }): Promise<{ alreadySent: boolean; ledgerWriteFailed: boolean }> {
   const file = ledgerPath(input.memoryRoot, input.episodicId);
+  const safeId = safeEpisodicIdForBody(input.episodicId);
   try {
     const existing = await readLedger(input.memoryRoot, input.episodicId);
     if (existing && existing.fingerprints.some((f) => f.contentHash === input.fingerprint)) {
       return { alreadySent: true, ledgerWriteFailed: false };
     }
     const updated: NotificationLedgerEntry = existing ?? {
-      episodicId: input.episodicId,
+      episodicId: safeId,
       fingerprints: [],
     };
+    // Re-validate on every write so a prior unsafe entry can't persist.
+    updated.episodicId = safeEpisodicIdForBody(updated.episodicId);
     updated.fingerprints.push({
       contentHash: input.fingerprint,
       sentAt: new Date().toISOString(),
