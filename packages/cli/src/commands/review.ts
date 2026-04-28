@@ -9,11 +9,13 @@ import {
   MetricsRecorder,
   OutcomeWriter,
   TieredCouncil,
+  applyFailureGate,
   buildFrequencyMap,
   formatAnswerKeyForPrompt,
   formatFailureForPrompt,
   generatePlainSummary,
   newEpisodicId,
+  type FailureGateResult,
   type Agent,
   type MetricsSink,
   type PlainSummary,
@@ -769,7 +771,26 @@ export async function review(argv: string[]): Promise<void> {
     }
   }
 
-  const outcome = await council.deliberate(reviewCtx);
+  const rawOutcome = await council.deliberate(reviewCtx);
+
+  // 5b. H2 #7 — active failure-catalog gating. Scan the diff against
+  //     retrieved failure-catalog entries; inject sticky blockers for
+  //     any known pattern the council didn't already flag. Deterministic
+  //     and free (no LLM call). Off via `memory.activeFailureGate: false`.
+  const gateEnabled = config.memory.activeFailureGate !== false;
+  const failureGateOutput: FailureGateResult = gateEnabled
+    ? applyFailureGate(rawOutcome, retrieval.failures, reviewCtx, {
+        minTokenOverlap: config.memory.activeFailureGateMinOverlap ?? 2,
+      })
+    : { outcome: rawOutcome, stickyBlockers: [], matches: [] };
+  const outcome = failureGateOutput.outcome;
+  if (failureGateOutput.stickyBlockers.length > 0) {
+    infoOut(
+      `conclave review: failure-gate injected ${failureGateOutput.stickyBlockers.length} sticky blocker${
+        failureGateOutput.stickyBlockers.length === 1 ? "" : "s"
+      } (${failureGateOutput.matches.map((m) => m.failureId).join(", ")}); verdict → ${outcome.verdict}\n`,
+    );
+  }
 
   // 6. Persist the episodic entry (outcome: "pending") so `conclave
   //    record-outcome` can classify it later into answer-keys / failures.

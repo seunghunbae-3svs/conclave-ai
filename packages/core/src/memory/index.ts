@@ -30,6 +30,9 @@ export type {
   RecordOutcomeOutput,
 } from "./outcome-writer.js";
 
+export { applyFailureGate } from "./failure-gate.js";
+export type { FailureGateOptions, FailureGateResult } from "./failure-gate.js";
+
 export { RuleBasedClassifier, newEpisodicId } from "./classifier.js";
 export type { Classifier, ClassificationOutput, OutcomeResult } from "./classifier.js";
 

@@ -118,6 +118,7 @@ export {
   mapLegacyCategory,
   LegacyCatalogSchema,
   retrieve,
+  applyFailureGate,
 } from "./memory/index.js";
 export type {
   AnswerKey,
@@ -139,6 +140,8 @@ export type {
   SeedOptions,
   SeedResult,
   NewFailureCategory,
+  FailureGateOptions,
+  FailureGateResult,
 } from "./memory/index.js";
 
 // Federated sync (decision #21) — redact answer-keys + failures to the

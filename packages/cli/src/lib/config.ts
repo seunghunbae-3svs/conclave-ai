@@ -26,10 +26,22 @@ export const ConclaveConfigSchema = z.object({
       answerKeysDir: z.string(),
       failureCatalogDir: z.string(),
       root: z.string().optional(),
+      /**
+       * H2 #7 — active failure-catalog gating. When enabled (default),
+       * the post-deliberation gate scans the diff against retrieved
+       * failure-catalog entries and injects sticky blockers for any
+       * known pattern the council didn't already flag. Set false to
+       * fall back to retrieval-only context (pre-H2 #7 behaviour).
+       */
+      activeFailureGate: z.boolean().default(true),
+      /** Token-overlap threshold for the gate. Default 2; raise for stricter matching. */
+      activeFailureGateMinOverlap: z.number().int().min(1).default(2),
     })
     .default({
       answerKeysDir: ".conclave/answer-keys",
       failureCatalogDir: ".conclave/failure-catalog",
+      activeFailureGate: true,
+      activeFailureGateMinOverlap: 2,
     }),
   observability: z
     .object({
@@ -262,6 +274,8 @@ export const DEFAULT_CONFIG: ConclaveConfig = {
     answerKeysDir: ".conclave/answer-keys",
     failureCatalogDir: ".conclave/failure-catalog",
     root: ".conclave",
+    activeFailureGate: true,
+    activeFailureGateMinOverlap: 2,
   },
 };
 
