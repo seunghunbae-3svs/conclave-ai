@@ -56,6 +56,13 @@ import {
 import { ClaudeHaikuPlainSummaryLlm } from "../lib/plain-summary-llm.js";
 import { renderPlainSummarySection } from "../lib/output.js";
 import { resolveKey } from "../lib/credentials.js";
+import {
+  parseSpecMarkdown,
+  classifySpecFeature,
+  buildSpecReport,
+  renderSpecStdout,
+  renderSpecIssueBody,
+} from "../lib/audit-spec.js";
 
 const execFile = promisify(execFileCb);
 
@@ -88,6 +95,7 @@ interface ParsedArgs {
   noPlainSummary: boolean;
   plainSummaryOnly: boolean;
   plainSummaryLocale?: PlainSummaryLocale;
+  specPath?: string;
 }
 
 const HELP = `conclave audit — full-project health check across the current codebase
@@ -111,6 +119,8 @@ Options:
   --no-plain-summary          Disable the plain-language (non-dev) summary.
   --plain-summary-locale <en|ko>  Override the summary locale (default from config).
   --plain-summary-only        Emit ONLY the plain summary to the issue body.
+  --spec <path>       feature-gap mode: classify spec bullets vs codebase
+                       (deterministic, no LLM call — hermetic + cheap)
 
 Environment:
   ANTHROPIC_API_KEY   required — primary Claude agent.
@@ -175,6 +185,8 @@ function parseArgv(argv: string[]): ParsedArgs {
       out.cwd = argv[++i]!;
     } else if (a === "--json-out" && argv[i + 1]) {
       out.jsonPath = argv[++i]!;
+    } else if (a === "--spec" && argv[i + 1]) {
+      out.specPath = argv[++i]!;
     }
   }
   return out;
@@ -257,6 +269,87 @@ function buildAgentsForDomain(
   return { agents, skipped, resolvedDomain: resolved };
 }
 
+/**
+ * H1.5 C — `conclave audit --spec <path>` mode.
+ *
+ * Parses a markdown spec (bullet list of intended features),
+ * deterministically classifies each bullet against the codebase as
+ * PRESENT / PARTIAL / MISSING, then emits a feature-gap report. No
+ * LLM call — fast, free, hermetic.
+ *
+ * Distinct from defect-mode audit: reports what's NOT built per the
+ * spec, not what's broken in what IS built.
+ */
+async function runSpecAudit(opts: {
+  cwd: string;
+  specPath: string;
+  output: AuditOutputTarget;
+  repo: string;
+}): Promise<void> {
+  const { cwd, specPath, output, repo } = opts;
+  const fullSpecPath = path.isAbsolute(specPath) ? specPath : path.resolve(cwd, specPath);
+  if (!fs.existsSync(fullSpecPath)) {
+    process.stderr.write(`conclave audit --spec: file not found: ${fullSpecPath}\n`);
+    process.exitCode = 1;
+    return;
+  }
+  const md = fs.readFileSync(fullSpecPath, "utf8");
+  const features = parseSpecMarkdown(md);
+  if (features.length === 0) {
+    process.stderr.write(`conclave audit --spec: ${specPath} contains no bullet items.\n`);
+    return;
+  }
+  process.stdout.write(
+    `conclave audit --spec: ${features.length} feature(s) parsed from ${specPath}\n`,
+  );
+
+  const discovery = await discoverAuditFiles({ cwd, scope: "all", maxFiles: 500 });
+
+  const filesIn: { path: string; content: string }[] = [];
+  for (const f of discovery.files) {
+    const full = path.isAbsolute(f.path) ? f.path : path.join(cwd, f.path);
+    try {
+      const stat = fs.statSync(full);
+      if (stat.size > 200 * 1024) continue;
+      const content = fs.readFileSync(full, "utf8");
+      filesIn.push({ path: f.path, content });
+    } catch {
+      // unreadable / not a regular file — skip
+    }
+  }
+
+  const classifications = features.map((f) => classifySpecFeature(f, filesIn));
+  const report = buildSpecReport(specPath, classifications);
+
+  const wantStdout = output === "stdout" || output === "both";
+  const wantIssue = output === "issue" || output === "both";
+  const wantJson = output === "json";
+
+  if (wantStdout) process.stdout.write(renderSpecStdout(report));
+  if (wantJson) process.stdout.write(JSON.stringify(report, null, 2) + "\n");
+  if (wantIssue) {
+    const body = renderSpecIssueBody(report);
+    const today = new Date().toISOString().slice(0, 10);
+    const title = `Conclave Spec Gap — ${today}`;
+    try {
+      await execFile(
+        "gh",
+        ["issue", "create", "--title", title, "--body", body, "--repo", repo],
+        { maxBuffer: 4 * 1024 * 1024 },
+      );
+      process.stdout.write(`✓ issue created on ${repo}\n`);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      process.stderr.write(
+        `conclave audit --spec: gh issue create failed (${msg.slice(0, 200)}); falling back to stdout\n`,
+      );
+      if (output === "issue") process.stdout.write(body);
+    }
+  }
+
+  if (report.missingCount > 0 || report.partialCount > 0) process.exitCode = 1;
+}
+
 export async function audit(argv: string[]): Promise<void> {
   const args = parseArgv(argv);
   if (args.help) {
@@ -265,6 +358,17 @@ export async function audit(argv: string[]): Promise<void> {
   }
 
   const cwd = path.resolve(args.cwd ?? process.cwd());
+
+  // H1.5 C — spec-mode short-circuits the LLM-driven audit path.
+  // No budget reservations, no agents, no batches: just parse spec,
+  // classify, render. Same --output semantics so callers can swap
+  // between defect-mode and gap-mode without rewiring scripts.
+  if (args.specPath) {
+    const repo = await resolveRepoSlug(cwd);
+    await runSpecAudit({ cwd, specPath: args.specPath, output: args.output, repo });
+    return;
+  }
+
   const { config } = await loadConfig(cwd);
 
   // Apply config defaults when CLI flag omitted (CLI wins over config).

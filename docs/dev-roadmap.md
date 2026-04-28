@@ -89,13 +89,14 @@ before PR before→after pairs, SYSTEM_PROMPT updated with baseline-drift guidan
 `--capture-baseline` CLI flag to save golden reference. 17 new hermetic tests
 (10 in design-baseline.test.mjs, 7 in vision-mode.test.mjs).
 
-**C. `conclave audit --spec docs/spec.md`** (spec-vs-code gap analysis).
-Audit reads a spec file (markdown bullet list of intended features) and
-reports which features are present in the codebase vs. missing vs.
-partial. CLI flag may exist; spec-aware comparison logic may need
-building. Output: a GitHub issue mode that's "feature gap" rather than
-"code defect". This is what catches "Bae planned X feature, eventbadge
-doesn't have it yet."
+**C. `conclave audit --spec docs/spec.md`** ✅ shipped 2026-04-28
+(cli@0.13.23). Hermetic deterministic classifier — no LLM call, $0
+to run. Spec markdown is parsed for bullets (any indent / `-`*`+`),
+each feature is classified PRESENT / PARTIAL / MISSING by keyword
+overlap against the codebase (path matches weighted ×3). Output:
+stdout / `--output issue` (creates a "Conclave Spec Gap" GitHub issue
+with checklist of missing/partial features) / both / json. 7 new
+hermetic tests in audit.test.mjs.
 
 Acceptance criteria: all three run on eventbadge end-to-end, output
 reads as "this is what I'd expect a senior reviewer to flag", Bae

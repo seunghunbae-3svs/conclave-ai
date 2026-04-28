@@ -18,6 +18,13 @@ import {
   renderAuditIssueBody,
 } from "../dist/lib/audit-output.js";
 import { HARD_BUDGET_CEILING_USD } from "../dist/commands/audit.js";
+import {
+  parseSpecMarkdown,
+  classifySpecFeature,
+  buildSpecReport,
+  renderSpecStdout,
+  renderSpecIssueBody,
+} from "../dist/lib/audit-spec.js";
 
 // ─── helpers ─────────────────────────────────────────────────────────
 
@@ -495,4 +502,89 @@ test("audit-aggregate: unknown file path falls back to inferred subsystem", () =
   const findings = aggregateFindings(perBatch, new Map());
   assert.equal(findings.length, 1);
   assert.equal(findings[0].subsystem, "ui", "tsx should infer subsystem=ui");
+});
+
+// ─── audit-spec (H1.5 C) ─────────────────────────────────────────────
+
+test("audit-spec parseSpecMarkdown: extracts bullets, ignores headings/blank/prose", () => {
+  const md = `# Project Spec
+
+Some intro prose that should be ignored.
+
+- Feature A: user authentication with email
+* Feature B: dashboard with metrics
++ Feature C: invoice export to PDF
+  - Nested feature D
+plain non-bullet line
+`;
+  const features = parseSpecMarkdown(md);
+  assert.equal(features.length, 4, "should pick up 3 top-level + 1 nested bullet");
+  assert.match(features[0].title, /authentication/i);
+  assert.ok(features[0].keywords.includes("authentication"), "keyword extraction works");
+  assert.ok(!features[0].keywords.includes("with"), "stop-words filtered");
+});
+
+test("audit-spec parseSpecMarkdown: empty input yields empty list", () => {
+  assert.deepEqual(parseSpecMarkdown(""), []);
+  assert.deepEqual(parseSpecMarkdown("# only a heading\n\n\n"), []);
+});
+
+test("audit-spec classifySpecFeature: zero hits → MISSING", () => {
+  const feature = parseSpecMarkdown("- payment gateway integration with Stripe")[0];
+  const r = classifySpecFeature(feature, [
+    { path: "src/login.ts", content: "export function login() {}" },
+  ]);
+  assert.equal(r.status, "MISSING");
+  assert.equal(r.hits, 0);
+});
+
+test("audit-spec classifySpecFeature: many hits across files → PRESENT", () => {
+  const feature = parseSpecMarkdown("- user authentication with login flow")[0];
+  const r = classifySpecFeature(feature, [
+    { path: "src/auth/login.ts", content: "export function login() { return authenticate(); }" },
+    { path: "src/auth/session.ts", content: "import { login } from './login'; // authentication" },
+    { path: "test/auth.test.ts", content: "test('authentication login works', () => {})" },
+  ]);
+  assert.equal(r.status, "PRESENT");
+  assert.ok(r.hits >= 6, `expected ≥6 hits across path+content, got ${r.hits}`);
+  assert.ok(r.matchedFiles.length >= 2);
+});
+
+test("audit-spec classifySpecFeature: thin signal → PARTIAL", () => {
+  const feature = parseSpecMarkdown("- billing analytics dashboard")[0];
+  const r = classifySpecFeature(feature, [
+    { path: "src/main.ts", content: "// TODO: add billing later" },
+  ]);
+  assert.equal(r.status, "PARTIAL", "single weak hit should be partial, not missing");
+  assert.ok(r.hits > 0);
+});
+
+test("audit-spec renderSpecIssueBody: contains all three sections + counts", () => {
+  const features = parseSpecMarkdown("- auth login\n- dashboard\n- payments");
+  const classifications = [
+    classifySpecFeature(features[0], [
+      { path: "src/auth/login.ts", content: "function login() {} // auth" },
+      { path: "src/auth/session.ts", content: "// auth login session" },
+    ]),
+    classifySpecFeature(features[1], [{ path: "src/dashboard.ts", content: "// dashboard" }]),
+    classifySpecFeature(features[2], []),
+  ];
+  const report = buildSpecReport("docs/spec.md", classifications);
+  const body = renderSpecIssueBody(report);
+  assert.match(body, /## Spec vs Code Gap Analysis/);
+  assert.match(body, /### Missing/);
+  assert.match(body, /### Partial/);
+  assert.match(body, /### Present/);
+  assert.match(body, /3 features/);
+  assert.match(body, /docs\/spec\.md/);
+});
+
+test("audit-spec renderSpecStdout: shows per-feature status + summary line", () => {
+  const features = parseSpecMarkdown("- feature one alpha\n- feature two beta");
+  const classifications = features.map((f) => classifySpecFeature(f, []));
+  const report = buildSpecReport("spec.md", classifications);
+  const out = renderSpecStdout(report);
+  assert.match(out, /Spec gap analysis/);
+  assert.match(out, /2 features/);
+  assert.match(out, /\[MISSING\]/);
 });
