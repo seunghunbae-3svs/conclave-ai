@@ -132,9 +132,17 @@ wired live.
    reject. Wired into review.ts; config knobs `memory.activeFailureGate`
    (default true) + `memory.activeFailureGateMinOverlap` (default 2).
    11 hermetic tests.
-8. **Per-repo blocker-vs-nit calibration.** When user clicks ✅ on a
-   REWORK verdict (overriding) → that category's threshold drops for
-   this repo. Adaptive.
+8. **Per-repo blocker-vs-nit calibration.** ✅ shipped 2026-04-28
+   (commit 94222a7, manual dev). OutcomeWriter detects overrides
+   (merge that lands on a rework/reject verdict) and auto-records one
+   calibration entry per blocker category in
+   `.conclave/calibration/{domain}/{repo}.json`. Step-function thresholds
+   on the failure-gate side: 0–1 overrides untouched, 2 demote one
+   severity step (blocker→major, major→minor, minor→skip), 3+ skip
+   entirely. Sticky verdict logic now treats "minor" as informational
+   only, so demoted stickies stop blocking merges over time. Nits
+   excluded from counting; same-category dedup across agents in one
+   merge. 17 new hermetic tests.
 9. **Diff splitter** — >500-line diffs auto-split into logical chunks,
    chunk-by-chunk review, integrated verdict.
 10. **Agent score routing** (decision #19, partially shipped via
