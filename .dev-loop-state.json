@@ -1,8 +1,8 @@
 {
   "version": 1,
-  "currentItem": "H1.5 C",
-  "lastShipped": "H1.5 B",
-  "lastShippedAt": "2026-04-27T08:19:31Z",
+  "currentItem": "H2 #6",
+  "lastShipped": "H1.5 C",
+  "lastShippedAt": "2026-04-28T00:00:00Z",
   "consecutiveFailures": 0,
   "totalSpentUsdToday": 0,
   "lastSpendResetDate": "2026-04-27T08:06:01.117Z",
@@ -48,6 +48,12 @@
       "version": "cli@0.13.22",
       "commit": "eb84fbf2b20001d1afb4ecd87cf1933a26c0d07e",
       "note": "shipped by dev-loop run #24983649832 (commit eb84fbf, design-baseline + visual review); orchestrator marked shipped:false because DEVLOOP_RESULT line missing from stdout, then 5 subsequent retry runs all crashed (claude exited null) on the same item. Manually reconciled 2026-04-28; root cause of the null exit pattern to be investigated before tonight's session."
+    },
+    {
+      "item": "H1.5 C",
+      "shippedAt": "2026-04-28T00:00Z",
+      "version": "cli@0.13.24",
+      "note": "manual dev — no LLM, hermetic spec-vs-code classifier"
     }
   ]
 }
