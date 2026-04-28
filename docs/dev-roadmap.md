@@ -210,8 +210,17 @@ H2 has to be live first or this just feeds noise.
     hermetic tests (8 extractor/renderer + 5 cache-prefix).
     Deterministic text synthesis only — LLM-driven self-tuning is a
     follow-up.
-14. **Federated baseline live.** Code already in `core/federated-*`
-    for k-anonymous baseline exchange. Flip the opt-in switch.
+14. **Federated baseline live.** ✅ shipped 2026-04-28 (commit
+    7904804, manual dev). New `federated.autoPush` config flag
+    (default false). When enabled alongside `federated.enabled` +
+    `federated.endpoint`, every `conclave record-outcome` event
+    auto-pushes the deltas the classifier just wrote — answer-keys
+    + failures — through the existing HttpFederatedSyncTransport.
+    Pulls stay on the explicit `conclave sync` path so latency
+    doesn't land on every merge. autoPushOutcome helper hard-skips
+    with a reason on every misconfig path; transport throws are
+    caught and surfaced via the result's error field, never
+    propagated. 8 new hermetic tests.
 15. **Regression-detection meta-loop.** "Yesterday we caught
     console.log. Today we didn't." → automated agent re-eval + alert.
 

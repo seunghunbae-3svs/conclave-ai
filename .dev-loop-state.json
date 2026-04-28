@@ -1,8 +1,8 @@
 {
   "version": 1,
-  "currentItem": "H3 #14",
-  "lastShipped": "H3 #13",
-  "lastShippedAt": "2026-04-28T20:20:00Z",
+  "currentItem": "H3 #15",
+  "lastShipped": "H3 #14",
+  "lastShippedAt": "2026-04-28T20:45:00Z",
   "consecutiveFailures": 0,
   "totalSpentUsdToday": 0,
   "lastSpendResetDate": "2026-04-27T08:06:01.117Z",
@@ -108,6 +108,12 @@
       "shippedAt": "2026-04-28T20:20Z",
       "commit": "8fe896f",
       "note": "manual dev — worker prompt auto-tunes from past bails (extractPriorBailHints + cache-prefix section); 13 new tests"
+    },
+    {
+      "item": "H3 #14",
+      "shippedAt": "2026-04-28T20:45Z",
+      "commit": "7904804",
+      "note": "manual dev — federation auto-push on record-outcome (autoPushOutcome helper + record-outcome wiring); 8 new tests"
     }
   ]
 }
