@@ -120,9 +120,18 @@ wired live.
    automatically. EpisodicEntry gains cycleNumber + priorEpisodicId;
    AnswerKey gains removedBlockers; classifier walks the chain on merge.
    13 new hermetic tests.
-7. **failure-catalog active gating.** Rejected-PR patterns become
-   sticky blockers in subsequent reviews. Same mistake never sneaks
-   past twice.
+7. **failure-catalog active gating.** ✅ shipped 2026-04-28 (commit
+   18ccb64, manual dev). `applyFailureGate(outcome, retrieved, ctx)`
+   runs deterministically after `council.deliberate` — tokenizes each
+   retrieved failure entry's title+body+tags, matches against the
+   diff's added-line tokens (≥2 overlap, length ≥4, stopword-filtered,
+   hyphens split), and injects a sticky Blocker via a synthetic
+   `failure-gate` agent for any match the council didn't already
+   cover (same category + same file). Verdict escalates:
+   blocker→reject, major/minor→rework, never downgrades a council
+   reject. Wired into review.ts; config knobs `memory.activeFailureGate`
+   (default true) + `memory.activeFailureGateMinOverlap` (default 2).
+   11 hermetic tests.
 8. **Per-repo blocker-vs-nit calibration.** When user clicks ✅ on a
    REWORK verdict (overriding) → that category's threshold drops for
    this repo. Adaptive.
