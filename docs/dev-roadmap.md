@@ -197,8 +197,19 @@ H2 has to be live first or this just feeds noise.
     `mapCategory` exposed as a public export. (Active "pre-apply
     dedupe" — automatic workaround application — remains a
     follow-up; this ship is the WRITE side.)
-13. **Worker prompt auto-tuning.** Recurring autofix failures feed a
-    prompt-iteration loop instead of needing manual prompt edits.
+13. **Worker prompt auto-tuning.** ✅ shipped 2026-04-28 (commit
+    8fe896f, manual dev). At autofix start the CLI retrieves
+    `rework-loop-failure` entries (written by H3 #12) and synthesizes
+    one short hint line per entry via `extractPriorBailHints`.
+    WorkerContext.priorBailHints carries the lines;
+    buildCacheablePrefix splices them into a dedicated "Past worker
+    bails — avoid these failure modes" section in the cache prefix
+    (own block so prompt-cache hits stay intact). Retrieval query
+    seeded with the first remaining blocker's (category, message) so
+    hints surface only when run shape resembles past bails. 13 new
+    hermetic tests (8 extractor/renderer + 5 cache-prefix).
+    Deterministic text synthesis only — LLM-driven self-tuning is a
+    follow-up.
 14. **Federated baseline live.** Code already in `core/federated-*`
     for k-anonymous baseline exchange. Flip the opt-in switch.
 15. **Regression-detection meta-loop.** "Yesterday we caught
