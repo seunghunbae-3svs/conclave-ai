@@ -59,7 +59,22 @@ export interface MemoryStore {
  */
 export function formatAnswerKeyForPrompt(k: AnswerKey): string {
   const tags = k.tags.length > 0 ? ` [${k.tags.join(", ")}]` : "";
-  return `(${k.domain}/${k.pattern})${tags} — ${k.lesson}`;
+  const head = `(${k.domain}/${k.pattern})${tags} — ${k.lesson}`;
+  // H2 #6 — surface up to 3 removed-blocker examples verbatim so the
+  // next council can pattern-match on the same words ("console.log",
+  // "missing tests", etc.) instead of leaning on category labels alone.
+  if (k.removedBlockers && k.removedBlockers.length > 0) {
+    const examples = k.removedBlockers
+      .slice(0, 3)
+      .map((b) => `${b.category}: ${truncateExample(b.message, 100)}`)
+      .join(" / ");
+    return `${head}\n  Resolved before merge — ${examples}`;
+  }
+  return head;
+}
+
+function truncateExample(s: string, max: number): string {
+  return s.length <= max ? s : s.slice(0, max - 1) + "…";
 }
 
 export function formatFailureForPrompt(f: FailureEntry): string {

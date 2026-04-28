@@ -152,3 +152,124 @@ test("classify: ids are stable for the same input", () => {
   const b = c.classify(ep, "rejected");
   assert.equal(a.failures[0].id, b.failures[0].id);
 });
+
+// H2 #6 — removed-blocker extraction on merge with priors
+
+test("classify merged with priors: extracts removed-blocker from earlier cycle", () => {
+  const c = new RuleBasedClassifier();
+  const cycle1 = mkEpisodic(
+    [
+      {
+        agent: "claude",
+        verdict: "rework",
+        blockers: [
+          { severity: "major", category: "debug-noise", message: "console.log debug call left in compressImage" },
+        ],
+        summary: "1 blocker",
+      },
+    ],
+    { id: "ep-cycle-1", cycleNumber: 1, councilVerdict: "rework", outcome: "reworked" },
+  );
+  const cycle2 = mkEpisodic(
+    [{ agent: "claude", verdict: "approve", blockers: [], summary: "LGTM after rework" }],
+    { id: "ep-cycle-2", cycleNumber: 2, priorEpisodicId: "ep-cycle-1" },
+  );
+  const out = c.classify(cycle2, "merged", [cycle1]);
+  assert.equal(out.answerKeys.length, 1);
+  const ak = out.answerKeys[0];
+  assert.equal(ak.removedBlockers.length, 1);
+  assert.equal(ak.removedBlockers[0].category, "debug-noise");
+  assert.match(ak.removedBlockers[0].message, /console\.log/);
+  // Lesson surfaces the resolved-before-merge signal.
+  assert.match(ak.lesson, /Resolved before merge/);
+  // Tags pick up the removed-blocker category.
+  assert.ok(ak.tags.includes("debug-noise"));
+});
+
+test("classify merged with priors: skips nits (low signal)", () => {
+  const c = new RuleBasedClassifier();
+  const cycle1 = mkEpisodic(
+    [
+      {
+        agent: "claude",
+        verdict: "rework",
+        blockers: [{ severity: "nit", category: "style", message: "trailing whitespace" }],
+        summary: "",
+      },
+    ],
+    { id: "ep-c1", cycleNumber: 1 },
+  );
+  const cycle2 = mkEpisodic([{ agent: "claude", verdict: "approve", blockers: [], summary: "" }], {
+    id: "ep-c2",
+    cycleNumber: 2,
+    priorEpisodicId: "ep-c1",
+  });
+  const out = c.classify(cycle2, "merged", [cycle1]);
+  assert.equal(out.answerKeys[0].removedBlockers.length, 0);
+});
+
+test("classify merged with priors: a blocker still present in the final cycle is NOT removed", () => {
+  const c = new RuleBasedClassifier();
+  const persistent = { severity: "major", category: "security", message: "hardcoded api key" };
+  const cycle1 = mkEpisodic(
+    [{ agent: "claude", verdict: "rework", blockers: [persistent], summary: "" }],
+    { id: "ep-c1", cycleNumber: 1 },
+  );
+  const cycle2 = mkEpisodic(
+    [{ agent: "claude", verdict: "rework", blockers: [persistent], summary: "" }],
+    { id: "ep-c2", cycleNumber: 2, priorEpisodicId: "ep-c1" },
+  );
+  const out = c.classify(cycle2, "merged", [cycle1]);
+  assert.equal(out.answerKeys[0].removedBlockers.length, 0);
+});
+
+test("classify merged with priors: dedupes the same removed-blocker reported by 2 agents", () => {
+  const c = new RuleBasedClassifier();
+  const sameBlocker = { severity: "major", category: "missing-test", message: "no test for new branch" };
+  const cycle1 = mkEpisodic(
+    [
+      { agent: "claude", verdict: "rework", blockers: [sameBlocker], summary: "" },
+      { agent: "openai", verdict: "rework", blockers: [sameBlocker], summary: "" },
+    ],
+    { id: "ep-c1", cycleNumber: 1 },
+  );
+  const cycle2 = mkEpisodic([{ agent: "claude", verdict: "approve", blockers: [], summary: "" }], {
+    id: "ep-c2",
+    cycleNumber: 2,
+    priorEpisodicId: "ep-c1",
+  });
+  const out = c.classify(cycle2, "merged", [cycle1]);
+  assert.equal(out.answerKeys[0].removedBlockers.length, 1);
+});
+
+test("classify merged with priors: walks multi-cycle chain (cycle 1 + 2 → merged at 3)", () => {
+  const c = new RuleBasedClassifier();
+  const c1 = mkEpisodic(
+    [{ agent: "claude", verdict: "rework", blockers: [{ severity: "major", category: "type-error", message: "ts2345" }], summary: "" }],
+    { id: "ep-c1", cycleNumber: 1 },
+  );
+  const c2 = mkEpisodic(
+    [{ agent: "claude", verdict: "rework", blockers: [{ severity: "major", category: "missing-test", message: "no test" }], summary: "" }],
+    { id: "ep-c2", cycleNumber: 2, priorEpisodicId: "ep-c1" },
+  );
+  const c3 = mkEpisodic([{ agent: "claude", verdict: "approve", blockers: [], summary: "" }], {
+    id: "ep-c3",
+    cycleNumber: 3,
+    priorEpisodicId: "ep-c2",
+  });
+  // Caller responsibility: pass priors in oldest-first order.
+  const out = c.classify(c3, "merged", [c1, c2]);
+  const cats = out.answerKeys[0].removedBlockers.map((b) => b.category).sort();
+  assert.deepEqual(cats, ["missing-test", "type-error"]);
+});
+
+test("classify merged without priors: behaves identically to legacy single-cycle path", () => {
+  const c = new RuleBasedClassifier();
+  const ep = mkEpisodic(
+    [{ agent: "claude", verdict: "approve", blockers: [], summary: "LGTM" }],
+    { id: "ep-1", cycleNumber: 1 },
+  );
+  const out = c.classify(ep, "merged", []);
+  assert.equal(out.answerKeys[0].removedBlockers.length, 0);
+  assert.doesNotMatch(out.answerKeys[0].lesson, /Resolved before merge/);
+});

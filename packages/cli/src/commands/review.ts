@@ -51,6 +51,7 @@ import { buildReviewJson, serializeReviewJson } from "../lib/review-json-output.
 import { resolveKey } from "../lib/credentials.js";
 import { runVisualCapture, type VisualCaptureResult } from "../lib/visual-capture.js";
 import { matchBaselinesToArtifacts, saveDesignBaseline } from "../lib/design-baseline.js";
+import { findPriorEpisodicId } from "../lib/episodic-chain.js";
 import type { ViewportSpec } from "@conclave-ai/visual-review";
 
 type ReviewDomainInput = "code" | "design";
@@ -774,6 +775,15 @@ export async function review(argv: string[]): Promise<void> {
   //    record-outcome` can classify it later into answer-keys / failures.
   // v0.11 — pre-generated episodicId is reused so the Telegram timeline
   //         message and the on-disk episodic entry share the same id.
+  // H2 #6 — cycleNumber is 1-indexed; --rework-cycle 0 (default) is the
+  //         first review of the PR, --rework-cycle N is the (N+1)-th.
+  //         priorEpisodicId links to the previous cycle for the same PR
+  //         so OutcomeWriter can recover removed-blockers on merge.
+  const cycleNumber = (args.reworkCycle ?? 0) + 1;
+  const priorEpisodicId =
+    cycleNumber > 1 && loaded.pullNumber
+      ? await findPriorEpisodicId(store, loaded.repo, loaded.pullNumber, cycleNumber)
+      : undefined;
   const writer = new OutcomeWriter({ store });
   const episodic = await writer.writeReview({
     ctx: reviewCtx,
@@ -781,6 +791,8 @@ export async function review(argv: string[]): Promise<void> {
     councilVerdict: outcome.verdict,
     costUsd: gate.metrics.summary().totalCostUsd,
     episodicId,
+    cycleNumber,
+    ...(priorEpisodicId ? { priorEpisodicId } : {}),
   });
 
   // v0.12.x — anchor the episodic in central plane so the autonomy

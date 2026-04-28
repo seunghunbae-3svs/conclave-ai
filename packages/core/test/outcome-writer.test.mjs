@@ -133,6 +133,98 @@ test("recordOutcome: unknown episodic id throws actionable error", async () => {
   }
 });
 
+// H2 #6 — chain walk + removed-blocker landing in answer-key
+
+test("writeReview: persists cycleNumber + priorEpisodicId fields", async () => {
+  const { store, root } = freshFs();
+  try {
+    const writer = new OutcomeWriter({ store });
+    const c1 = await writer.writeReview({
+      ctx: baseCtx,
+      reviews: [rejectReview],
+      councilVerdict: "rework",
+      costUsd: 0.01,
+      cycleNumber: 1,
+    });
+    const c2 = await writer.writeReview({
+      ctx: { ...baseCtx, newSha: "sha-c2" },
+      reviews: [approveReview],
+      councilVerdict: "approve",
+      costUsd: 0.01,
+      cycleNumber: 2,
+      priorEpisodicId: c1.id,
+    });
+    const found = await store.findEpisodic(c2.id);
+    assert.equal(found.cycleNumber, 2);
+    assert.equal(found.priorEpisodicId, c1.id);
+  } finally {
+    cleanup(root);
+  }
+});
+
+test("recordOutcome merged: walks priorEpisodicId chain + records removed-blockers", async () => {
+  const { store, root } = freshFs();
+  try {
+    const writer = new OutcomeWriter({ store });
+    const cycle1 = await writer.writeReview({
+      ctx: baseCtx,
+      reviews: [
+        {
+          agent: "claude",
+          verdict: "rework",
+          blockers: [
+            { severity: "major", category: "debug-noise", message: "console.log debug call left in compressImage" },
+          ],
+          summary: "1 blocker",
+        },
+      ],
+      councilVerdict: "rework",
+      costUsd: 0.01,
+      cycleNumber: 1,
+    });
+    // First record cycle 1 as reworked (it ships failure-catalog; orthogonal to the merge path).
+    await writer.recordOutcome({ episodicId: cycle1.id, outcome: "reworked" });
+
+    const cycle2 = await writer.writeReview({
+      ctx: { ...baseCtx, newSha: "sha-c2" },
+      reviews: [approveReview],
+      councilVerdict: "approve",
+      costUsd: 0.01,
+      cycleNumber: 2,
+      priorEpisodicId: cycle1.id,
+    });
+    const out = await writer.recordOutcome({ episodicId: cycle2.id, outcome: "merged" });
+    assert.equal(out.answerKeys.length, 1);
+    const ak = out.answerKeys[0];
+    assert.equal(ak.removedBlockers.length, 1);
+    assert.equal(ak.removedBlockers[0].category, "debug-noise");
+    assert.match(ak.removedBlockers[0].message, /console\.log/);
+    assert.match(ak.lesson, /Resolved before merge/);
+  } finally {
+    cleanup(root);
+  }
+});
+
+test("recordOutcome merged: missing prior in chain is treated as 'no further history' (no throw)", async () => {
+  const { store, root } = freshFs();
+  try {
+    const writer = new OutcomeWriter({ store });
+    const cycle2 = await writer.writeReview({
+      ctx: baseCtx,
+      reviews: [approveReview],
+      councilVerdict: "approve",
+      costUsd: 0.01,
+      cycleNumber: 2,
+      priorEpisodicId: "ep-does-not-exist",
+    });
+    const out = await writer.recordOutcome({ episodicId: cycle2.id, outcome: "merged" });
+    assert.equal(out.answerKeys.length, 1);
+    assert.equal(out.answerKeys[0].removedBlockers.length, 0);
+  } finally {
+    cleanup(root);
+  }
+});
+
 test("writeReview: caller-provided episodicId makes the write idempotent", async () => {
   const { store, root } = freshFs();
   try {

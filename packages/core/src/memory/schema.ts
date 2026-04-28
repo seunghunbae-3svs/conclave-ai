@@ -5,6 +5,12 @@ import { BlockerSchema, ReviewResultSchema } from "../schema.js";
  * EpisodicEntry — raw event log. One record per review cycle.
  * 90-day TTL per architecture. Nightly Haiku job classifies these into
  * answer-keys (on merge) + failure-catalog (on reject/rework).
+ *
+ * `cycleNumber` (1-indexed) and `priorEpisodicId` link reviews of the
+ * same PR across rework cycles. When a merge happens at cycle N, the
+ * classifier walks `priorEpisodicId` back to cycle 1 to recover blockers
+ * that were caught and fixed before merge — those become "removed
+ * blockers" on the resulting AnswerKey (H2 #6).
  */
 export const EpisodicEntrySchema = z.object({
   id: z.string().min(1),
@@ -17,6 +23,8 @@ export const EpisodicEntrySchema = z.object({
   councilVerdict: z.enum(["approve", "rework", "reject"]),
   outcome: z.enum(["merged", "rejected", "reworked", "pending"]),
   costUsd: z.number().nonnegative(),
+  cycleNumber: z.number().int().min(1).default(1),
+  priorEpisodicId: z.string().optional(),
 });
 export type EpisodicEntry = z.infer<typeof EpisodicEntrySchema>;
 
@@ -40,6 +48,24 @@ export const AnswerKeySchema = z.object({
   tags: z.array(z.string()).default([]),
   /** Optional pointer back to the episodic entry that produced this answer-key. */
   episodicId: z.string().optional(),
+  /**
+   * H2 #6 — blockers that surfaced in earlier rework cycles of this PR
+   * but were resolved before merge. Each entry tells the next council
+   * "this repo cares about <category>; here's a representative message"
+   * so retrieval can match on the same words ("console.log" → catches
+   * future console.log noise without re-learning).
+   *
+   * Default empty for legacy answer-keys + non-rework merges.
+   */
+  removedBlockers: z
+    .array(
+      z.object({
+        category: z.string().min(1),
+        severity: z.enum(["blocker", "major", "minor", "nit"]),
+        message: z.string().min(1),
+      }),
+    )
+    .default([]),
 });
 export type AnswerKey = z.infer<typeof AnswerKeySchema>;
 

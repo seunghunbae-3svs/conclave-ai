@@ -48,7 +48,14 @@ export class FileSystemMemoryStore implements MemoryStore {
       answerKeyCorpus,
       q.query,
       {
-        text: (d) => `${d.pattern}\n${d.lesson}\n${d.tags.join(" ")}`,
+        // H2 #6 — fold removed-blocker categories + messages into the
+        // searchable text so a diff containing "console.log" matches an
+        // answer-key whose previous-cycle blocker was about console.log.
+        text: (d) => {
+          const removed = d.removedBlockers ?? [];
+          const removedText = removed.map((b) => `${b.category} ${b.message}`).join("\n");
+          return `${d.pattern}\n${d.lesson}\n${d.tags.join(" ")}\n${removedText}`;
+        },
         tags: (d) => d.tags,
         repo: (d) => d.repo,
       },

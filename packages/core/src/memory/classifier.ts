@@ -10,7 +10,18 @@ export interface ClassificationOutput {
 }
 
 export interface Classifier {
-  classify(episodic: EpisodicEntry, outcome: OutcomeResult): ClassificationOutput;
+  /**
+   * `priors` carries earlier rework-cycle episodic entries for the same
+   * PR (oldest → newest, excluding `episodic` itself). RuleBasedClassifier
+   * uses them at merge time to compute "removed blockers" — categories
+   * caught earlier but absent from the final review. Optional; legacy
+   * callers pass nothing and get the original behavior.
+   */
+  classify(
+    episodic: EpisodicEntry,
+    outcome: OutcomeResult,
+    priors?: readonly EpisodicEntry[],
+  ): ClassificationOutput;
 }
 
 /**
@@ -19,8 +30,9 @@ export interface Classifier {
  *
  * Rules:
  *   - merged + all agents approved → one `AnswerKey` from the consensus
- *     summary. Pattern = `by-repo/<repo>`; tags derived from diff file
- *     extensions + blocker categories that appeared but were fixed.
+ *     summary. Pattern = `by-repo/<repo>`; tags derived from blocker
+ *     categories that appeared but were fixed (across this cycle + any
+ *     prior cycles passed in `priors`).
  *   - rejected / reworked → one `FailureEntry` per unique (category, severity)
  *     blocker seen across all agent reviews. Title from blocker.message
  *     (first sentence), body combines message + file:line context.
@@ -29,21 +41,36 @@ export interface Classifier {
  * is stable.
  */
 export class RuleBasedClassifier implements Classifier {
-  classify(episodic: EpisodicEntry, outcome: OutcomeResult): ClassificationOutput {
+  classify(
+    episodic: EpisodicEntry,
+    outcome: OutcomeResult,
+    priors: readonly EpisodicEntry[] = [],
+  ): ClassificationOutput {
     if (outcome === "merged") {
-      return { answerKeys: [this.extractAnswerKey(episodic)], failures: [] };
+      return { answerKeys: [this.extractAnswerKey(episodic, priors)], failures: [] };
     }
     return { answerKeys: [], failures: this.extractFailures(episodic) };
   }
 
-  private extractAnswerKey(episodic: EpisodicEntry): AnswerKey {
+  private extractAnswerKey(
+    episodic: EpisodicEntry,
+    priors: readonly EpisodicEntry[],
+  ): AnswerKey {
     const summaries = episodic.reviews
       .map((r) => r.summary)
       .filter((s) => s && s.trim().length > 0)
       .slice(0, 3)
       .join(" | ");
-    const lesson = summaries || `Merged without blockers — ${episodic.repo} #${episodic.pullNumber}`;
-    const tags = this.deriveTags(episodic);
+    const removedBlockers = this.extractRemovedBlockers(episodic, priors);
+    const lessonBase =
+      summaries || `Merged without blockers — ${episodic.repo} #${episodic.pullNumber}`;
+    const lesson = removedBlockers.length > 0
+      ? `${lessonBase} | Resolved before merge: ${removedBlockers
+          .slice(0, 4)
+          .map((b) => `${b.category} (${b.severity})`)
+          .join("; ")}`
+      : lessonBase;
+    const tags = this.deriveTags(episodic, removedBlockers);
     const key: AnswerKey = {
       id: `ak-${shortHash(episodic.id + ":" + episodic.sha)}`,
       createdAt: episodic.createdAt,
@@ -53,8 +80,48 @@ export class RuleBasedClassifier implements Classifier {
       tags,
       repo: episodic.repo,
       episodicId: episodic.id,
+      removedBlockers,
     };
     return key;
+  }
+
+  /**
+   * Removed-blocker = present in ANY prior cycle's reviews, absent from
+   * the final episodic's reviews. Dedup key is
+   * `category|severity|truncate(message,60)` so the same console.log
+   * blocker reported by two agents collapses to one entry.
+   *
+   * Skips nits (those aren't worth polluting future RAG). Final-cycle
+   * presence is decided by the same dedup key.
+   */
+  private extractRemovedBlockers(
+    episodic: EpisodicEntry,
+    priors: readonly EpisodicEntry[],
+  ): AnswerKey["removedBlockers"] {
+    if (priors.length === 0) return [];
+    const finalKeys = new Set<string>();
+    for (const review of episodic.reviews) {
+      for (const b of review.blockers) {
+        finalKeys.add(blockerKey(b));
+      }
+    }
+    const collected = new Map<string, AnswerKey["removedBlockers"][number]>();
+    for (const prior of priors) {
+      for (const review of prior.reviews) {
+        for (const b of review.blockers) {
+          if (b.severity === "nit") continue;
+          const k = blockerKey(b);
+          if (finalKeys.has(k)) continue;
+          if (collected.has(k)) continue;
+          collected.set(k, {
+            category: b.category,
+            severity: b.severity,
+            message: truncate(b.message, 200),
+          });
+        }
+      }
+    }
+    return [...collected.values()];
   }
 
   private extractFailures(episodic: EpisodicEntry): FailureEntry[] {
@@ -70,13 +137,21 @@ export class RuleBasedClassifier implements Classifier {
     return [...seen.values()];
   }
 
-  private deriveTags(episodic: EpisodicEntry): string[] {
+  private deriveTags(
+    episodic: EpisodicEntry,
+    removedBlockers: AnswerKey["removedBlockers"],
+  ): string[] {
     const tags = new Set<string>();
     for (const review of episodic.reviews) {
       for (const b of review.blockers) tags.add(b.category);
     }
+    for (const b of removedBlockers) tags.add(b.category);
     return [...tags];
   }
+}
+
+function blockerKey(b: { category: string; severity: string; message: string }): string {
+  return `${b.category}|${b.severity}|${truncate(b.message, 60)}`;
 }
 
 function toFailureEntry(blocker: Blocker, episodic: EpisodicEntry): FailureEntry {

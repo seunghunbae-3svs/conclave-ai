@@ -177,3 +177,41 @@ test("FileSystemMemoryStore: retrieve k defaults to 8", async () => {
     cleanup(root);
   }
 });
+
+// H2 #6 — retrieval matches answer-keys via removed-blocker tokens
+// (e.g. a future PR mentioning "console.log" finds the answer-key whose
+//  earlier cycle had a console.log blocker, even when lesson/pattern
+//  contain none of those words).
+test("FileSystemMemoryStore: retrieve matches via removedBlockers text", async () => {
+  const { store, root } = freshStore();
+  try {
+    await store.writeAnswerKey({
+      id: "ak-without-removed",
+      createdAt: now(),
+      domain: "code",
+      pattern: "by-repo/acme/quiet",
+      lesson: "merged without blockers — generic outcome",
+      tags: [],
+    });
+    await store.writeAnswerKey({
+      id: "ak-with-removed",
+      createdAt: now(),
+      domain: "code",
+      pattern: "by-repo/acme/app",
+      lesson: "Resolved before merge: debug-noise (major)",
+      tags: ["debug-noise"],
+      removedBlockers: [
+        {
+          category: "debug-noise",
+          severity: "major",
+          message: "console.log debug call left in compressImage",
+        },
+      ],
+    });
+    const r = await store.retrieve({ query: "frontend image upload console.log compressor" });
+    const ids = r.answerKeys.map((k) => k.id);
+    assert.equal(ids[0], "ak-with-removed", `expected removed-blocker match first, got order ${JSON.stringify(ids)}`);
+  } finally {
+    cleanup(root);
+  }
+});

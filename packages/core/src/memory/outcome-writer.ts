@@ -11,6 +11,17 @@ export interface WriteReviewInput {
   costUsd: number;
   /** Provide a stable id to make the write idempotent (re-runs update instead of dup). Defaults to a UUID. */
   episodicId?: string;
+  /**
+   * H2 #6 — 1-indexed rework cycle number. Cycle 1 is the first review;
+   * cycle 2 the first auto-rework, etc. Defaults to 1 for legacy callers.
+   */
+  cycleNumber?: number;
+  /**
+   * H2 #6 — id of the episodic entry from the previous cycle of THIS PR.
+   * Lets `recordOutcome` walk back across rework cycles to compute the
+   * "removed blockers" signal that lands in the merged AnswerKey.
+   */
+  priorEpisodicId?: string;
 }
 
 export interface RecordOutcomeInput {
@@ -61,6 +72,8 @@ export class OutcomeWriter {
       councilVerdict: input.councilVerdict,
       outcome: "pending",
       costUsd: input.costUsd,
+      cycleNumber: input.cycleNumber ?? 1,
+      ...(input.priorEpisodicId ? { priorEpisodicId: input.priorEpisodicId } : {}),
     };
     await this.store.writeEpisodic(entry);
     this.episodicIndex.set(id, entry);
@@ -76,10 +89,39 @@ export class OutcomeWriter {
     await this.store.writeEpisodic(updated);
     this.episodicIndex.set(input.episodicId, updated);
 
-    const classification = this.classifier.classify(updated, input.outcome);
+    // H2 #6 — walk priorEpisodicId chain to recover earlier-cycle reviews.
+    // Only relevant for "merged" outcomes (the answer-key path); skipped
+    // for reject/rework since they don't read priors today.
+    const priors =
+      input.outcome === "merged" ? await this.collectPriors(updated) : [];
+    const classification = this.classifier.classify(updated, input.outcome, priors);
     for (const key of classification.answerKeys) await this.store.writeAnswerKey(key);
     for (const entry of classification.failures) await this.store.writeFailure(entry);
     return classification;
+  }
+
+  /**
+   * Walk back through `priorEpisodicId` links and return the chain in
+   * oldest-first order. Stops at the first missing link (defensive — a
+   * deleted prior is treated as "no further history" rather than an
+   * error). Bounded to 10 hops to prevent runaway loops if a malformed
+   * chain ever forms.
+   */
+  private async collectPriors(start: EpisodicEntry): Promise<EpisodicEntry[]> {
+    const chain: EpisodicEntry[] = [];
+    let cursor: string | undefined = start.priorEpisodicId;
+    const seen = new Set<string>([start.id]);
+    let hops = 0;
+    while (cursor && hops < 10) {
+      if (seen.has(cursor)) break;
+      seen.add(cursor);
+      const prior = await this.store.findEpisodic(cursor);
+      if (!prior) break;
+      chain.push(prior);
+      cursor = prior.priorEpisodicId;
+      hops += 1;
+    }
+    return chain.reverse();
   }
 
   private async loadEpisodicFromDisk(id: string): Promise<EpisodicEntry | null> {
