@@ -143,8 +143,16 @@ wired live.
    only, so demoted stickies stop blocking merges over time. Nits
    excluded from counting; same-category dedup across agents in one
    merge. 17 new hermetic tests.
-9. **Diff splitter** — >500-line diffs auto-split into logical chunks,
-   chunk-by-chunk review, integrated verdict.
+9. **Diff splitter** ✅ shipped 2026-04-28 (commit 0903777, manual
+   dev). PRs over 500 changed lines bin-pack their per-file `diff --git`
+   blocks into chunks (≤500 lines each, ≤20 files each by default),
+   run council per chunk, integrate verdicts. `splitDiff` never breaks
+   a single file mid-diff — oversize files become their own chunk.
+   `integrateChunkOutcomes` merges per agent (blockers concatenated
+   + deduped, verdict severity-max, summaries joined, tokens/cost
+   summed). Config: `efficiency.diffSplitter` /
+   `diffSplitterMaxLines` / `diffSplitterMaxFilesPerChunk`. 15 new
+   hermetic tests.
 10. **Agent score routing** (decision #19, partially shipped via
     `conclave scores`). Vote weights from past accuracy.
 
