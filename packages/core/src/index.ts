@@ -133,6 +133,8 @@ export {
   writeReworkLoopFailure,
   extractPriorBailHints,
   renderPriorBailHintsSection,
+  detectCatchRegressions,
+  writeCatchRegression,
 } from "./memory/index.js";
 export type {
   AnswerKey,
@@ -165,6 +167,10 @@ export type {
   ReworkLoopFailureOutput,
   ExtractPriorBailHintsOptions,
   PriorBailHint,
+  DetectCatchRegressionsInput,
+  DetectCatchRegressionsOptions,
+  CatchRegression,
+  WriteCatchRegressionInput,
 } from "./memory/index.js";
 
 // Federated sync (decision #21) — redact answer-keys + failures to the

@@ -56,6 +56,14 @@ export type {
   PriorBailHint,
 } from "./prior-bail-hints.js";
 
+export { detectCatchRegressions, writeCatchRegression } from "./catch-regression.js";
+export type {
+  DetectCatchRegressionsInput,
+  DetectCatchRegressionsOptions,
+  CatchRegression,
+  WriteCatchRegressionInput,
+} from "./catch-regression.js";
+
 export { RuleBasedClassifier, newEpisodicId } from "./classifier.js";
 export type { Classifier, ClassificationOutput, OutcomeResult } from "./classifier.js";
 

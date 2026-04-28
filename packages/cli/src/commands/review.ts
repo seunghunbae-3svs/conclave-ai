@@ -14,12 +14,14 @@ import {
   buildFrequencyMap,
   computeAllAgentScores,
   deriveAgentWeights,
+  detectCatchRegressions,
   formatAnswerKeyForPrompt,
   formatFailureForPrompt,
   generatePlainSummary,
   integrateChunkOutcomes,
   newEpisodicId,
   splitDiff,
+  writeCatchRegression,
   type CouncilOutcome,
   type FailureGateResult,
   type Agent,
@@ -875,6 +877,50 @@ export async function review(argv: string[]): Promise<void> {
           .map((s) => `${s.category}@${s.overrideCount}x`)
           .join(", ")})\n`,
     );
+  }
+
+  // H3 #15 — regression-detection meta-loop. Run a relaxed-overlap
+  // scan over the same retrieval the gate used; anything matching at
+  // the lower bar that neither council nor gate raised counts as a
+  // "catch regression". Each one becomes a meta failure-catalog entry
+  // tagged 'catch-regression' so retrieval surfaces it next time.
+  // Best-effort: detection or write failures never kill the review.
+  if (gateEnabled && retrieval.failures.length > 0) {
+    try {
+      const regressions = detectCatchRegressions({
+        outcome,
+        ctx: { diff: reviewCtx.diff },
+        retrievedFailures: retrieval.failures,
+      });
+      if (regressions.length > 0) {
+        const contextLabel = loaded.pullNumber
+          ? `${loaded.repo}#${loaded.pullNumber}`
+          : `${loaded.repo}@${loaded.newSha.slice(0, 8)}`;
+        process.stderr.write(
+          `conclave review: ⚠️ catch-regression alert — ${regressions.length} catalog pattern(s) matched ` +
+            `${contextLabel} but neither council nor gate raised them: ${regressions
+              .map((r) => r.category)
+              .join(", ")}\n`,
+        );
+        for (const r of regressions) {
+          try {
+            await writeCatchRegression(store, {
+              contextLabel,
+              regression: r,
+              episodicId,
+            });
+          } catch (writeErr) {
+            process.stderr.write(
+              `conclave review: catch-regression write for ${r.failureId} failed — ${(writeErr as Error).message}\n`,
+            );
+          }
+        }
+      }
+    } catch (err) {
+      process.stderr.write(
+        `conclave review: catch-regression detection failed (non-fatal) — ${(err as Error).message}\n`,
+      );
+    }
   }
 
   // 6. Persist the episodic entry (outcome: "pending") so `conclave
