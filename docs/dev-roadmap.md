@@ -183,9 +183,20 @@ H2 has to be live first or this just feeds noise.
     or file match) and emits per-pair answer-keys with pattern
     `autofix-solution/<category>`. 10 new hermetic tests
     (4 classifier + 6 sidecar).
-12. **Rework-loop failure → failure-catalog.** "fuzzy dedupe missed →
-    stall" becomes a stored pattern; subsequent verdicts of similar
-    shape pre-apply the dedupe.
+12. **Rework-loop failure → failure-catalog.** ✅ shipped 2026-04-28
+    (commit 6526b59, manual dev). When autofix bails (no-patches,
+    max-iterations, budget, build-failed, tests-failed, etc.),
+    `writeReworkLoopFailure(store, input)` persists a FailureEntry
+    tagged `rework-loop-failure` + the bail status + every
+    distinct blocker category. The H2 #7 active gate surfaces
+    these as sticky blockers on subsequent reviews whose diff
+    tokens overlap. Stable id keyed on (bailStatus, seed.category,
+    seed.message[:60]) so re-runs don't spawn duplicates.
+    autofix.ts hooks the writer right before the final return
+    when status starts with `bailed-`. 7 new hermetic tests.
+    `mapCategory` exposed as a public export. (Active "pre-apply
+    dedupe" — automatic workaround application — remains a
+    follow-up; this ship is the WRITE side.)
 13. **Worker prompt auto-tuning.** Recurring autofix failures feed a
     prompt-iteration loop instead of needing manual prompt edits.
 14. **Federated baseline live.** Code already in `core/federated-*`
