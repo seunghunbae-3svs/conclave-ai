@@ -111,9 +111,15 @@ Foundation already exists in `core/memory/` (answer-keys +
 failure-catalog seeds shipped, federated-* code present). Just not
 wired live.
 
-6. **answer-keys live retrieval.** Merged PR (diff, removed-blockers) →
-   embedding → injected as RAG context into next council. "This repo
-   flags console.log" learned automatically.
+6. **answer-keys live retrieval.** ✅ shipped 2026-04-28 (commit 6c90ef8,
+   manual dev). Merged PR's pre-merge "removed blockers" (categories
+   caught in earlier rework cycles, resolved before merge) land on the
+   AnswerKey. Future councils retrieve them via the same BM25 path —
+   matching on the original blocker words ("console.log", "missing
+   test"), not just category labels — so "this repo flags X" is learned
+   automatically. EpisodicEntry gains cycleNumber + priorEpisodicId;
+   AnswerKey gains removedBlockers; classifier walks the chain on merge.
+   13 new hermetic tests.
 7. **failure-catalog active gating.** Rejected-PR patterns become
    sticky blockers in subsequent reviews. Same mistake never sneaks
    past twice.
