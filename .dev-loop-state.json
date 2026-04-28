@@ -1,8 +1,8 @@
 {
   "version": 1,
-  "currentItem": "H3 #15",
-  "lastShipped": "H3 #14",
-  "lastShippedAt": "2026-04-28T20:45:00Z",
+  "currentItem": "H4 #16",
+  "lastShipped": "H3 #15",
+  "lastShippedAt": "2026-04-28T21:10:00Z",
   "consecutiveFailures": 0,
   "totalSpentUsdToday": 0,
   "lastSpendResetDate": "2026-04-27T08:06:01.117Z",
@@ -114,6 +114,12 @@
       "shippedAt": "2026-04-28T20:45Z",
       "commit": "7904804",
       "note": "manual dev — federation auto-push on record-outcome (autoPushOutcome helper + record-outcome wiring); 8 new tests"
+    },
+    {
+      "item": "H3 #15",
+      "shippedAt": "2026-04-28T21:10Z",
+      "commit": "ead2210",
+      "note": "manual dev — catch-regression detector + meta-loop alerts (detectCatchRegressions + writeCatchRegression + review wiring); 10 new tests. H3 complete!"
     }
   ]
 }

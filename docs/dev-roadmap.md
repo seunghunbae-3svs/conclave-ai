@@ -221,8 +221,18 @@ H2 has to be live first or this just feeds noise.
     with a reason on every misconfig path; transport throws are
     caught and surfaced via the result's error field, never
     propagated. 8 new hermetic tests.
-15. **Regression-detection meta-loop.** "Yesterday we caught
-    console.log. Today we didn't." → automated agent re-eval + alert.
+15. **Regression-detection meta-loop.** ✅ shipped 2026-04-28
+    (commit ead2210, manual dev). After the H2 #7 active gate runs,
+    a relaxed-overlap scan re-checks retrieved failures against the
+    diff at minTokenOverlap=1 (vs the gate's default 2). Any catalog
+    pattern matching at the lower bar that neither council nor gate
+    raised counts as a catch regression. detectCatchRegressions
+    filters meta-tagged entries (so it doesn't recurse on its own
+    output), dedupes by (category, title[:60]), caps at 5.
+    writeCatchRegression persists each detection as a FailureEntry
+    tagged 'catch-regression' so the next retrieval surfaces it.
+    review.ts emits a stderr ⚠️ alert and writes one entry per
+    detection, both best-effort. 10 new hermetic tests.
 
 ---
 
