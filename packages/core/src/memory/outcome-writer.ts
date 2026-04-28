@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import type { EpisodicEntry, AnswerKey, FailureEntry } from "./schema.js";
+import type { EpisodicEntry, AnswerKey, FailureEntry, SolutionPatch } from "./schema.js";
 import type { MemoryStore } from "./store.js";
 import type { CalibrationStore } from "./calibration-store.js";
 import { RuleBasedClassifier, newEpisodicId, type Classifier, type OutcomeResult } from "./classifier.js";
@@ -23,6 +23,12 @@ export interface WriteReviewInput {
    * "removed blockers" signal that lands in the merged AnswerKey.
    */
   priorEpisodicId?: string;
+  /**
+   * H3 #11 — autofix worker patches applied between the prior cycle and
+   * this one. Captured by the CLI from the autofix sidecar so the
+   * merge-time classifier can promote merged solutions to answer-keys.
+   */
+  solutionPatches?: readonly SolutionPatch[];
 }
 
 export interface RecordOutcomeInput {
@@ -87,6 +93,7 @@ export class OutcomeWriter {
       costUsd: input.costUsd,
       cycleNumber: input.cycleNumber ?? 1,
       ...(input.priorEpisodicId ? { priorEpisodicId: input.priorEpisodicId } : {}),
+      solutionPatches: input.solutionPatches ? [...input.solutionPatches] : [],
     };
     await this.store.writeEpisodic(entry);
     this.episodicIndex.set(id, entry);

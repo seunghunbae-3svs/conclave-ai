@@ -273,3 +273,176 @@ test("classify merged without priors: behaves identically to legacy single-cycle
   assert.equal(out.answerKeys[0].removedBlockers.length, 0);
   assert.doesNotMatch(out.answerKeys[0].lesson, /Resolved before merge/);
 });
+
+// H3 #11 — solution-patch promotion on merge
+
+const sampleHunk = [
+  "diff --git a/x.js b/x.js",
+  "--- a/x.js",
+  "+++ b/x.js",
+  "@@ -1,2 +1,1 @@",
+  " const x = 1;",
+  "-console.log('debug');",
+].join("\n");
+
+test("classify merged with priors carrying solutionPatches: emits per-pair answer-keys", () => {
+  const c = new RuleBasedClassifier();
+  const cycle1 = mkEpisodic(
+    [
+      {
+        agent: "claude",
+        verdict: "rework",
+        blockers: [
+          { severity: "major", category: "debug-noise", message: "console.log left in compressImage" },
+        ],
+        summary: "1 blocker",
+      },
+    ],
+    { id: "ep-c1", cycleNumber: 1 },
+  );
+  // Cycle 2 carries the worker's applied patch as solutionPatches.
+  const cycle2 = mkEpisodic(
+    [{ agent: "claude", verdict: "approve", blockers: [], summary: "LGTM after rework" }],
+    {
+      id: "ep-c2",
+      cycleNumber: 2,
+      priorEpisodicId: "ep-c1",
+      solutionPatches: [
+        {
+          blockerCategory: "debug-noise",
+          blockerMessage: "console.log left in compressImage",
+          blockerFile: "src/x.js",
+          hunk: sampleHunk,
+          agent: "claude",
+        },
+      ],
+    },
+  );
+  const out = c.classify(cycle2, "merged", [cycle1]);
+  assert.equal(out.answerKeys.length, 2); // aggregate + per-pair
+  const solnKey = out.answerKeys.find((k) => k.pattern.startsWith("autofix-solution/"));
+  assert.ok(solnKey, "expected autofix-solution answer-key");
+  assert.equal(solnKey.solutionPatch.hunk, sampleHunk);
+  assert.equal(solnKey.solutionPatch.blockerCategory, "debug-noise");
+  assert.match(solnKey.lesson, /Worker.*resolved.*debug-noise/);
+});
+
+test("classify merged: solutionPatch with no matching removed-blocker → not emitted", () => {
+  const c = new RuleBasedClassifier();
+  const cycle1 = mkEpisodic(
+    [{ agent: "claude", verdict: "approve", blockers: [], summary: "" }],
+    { id: "ep-c1", cycleNumber: 1 },
+  );
+  const cycle2 = mkEpisodic(
+    [{ agent: "claude", verdict: "approve", blockers: [], summary: "" }],
+    {
+      id: "ep-c2",
+      cycleNumber: 2,
+      priorEpisodicId: "ep-c1",
+      solutionPatches: [
+        {
+          blockerCategory: "different-category",
+          blockerMessage: "no matching removed-blocker exists",
+          hunk: sampleHunk,
+          agent: "claude",
+        },
+      ],
+    },
+  );
+  const out = c.classify(cycle2, "merged", [cycle1]);
+  // No removed blockers (priors had no blockers) → no autofix-solution key.
+  assert.equal(out.answerKeys.length, 1);
+  assert.equal(out.answerKeys[0].pattern, "by-repo/acme/app");
+});
+
+test("classify merged: dedupes same-(category, message) solutionPatch across multiple priors", () => {
+  const c = new RuleBasedClassifier();
+  const cycle1 = mkEpisodic(
+    [
+      {
+        agent: "claude",
+        verdict: "rework",
+        blockers: [{ severity: "major", category: "debug-noise", message: "console.log A" }],
+        summary: "",
+      },
+    ],
+    { id: "ep-c1", cycleNumber: 1 },
+  );
+  const cycle2 = mkEpisodic(
+    [
+      {
+        agent: "claude",
+        verdict: "rework",
+        blockers: [{ severity: "major", category: "debug-noise", message: "console.log A" }],
+        summary: "",
+      },
+    ],
+    {
+      id: "ep-c2",
+      cycleNumber: 2,
+      priorEpisodicId: "ep-c1",
+      // Same patch across cycles — should collapse.
+      solutionPatches: [
+        {
+          blockerCategory: "debug-noise",
+          blockerMessage: "console.log A",
+          hunk: sampleHunk,
+          agent: "claude",
+        },
+      ],
+    },
+  );
+  const cycle3 = mkEpisodic(
+    [{ agent: "claude", verdict: "approve", blockers: [], summary: "" }],
+    {
+      id: "ep-c3",
+      cycleNumber: 3,
+      priorEpisodicId: "ep-c2",
+      solutionPatches: [
+        {
+          blockerCategory: "debug-noise",
+          blockerMessage: "console.log A",
+          hunk: sampleHunk,
+          agent: "claude",
+        },
+      ],
+    },
+  );
+  const out = c.classify(cycle3, "merged", [cycle1, cycle2]);
+  const solnKeys = out.answerKeys.filter((k) => k.pattern.startsWith("autofix-solution/"));
+  assert.equal(solnKeys.length, 1, `expected 1 deduped solution key, got ${solnKeys.length}`);
+});
+
+test("classify merged: matchPatchToRemoved requires same category", () => {
+  const c = new RuleBasedClassifier();
+  const cycle1 = mkEpisodic(
+    [
+      {
+        agent: "claude",
+        verdict: "rework",
+        blockers: [{ severity: "major", category: "debug-noise", message: "x" }],
+        summary: "",
+      },
+    ],
+    { id: "ep-c1", cycleNumber: 1 },
+  );
+  const cycle2 = mkEpisodic(
+    [{ agent: "claude", verdict: "approve", blockers: [], summary: "" }],
+    {
+      id: "ep-c2",
+      cycleNumber: 2,
+      priorEpisodicId: "ep-c1",
+      solutionPatches: [
+        {
+          blockerCategory: "missing-test", // different category — should NOT match
+          blockerMessage: "x",
+          hunk: sampleHunk,
+          agent: "claude",
+        },
+      ],
+    },
+  );
+  const out = c.classify(cycle2, "merged", [cycle1]);
+  const solnKeys = out.answerKeys.filter((k) => k.pattern.startsWith("autofix-solution/"));
+  assert.equal(solnKeys.length, 0);
+});

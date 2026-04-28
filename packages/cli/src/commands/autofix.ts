@@ -36,6 +36,7 @@ import { loadConfig, resolveMemoryRoot, type ConclaveConfig } from "../lib/confi
 import { runPerBlocker, type GitLike, type WorkerLike } from "../lib/autofix-worker.js";
 import { recountHunkHeaders } from "../lib/patch-fixup.js";
 import { runSpecialHandlers } from "../lib/autofix-handlers/index.js";
+import { writeSolutionSidecar } from "../lib/solution-sidecar.js";
 import { resolveKey } from "../lib/credentials.js";
 import { buildNotifiers } from "../lib/notifier-factory.js";
 import { emitProgress } from "../lib/progress-emit.js";
@@ -481,6 +482,7 @@ export async function runAutofix(args: AutofixArgs, deps: AutofixDeps = {}): Pro
 
   const loadCfg = deps.loadConfig ?? loadConfig;
   const cfg = await loadCfg();
+  const memoryRoot = resolveMemoryRoot(cfg.config, cfg.configDir);
   const git = deps.git ?? defaultGit;
   const gh = deps.gh ?? defaultGh;
   const readVerdict = deps.readVerdictFile ?? ((p: string) => fs.readFile(p, "utf8"));
@@ -1235,6 +1237,34 @@ export async function runAutofix(args: AutofixArgs, deps: AutofixDeps = {}): Pro
     await git("git", ["push"], { cwd: args.cwd }).catch((err) => {
       stderr(`autofix: git push warning — ${err instanceof Error ? err.message : String(err)}\n`);
     });
+
+    // H3 #11 — write a solution sidecar so the next review cycle can
+    // attach the (blocker, patch) pairs to its EpisodicEntry. On merge,
+    // recordOutcome promotes them to answer-keys with `solutionPatch`.
+    if (repo && typeof prNumber === "number" && committedFixes.length > 0) {
+      try {
+        const patches = committedFixes
+          .filter((f) => typeof f.patch === "string" && f.patch.trim().length > 0)
+          .map((f) => ({
+            blockerCategory: f.blocker.category,
+            blockerMessage: f.blocker.message,
+            ...(f.blocker.file ? { blockerFile: f.blocker.file } : {}),
+            ...(f.blocker.line ? { blockerLine: f.blocker.line } : {}),
+            hunk: f.patch as string,
+            agent: f.agent,
+          }));
+        if (patches.length > 0) {
+          await writeSolutionSidecar(
+            { memoryRoot, repo, pullNumber: prNumber, cycleNumber: nextCycle },
+            patches,
+          );
+        }
+      } catch (err) {
+        stderr(
+          `autofix: solution-sidecar write failed (non-fatal) — ${(err as Error).message}\n`,
+        );
+      }
+    }
 
     // v0.13.7 — wait for the deploy preview of the just-pushed commit to
     // converge before yielding to the next review. Without this, a

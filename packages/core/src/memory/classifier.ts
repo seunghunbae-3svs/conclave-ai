@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
-import type { EpisodicEntry, AnswerKey, FailureEntry } from "./schema.js";
+import type { EpisodicEntry, AnswerKey, FailureEntry, SolutionPatch } from "./schema.js";
 import type { Blocker } from "../agent.js";
 
 export type OutcomeResult = "merged" | "rejected" | "reworked";
@@ -47,7 +47,13 @@ export class RuleBasedClassifier implements Classifier {
     priors: readonly EpisodicEntry[] = [],
   ): ClassificationOutput {
     if (outcome === "merged") {
-      return { answerKeys: [this.extractAnswerKey(episodic, priors)], failures: [] };
+      const aggregate = this.extractAnswerKey(episodic, priors);
+      // H3 #11 — for each removed blocker that has a matching
+      // solutionPatch in any prior cycle's solutionPatches array, emit
+      // an additional answer-key carrying the (blocker, patch) pair.
+      // Worker retrieves these as "here's what I did last time".
+      const solutionKeys = this.extractSolutionAnswerKeys(episodic, priors, aggregate.removedBlockers);
+      return { answerKeys: [aggregate, ...solutionKeys], failures: [] };
     }
     return { answerKeys: [], failures: this.extractFailures(episodic) };
   }
@@ -137,6 +143,67 @@ export class RuleBasedClassifier implements Classifier {
     return [...seen.values()];
   }
 
+  /**
+   * H3 #11 — match removed-blockers (from H2 #6) against solutionPatches
+   * recorded on prior cycles. Each match becomes its own AnswerKey with
+   * pattern `autofix-solution/<category>` and the patch hunk attached.
+   *
+   * Match rule: same blocker.category AND (same blocker.message[:60]
+   * substring OR same file). Conservative — false positive is "we
+   * recommend a stale patch"; false negative is "worker re-derives a
+   * patch from scratch". The patch is informative either way; the
+   * solutionPatch's `agent` field plus `solutionPatch.blockerMessage`
+   * carry full context so the worker can decide for itself whether
+   * the past solution applies.
+   */
+  private extractSolutionAnswerKeys(
+    episodic: EpisodicEntry,
+    priors: readonly EpisodicEntry[],
+    removedBlockers: AnswerKey["removedBlockers"],
+  ): AnswerKey[] {
+    if (removedBlockers.length === 0) return [];
+    // Collect from episodic itself AND every prior. The patch applied
+    // between cycle N and cycle N+1 is recorded on cycle N+1's
+    // EpisodicEntry (since that's the cycle that ran review AFTER the
+    // worker pushed). On a 3-cycle PR (rework→rework→merge), cycle 3 is
+    // `episodic` (its solutionPatches cover the c2→c3 hop) and cycles
+    // 1+2 are in `priors` (prior c2's patches cover c1→c2).
+    const allPatches: SolutionPatch[] = [...(episodic.solutionPatches ?? [])];
+    for (const prior of priors) {
+      for (const patch of prior.solutionPatches ?? []) {
+        allPatches.push(patch);
+      }
+    }
+    if (allPatches.length === 0) return [];
+
+    const out: AnswerKey[] = [];
+    const seenKeys = new Set<string>();
+    for (const removed of removedBlockers) {
+      for (const patch of allPatches) {
+        if (!matchPatchToRemoved(removed, patch)) continue;
+        const dedupKey = `${patch.blockerCategory}|${truncate(patch.blockerMessage, 60)}|${patch.blockerFile ?? ""}`;
+        if (seenKeys.has(dedupKey)) continue;
+        seenKeys.add(dedupKey);
+        out.push({
+          id: `ak-soln-${shortHash(episodic.id + ":" + dedupKey)}`,
+          createdAt: episodic.createdAt,
+          domain: "code",
+          pattern: `autofix-solution/${patch.blockerCategory}`,
+          lesson:
+            `Worker (${patch.agent}) resolved a ${patch.blockerCategory} blocker` +
+            (patch.blockerFile ? ` in ${patch.blockerFile}` : "") +
+            ` — applied patch is attached as solutionPatch (use as RAG for similar future blockers).`,
+          tags: [patch.blockerCategory, "autofix-solution"],
+          repo: episodic.repo,
+          episodicId: episodic.id,
+          removedBlockers: [removed],
+          solutionPatch: patch,
+        });
+      }
+    }
+    return out;
+  }
+
   private deriveTags(
     episodic: EpisodicEntry,
     removedBlockers: AnswerKey["removedBlockers"],
@@ -152,6 +219,29 @@ export class RuleBasedClassifier implements Classifier {
 
 function blockerKey(b: { category: string; severity: string; message: string }): string {
   return `${b.category}|${b.severity}|${truncate(b.message, 60)}`;
+}
+
+/**
+ * H3 #11 — heuristic match between a "removed blocker" record (which
+ * carries category + severity + message) and a SolutionPatch (which
+ * carries category + message + optional file). True when category
+ * matches AND (file matches OR message[:60] overlaps significantly).
+ */
+function matchPatchToRemoved(
+  removed: AnswerKey["removedBlockers"][number],
+  patch: SolutionPatch,
+): boolean {
+  if (removed.category !== patch.blockerCategory) return false;
+  // If the patch carries a file and the removed-blocker text mentions
+  // the same path (rare — message may not — so this is best-effort), accept.
+  if (patch.blockerFile && removed.message.includes(patch.blockerFile)) return true;
+  // Message-substring overlap: the removed-blocker's message[:60] vs
+  // patch.blockerMessage[:60]. Either side as substring of the other
+  // counts — agents tend to phrase the same blocker similarly across
+  // cycles, but exact equality is too strict.
+  const a = truncate(removed.message, 60).toLowerCase();
+  const b = truncate(patch.blockerMessage, 60).toLowerCase();
+  return a.includes(b) || b.includes(a);
 }
 
 function toFailureEntry(blocker: Blocker, episodic: EpisodicEntry): FailureEntry {

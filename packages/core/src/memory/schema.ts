@@ -2,6 +2,25 @@ import { z } from "zod";
 import { BlockerSchema, ReviewResultSchema } from "../schema.js";
 
 /**
+ * SolutionPatch — a (blocker, patch) pair captured when the autofix
+ * worker successfully addressed a council blocker. Carried on the
+ * EpisodicEntry that recorded the worker's work, so the merge-time
+ * classifier can promote merged solutions to answer-keys (H3 #11).
+ */
+export const SolutionPatchSchema = z.object({
+  /** Free-form category from the original Blocker (e.g. "debug-noise"). */
+  blockerCategory: z.string().min(1),
+  blockerMessage: z.string().min(1),
+  blockerFile: z.string().optional(),
+  blockerLine: z.number().int().positive().optional(),
+  /** The unified-diff hunk the worker produced and that was applied. */
+  hunk: z.string().min(1),
+  /** Agent that raised the original blocker ("claude", "openai", …). */
+  agent: z.string().min(1),
+});
+export type SolutionPatch = z.infer<typeof SolutionPatchSchema>;
+
+/**
  * EpisodicEntry — raw event log. One record per review cycle.
  * 90-day TTL per architecture. Nightly Haiku job classifies these into
  * answer-keys (on merge) + failure-catalog (on reject/rework).
@@ -11,6 +30,13 @@ import { BlockerSchema, ReviewResultSchema } from "../schema.js";
  * classifier walks `priorEpisodicId` back to cycle 1 to recover blockers
  * that were caught and fixed before merge — those become "removed
  * blockers" on the resulting AnswerKey (H2 #6).
+ *
+ * `solutionPatches` carries the autofix worker's patches that were
+ * applied between the prior cycle and this one (H3 #11). On merge,
+ * each (removed-blocker, matching solutionPatch) pair becomes its own
+ * answer-key with `solutionPatch` populated — the worker reads those
+ * at next-PR time as RAG ("here's what I did last time for this
+ * category").
  */
 export const EpisodicEntrySchema = z.object({
   id: z.string().min(1),
@@ -25,6 +51,7 @@ export const EpisodicEntrySchema = z.object({
   costUsd: z.number().nonnegative(),
   cycleNumber: z.number().int().min(1).default(1),
   priorEpisodicId: z.string().optional(),
+  solutionPatches: z.array(SolutionPatchSchema).default([]),
 });
 export type EpisodicEntry = z.infer<typeof EpisodicEntrySchema>;
 
@@ -66,6 +93,17 @@ export const AnswerKeySchema = z.object({
       }),
     )
     .default([]),
+  /**
+   * H3 #11 — when this answer-key represents a (removed-blocker,
+   * autofix-patch) pair, `solutionPatch` carries the unified-diff hunk
+   * the worker produced. Future autofix iterations retrieve these as
+   * RAG context — "for this repo, blockers of category X have been
+   * resolved with patches that look like this".
+   *
+   * Absent on legacy answer-keys + on aggregate merge keys (only the
+   * per-pair derivative keys carry it).
+   */
+  solutionPatch: SolutionPatchSchema.optional(),
 });
 export type AnswerKey = z.infer<typeof AnswerKeySchema>;
 

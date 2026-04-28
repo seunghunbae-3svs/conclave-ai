@@ -371,6 +371,9 @@ export async function loadConfig(cwd: string = process.cwd()): Promise<{
 }
 
 export function resolveMemoryRoot(config: ConclaveConfig, configDir: string): string {
-  const root = config.memory.root ?? ".conclave";
+  // Defensive: legacy callers (tests, stripped-down configs) may pass a
+  // ConclaveConfig that hasn't gone through Zod's default-injection path
+  // and thus has no `memory` block. Treat missing as `.conclave/`.
+  const root = config.memory?.root ?? ".conclave";
   return path.isAbsolute(root) ? root : path.join(configDir, root);
 }

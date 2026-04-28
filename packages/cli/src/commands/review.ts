@@ -60,6 +60,7 @@ import { resolveKey } from "../lib/credentials.js";
 import { runVisualCapture, type VisualCaptureResult } from "../lib/visual-capture.js";
 import { matchBaselinesToArtifacts, saveDesignBaseline } from "../lib/design-baseline.js";
 import { findPriorEpisodicId } from "../lib/episodic-chain.js";
+import { deleteSolutionSidecar, readSolutionSidecar } from "../lib/solution-sidecar.js";
 import type { ViewportSpec } from "@conclave-ai/visual-review";
 
 type ReviewDomainInput = "code" | "design";
@@ -889,6 +890,24 @@ export async function review(argv: string[]): Promise<void> {
     cycleNumber > 1 && loaded.pullNumber
       ? await findPriorEpisodicId(store, loaded.repo, loaded.pullNumber, cycleNumber)
       : undefined;
+  // H3 #11 — load any solution-patches sidecar the autofix command may
+  // have written for this cycle. Folded into the EpisodicEntry so
+  // recordOutcome on merge can promote them to answer-keys with
+  // `solutionPatch`. Best-effort: missing/corrupt sidecar = empty list.
+  const solutionPatches =
+    cycleNumber > 1 && loaded.pullNumber
+      ? await readSolutionSidecar({
+          memoryRoot,
+          repo: loaded.repo,
+          pullNumber: loaded.pullNumber,
+          cycleNumber,
+        })
+      : [];
+  if (solutionPatches.length > 0) {
+    infoOut(
+      `conclave review: solution sidecar attached — ${solutionPatches.length} patch(es) from prior autofix cycle\n`,
+    );
+  }
   const writer = new OutcomeWriter({ store });
   const episodic = await writer.writeReview({
     ctx: reviewCtx,
@@ -898,7 +917,18 @@ export async function review(argv: string[]): Promise<void> {
     episodicId,
     cycleNumber,
     ...(priorEpisodicId ? { priorEpisodicId } : {}),
+    ...(solutionPatches.length > 0 ? { solutionPatches } : {}),
   });
+  if (solutionPatches.length > 0 && loaded.pullNumber) {
+    // Sidecar consumed — delete so a stale file doesn't leak across
+    // unrelated cycle invocations. Best-effort.
+    await deleteSolutionSidecar({
+      memoryRoot,
+      repo: loaded.repo,
+      pullNumber: loaded.pullNumber,
+      cycleNumber,
+    });
+  }
 
   // v0.12.x — anchor the episodic in central plane so the autonomy
   // loop's CI rework can fetch it when local-only invocation means

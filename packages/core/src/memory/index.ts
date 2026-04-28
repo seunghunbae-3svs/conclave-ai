@@ -7,6 +7,7 @@ export {
   FailureSeveritySchema,
   SemanticRuleSchema,
   CalibrationEntrySchema,
+  SolutionPatchSchema,
 } from "./schema.js";
 export type {
   AnswerKey,
@@ -14,6 +15,7 @@ export type {
   FailureEntry,
   SemanticRule,
   CalibrationEntry,
+  SolutionPatch,
 } from "./schema.js";
 
 export { FileSystemCalibrationStore } from "./calibration-store.js";
