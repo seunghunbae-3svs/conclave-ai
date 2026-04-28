@@ -133,6 +133,13 @@ export class RuleBasedClassifier implements Classifier {
   private extractFailures(episodic: EpisodicEntry): FailureEntry[] {
     const seen = new Map<string, FailureEntry>();
     for (const review of episodic.reviews) {
+      // Derivative agents (failure-gate's stickies, deploy-guard's
+      // synthetic blockers) are NOT new observations — they're echoes
+      // of upstream catalog entries / status signals. Adding them to
+      // the failure-catalog creates near-duplicates that grow with
+      // every PR, producing duplicate stickies on later runs (the
+      // multi-PR self-evolve audit caught this).
+      if (DERIVATIVE_AGENT_IDS.has(review.agent)) continue;
       for (const blocker of review.blockers) {
         if (blocker.severity === "nit") continue;
         const key = `${blocker.category}|${blocker.severity}|${truncate(blocker.message, 80)}`;
@@ -220,6 +227,14 @@ export class RuleBasedClassifier implements Classifier {
 function blockerKey(b: { category: string; severity: string; message: string }): string {
   return `${b.category}|${b.severity}|${truncate(b.message, 60)}`;
 }
+
+/**
+ * Agent ids whose blockers are DERIVATIVE — synthesized by the CLI's
+ * post-deliberation guards from existing catalog entries / status
+ * signals — and therefore must NOT be re-cataloged as new observations.
+ * Keep this list narrow; only the CLI's own injected agents belong here.
+ */
+const DERIVATIVE_AGENT_IDS = new Set(["failure-gate", "deploy-guard"]);
 
 /**
  * H3 #11 — heuristic match between a "removed blocker" record (which

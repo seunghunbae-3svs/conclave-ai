@@ -63,6 +63,8 @@ import { runVisualCapture, type VisualCaptureResult } from "../lib/visual-captur
 import { matchBaselinesToArtifacts, saveDesignBaseline } from "../lib/design-baseline.js";
 import { findPriorEpisodicId } from "../lib/episodic-chain.js";
 import { deleteSolutionSidecar, readSolutionSidecar } from "../lib/solution-sidecar.js";
+import { applyDeployGuard } from "../lib/deploy-guard.js";
+import { checkAndRecordNotification, computeFingerprint } from "../lib/notification-ledger.js";
 import type { ViewportSpec } from "@conclave-ai/visual-review";
 
 type ReviewDomainInput = "code" | "design";
@@ -844,6 +846,21 @@ export async function review(argv: string[]): Promise<void> {
     rawOutcome = await council.deliberate(reviewCtx);
   }
 
+  // 5a. Phase B.4a — hard programmatic guard against deploy=failure.
+  //     User-reported failure mode: agents occasionally vote approve
+  //     even with deployStatus=failure injected into the prompt.
+  //     The CLI now enforces: deploy=failure + verdict=approve →
+  //     forced to rework + synthetic deploy-failure blocker. Runs
+  //     BEFORE the failure-gate so downstream layers (notifier,
+  //     record-outcome, merge button) all see the corrected verdict.
+  const deployGuardResult = applyDeployGuard(rawOutcome, deployStatus);
+  if (deployGuardResult.applied) {
+    process.stderr.write(
+      `conclave review: ⚠️ deploy-guard tripped — verdict downgraded approve → rework because deploy=failure\n`,
+    );
+  }
+  rawOutcome = deployGuardResult.outcome;
+
   // 5b. H2 #7 — active failure-catalog gating. Scan the diff against
   //     retrieved failure-catalog entries; inject sticky blockers for
   //     any known pattern the council didn't already flag. Deterministic
@@ -1253,15 +1270,42 @@ export async function review(argv: string[]): Promise<void> {
         : {}),
       blockerCount,
     };
-    await Promise.all(
-      notifiers.map(async (n) => {
-        try {
-          await n.notifyReview(notifyInput);
-        } catch (err) {
-          process.stderr.write(`conclave review: ${n.id} notifier failed — ${(err as Error).message}\n`);
-        }
-      }),
-    );
+    // Phase B.4b — client-side dedup ledger. Same (episodicId, verdict,
+    // blockerCount, reworkCycle) fired twice in one process or across
+    // re-invocations of the same review must not produce 2 messages to
+    // the user. Best-effort: any disk failure falls through to "send
+    // anyway" so a transient I/O issue never silences a real verdict.
+    const fingerprint = computeFingerprint({
+      episodicId: episodic.id,
+      verdict: outcome.verdict,
+      blockerCount,
+      reworkCycle: args.reworkCycle ?? 0,
+    });
+    const ledgerCheck = await checkAndRecordNotification({
+      memoryRoot,
+      episodicId: episodic.id,
+      fingerprint,
+    });
+    if (ledgerCheck.alreadySent) {
+      infoOut(
+        `conclave review: notification dedup'd — already sent fingerprint ${fingerprint} for episodic ${episodic.id}\n`,
+      );
+    } else {
+      if (ledgerCheck.ledgerWriteFailed) {
+        process.stderr.write(
+          `conclave review: notif-ledger write failed (will still send, but dedup may not protect on retry)\n`,
+        );
+      }
+      await Promise.all(
+        notifiers.map(async (n) => {
+          try {
+            await n.notifyReview(notifyInput);
+          } catch (err) {
+            process.stderr.write(`conclave review: ${n.id} notifier failed — ${(err as Error).message}\n`);
+          }
+        }),
+      );
+    }
   }
 
   // 9. Pixel-diff report (v0.9.0). When we captured artifacts earlier
