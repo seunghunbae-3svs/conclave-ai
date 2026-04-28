@@ -36,11 +36,15 @@ on:
         type: string
         default: ''
   # schedule:
-  #   - cron: '*/15 * * * *'  # disabled 2026-04-28: doing manual dev
-  #                            # locally, freeing runner capacity for
-  #                            # parallel automation on another project.
-  #                            # Re-enable after confirming `claude exited
-  #                            # null` root cause from H1.5 B retries.
+  #   - cron: '*/30 * * * *'  # OP-1 (2026-04-29): null-exit root cause
+  #                            # addressed (describeSpawnFailure + per-item
+  #                            # retry ceiling). Cron stays MANUAL until
+  #                            # an operator re-runs `gh workflow run
+  #                            # dev-loop.yml -f mode=real` once and
+  #                            # verifies the new diagnostic + freeze
+  #                            # behavior end-to-end. Bumped from */15
+  #                            # to */30 — at */15 the queue piled up
+  #                            # behind long claude sessions.
 
 concurrency:
   group: dev-loop

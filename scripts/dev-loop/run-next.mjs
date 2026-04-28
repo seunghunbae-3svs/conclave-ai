@@ -323,9 +323,39 @@ async function main() {
     `🚀 dev-loop run started\nItem: ${nextItem.id} — ${nextItem.label}\nSpent today: $${state.totalSpentUsdToday.toFixed(2)} / $${state.perDayCapUsd}\nFailures so far: ${state.consecutiveFailures}/3`,
   );
 
+  // OP-1 — per-item retry counter so a stuck item can't burn cycles
+  // forever. The reset/ceiling logic is extracted as `evaluatePerItemCeiling`
+  // so OP-2's hermetic tests can simulate the state machine without
+  // spawning real claude processes.
+  const PER_ITEM_RETRY_CEILING = 3;
+  const ceilingCheck = evaluatePerItemCeiling(
+    state.perItemRetries,
+    nextItem.id,
+    PER_ITEM_RETRY_CEILING,
+  );
+  state.perItemRetries = ceilingCheck.next;
+  if (ceilingCheck.shouldFreeze) {
+    state.frozen = true;
+    state.frozenReason = `per-item ceiling: ${nextItem.id} failed ${ceilingCheck.next.count}× in a row — manual investigation required`;
+    writeJson(STATE_FILE, state);
+    process.stdout.write(
+      `dev-loop AUTO-FROZEN — ${nextItem.id} hit per-item retry ceiling ${PER_ITEM_RETRY_CEILING}\n`,
+    );
+    await notifyTelegram(
+      `🚨 dev-loop FROZEN — same-item retry ceiling\nItem ${nextItem.id} failed ${ceilingCheck.next.count} times in a row. Same item won't be retried automatically. Investigate the Actions log; once you understand the failure: edit .dev-loop-state.json (frozen=false, perItemRetries={}), then \`gh workflow run dev-loop.yml -f mode=real\`.`,
+    );
+    return;
+  }
+
   // Spawn Claude Code in headless / non-interactive mode.
   // --dangerously-skip-permissions because the workflow's git/test
   // permissions are already gated by the runner's permissions block.
+  // OP-1 — maxBuffer raised from 50MB to 200MB. A long claude session
+  // produces tens of MB of stdout (transcript + tool calls echoed
+  // back); 50MB hit a hard SIGTERM from Node when claude rambled on a
+  // large refactor (status=null in the postmortem with no diagnostic).
+  // 200MB is a comfortable ceiling that bounds runaway buffers but
+  // doesn't false-trip on legit long sessions.
   const r = spawnSync(
     "claude",
     ["--print", "--dangerously-skip-permissions"],
@@ -335,18 +365,29 @@ async function main() {
       stdio: ["pipe", "pipe", "inherit"],
       encoding: "utf8",
       env: { ...process.env, ANTHROPIC_API_KEY: apiKey },
-      maxBuffer: 50 * 1024 * 1024,
+      maxBuffer: 200 * 1024 * 1024,
     },
   );
   const stdout = r.stdout ?? "";
   process.stdout.write(stdout);
 
   if (r.status !== 0) {
+    // OP-1 — disambiguate the exit shape so operators can tell apart
+    //   - status=number ≠ 0 : claude returned non-zero exit code
+    //   - status=null + signal=SIGTERM : killed by Node (timeout / OOM-kill / stdout overflow)
+    //   - status=null + error.code=ENOENT : spawn failed (claude not on PATH)
+    //   - status=null + error.code=ERR_CHILD_PROCESS_STDIO_MAXBUFFER : maxBuffer exceeded
+    //   - status=null + signal=null : impossible-but-defensive
+    // Pre-OP-1, all 5 of these printed identically as "claude exited null".
+    const diag = describeSpawnFailure(r);
     state.consecutiveFailures += 1;
+    state.perItemRetries.count += 1;
     writeJson(STATE_FILE, state);
-    process.stderr.write(`claude exited ${r.status}; consecutiveFailures=${state.consecutiveFailures}\n`);
+    process.stderr.write(
+      `claude failed: ${diag.short}\n  detail: ${diag.detail}\n  consecutiveFailures=${state.consecutiveFailures} perItem=${state.perItemRetries.count}/${PER_ITEM_RETRY_CEILING}\n`,
+    );
     await notifyTelegram(
-      `❌ ${nextItem.id} failed\nclaude exited with status ${r.status} (no DEVLOOP_RESULT parsed).\nFailures: ${state.consecutiveFailures}/3`,
+      `❌ ${nextItem.id} failed (${diag.short})\n${diag.detail}\n\nFailures: ${state.consecutiveFailures}/3 (item retry ${state.perItemRetries.count}/${PER_ITEM_RETRY_CEILING})\n${diag.hint}`,
     );
     return;
   }
@@ -354,10 +395,13 @@ async function main() {
   const result = parseAgentResult(stdout);
   if (!result) {
     state.consecutiveFailures += 1;
+    state.perItemRetries.count += 1;
     writeJson(STATE_FILE, state);
-    process.stderr.write(`agent stdout did not contain DEVLOOP_RESULT line; treating as failure\n`);
+    process.stderr.write(
+      `agent stdout did not contain DEVLOOP_RESULT line; treating as failure (perItem ${state.perItemRetries.count}/${PER_ITEM_RETRY_CEILING})\n`,
+    );
     await notifyTelegram(
-      `❌ ${nextItem.id} failed\nNo DEVLOOP_RESULT line in stdout (likely workflow timeout — check Actions log).\nFailures: ${state.consecutiveFailures}/3`,
+      `❌ ${nextItem.id} failed\nNo DEVLOOP_RESULT line in stdout (likely workflow timeout — check Actions log).\nFailures: ${state.consecutiveFailures}/3 (item retry ${state.perItemRetries.count}/${PER_ITEM_RETRY_CEILING})`,
     );
     return;
   }
@@ -367,6 +411,7 @@ async function main() {
     state.lastShipped = nextItem.id;
     state.lastShippedAt = nowIso;
     state.consecutiveFailures = 0;
+    state.perItemRetries = { item: null, count: 0 }; // OP-1 — reset on ship.
     state.history.push({
       item: nextItem.id,
       shippedAt: nowIso,
@@ -380,12 +425,102 @@ async function main() {
     );
   } else {
     state.consecutiveFailures += 1;
+    state.perItemRetries.count += 1;
     writeJson(STATE_FILE, state);
-    process.stdout.write(`✗ ${nextItem.id} not shipped — ${result.reason ?? "(no reason)"}; consecutiveFailures=${state.consecutiveFailures}\n`);
+    process.stdout.write(
+      `✗ ${nextItem.id} not shipped — ${result.reason ?? "(no reason)"}; consecutiveFailures=${state.consecutiveFailures} perItem=${state.perItemRetries.count}/${PER_ITEM_RETRY_CEILING}\n`,
+    );
     await notifyTelegram(
-      `❌ ${nextItem.id} not shipped\nReason: ${result.reason ?? "(no reason)"}\nWhat got done: ${result.summary ?? "(none)"}\nFailures: ${state.consecutiveFailures}/3`,
+      `❌ ${nextItem.id} not shipped\nReason: ${result.reason ?? "(no reason)"}\nWhat got done: ${result.summary ?? "(none)"}\nFailures: ${state.consecutiveFailures}/3 (item retry ${state.perItemRetries.count}/${PER_ITEM_RETRY_CEILING})`,
     );
   }
+}
+
+/**
+ * OP-2 — pure state-transition helper for the per-item retry guard.
+ * Inputs: the previous `perItemRetries` shape (may be `null` /
+ * `undefined` / `{}` for fresh state), the item id we're ABOUT to
+ * try, and the ceiling. Returns:
+ *   - `next`: the perItemRetries shape that should be persisted.
+ *     - new item OR fresh state → `{ item: id, count: 0 }`
+ *     - same item retried → `{ item: id, count: prior.count }` unchanged
+ *   - `shouldFreeze`: true iff the resulting count is >= ceiling.
+ *
+ * The CALLER is responsible for incrementing count on a failed run;
+ * this helper only handles the "should we proceed before spawning"
+ * decision.
+ */
+export function evaluatePerItemCeiling(prev, itemId, ceiling) {
+  let next;
+  if (!prev || prev.item !== itemId) {
+    next = { item: itemId, count: 0 };
+  } else {
+    next = { item: itemId, count: prev.count };
+  }
+  return { next, shouldFreeze: next.count >= ceiling };
+}
+
+/**
+ * OP-1 — classify a spawnSync failure into a human-readable
+ * (short, detail, hint) tuple. Pre-OP-1 this was a single line
+ * "claude exited null" with no info; the postmortem on H1.5 B's
+ * 5 retry crashes spent half a day re-deriving what the failure
+ * shape was. Now it tells you on the first line.
+ *
+ * Exported for hermetic testing.
+ */
+export function describeSpawnFailure(r) {
+  // r is the spawnSync return object: { status, signal, error?, stdout, stderr }
+  if (r.error) {
+    const code = r.error.code ?? "(no code)";
+    const msg = r.error.message ?? String(r.error);
+    if (code === "ENOENT") {
+      return {
+        short: "spawn ENOENT",
+        detail: `claude binary not on PATH (msg: ${msg})`,
+        hint: "Install Claude Code CLI on the runner: `npm i -g @anthropic-ai/claude-code`",
+      };
+    }
+    if (code === "ERR_CHILD_PROCESS_STDIO_MAXBUFFER") {
+      return {
+        short: "stdout buffer overflow",
+        detail: `claude exceeded the maxBuffer cap (raised to 200MB; this means the session was unusually verbose)`,
+        hint: "Consider scoping the next prompt smaller, OR raising maxBuffer further in run-next.mjs",
+      };
+    }
+    return {
+      short: `spawn ${code}`,
+      detail: `Node could not spawn claude — ${msg}`,
+      hint: "Check the Actions log for the underlying error (PATH, permissions, executable bit)",
+    };
+  }
+  if (r.signal) {
+    if (r.signal === "SIGTERM" || r.signal === "SIGKILL") {
+      return {
+        short: `killed by ${r.signal}`,
+        detail: `claude was killed by Node — likely the workflow's timeout-minutes hit, or the OS killed it for OOM`,
+        hint: "Check Actions log: was the run >90 min (workflow timeout)? Or did the runner hit memory pressure?",
+      };
+    }
+    return {
+      short: `signal ${r.signal}`,
+      detail: `claude received signal ${r.signal} (uncommon)`,
+      hint: "Check Actions log for the runtime context",
+    };
+  }
+  if (typeof r.status === "number" && r.status !== 0) {
+    return {
+      short: `exit ${r.status}`,
+      detail: `claude exited with non-zero status ${r.status}`,
+      hint: "Check stderr / Actions log for claude's error message",
+    };
+  }
+  // Defensive: status null AND signal null AND no error — should never happen.
+  return {
+    short: "unknown failure",
+    detail: `spawnSync returned status=${r.status} signal=${r.signal} error=${r.error ?? "(none)"} — please file an issue`,
+    hint: "This shape was previously printed as 'claude exited null'; OP-1 makes it impossible to hit silently",
+  };
 }
 
 const invokedDirectly = (() => {
