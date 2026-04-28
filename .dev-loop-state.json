@@ -120,6 +120,24 @@
       "shippedAt": "2026-04-28T21:10Z",
       "commit": "ead2210",
       "note": "manual dev — catch-regression detector + meta-loop alerts (detectCatchRegressions + writeCatchRegression + review wiring); 10 new tests. H3 complete!"
+    },
+    {
+      "item": "Phase A audit",
+      "shippedAt": "2026-04-29T00:00Z",
+      "commit": "49ba7e3",
+      "note": "fullchain on-disk integration tests for H2 #6 → H3 #15 (35 tests across 10 files). Found 2 production-impacting bugs that hermetic unit tests missed: (1) failure-gate alreadyCoveredByCouncil keyed by enum vs free-form category — duplicate stickies (commit 9cdad27); (2) sidecar cycleNumber off-by-one between autofix writer and review reader — every autofix→answer-key handoff was a silent no-op pre-fix (commit 692fa77)."
+    },
+    {
+      "item": "Phase B audit",
+      "shippedAt": "2026-04-29T15:00Z",
+      "commit": "901638c",
+      "note": "user-perspective integration audits (96 tests across 12 files: B.1 init, B.2 review-e2e, B.3 multi-PR self-evolve, B.4abc deploy/notif/cycle guards, B.5 npm package, B.6 doctor, B.7 secret isolation, B.8 budget, B.9 design domain, B.10 audit, B.11 federation HTTP, B.12 error UX). Found 4 production safety gaps: deploy-guard absent (5ebd3b8), notification-ledger absent (5ebd3b8), classifier polluted catalog with derivative-agent stickies — silent O(N) growth (5ebd3b8), notif-ledger leaked anomalous episodicId verbatim (0edc43a)."
+    },
+    {
+      "item": "OP-1..OP-6",
+      "shippedAt": "2026-04-29T18:00Z",
+      "commit": "c216c48",
+      "note": "operational issues root-cause closure (53 tests across 6 files). OP-1 dev-loop null-exit diagnostic (5-way classifier + maxBuffer 50→200MB) — direct cause of cron-disable resolved. OP-2 per-item retry ceiling — H1.5 B-style 5-retry-on-same-item now hard-stops at 3. OP-3 workflow YAML contract (review/rework/merge.yml + dispatch types + skip-guard ordering + lockstep cli-version). OP-4 workflow ↔ central-plane route shape contract. OP-5 secret-guard E2E on autofix patches. OP-6 episodic anchor concurrency + UPSERT idempotency. Phase A+B+OP grand total: 184 integration tests, 7 production bugs fixed."
     }
   ]
 }
