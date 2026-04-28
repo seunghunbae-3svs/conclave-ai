@@ -1,8 +1,8 @@
 {
   "version": 1,
-  "currentItem": "H3 #11",
-  "lastShipped": "H2 #10",
-  "lastShippedAt": "2026-04-28T19:00:00Z",
+  "currentItem": "H3 #12",
+  "lastShipped": "H3 #11",
+  "lastShippedAt": "2026-04-28T19:30:00Z",
   "consecutiveFailures": 0,
   "totalSpentUsdToday": 0,
   "lastSpendResetDate": "2026-04-27T08:06:01.117Z",
@@ -84,6 +84,18 @@
       "shippedAt": "2026-04-28T19:00Z",
       "commit": "b697e34",
       "note": "manual dev — agent-score-weighted reject routing (low-score agent's reject demoted to rework); 14 new tests. H2 complete!"
+    },
+    {
+      "item": "H2 QA",
+      "shippedAt": "2026-04-28T19:15Z",
+      "commit": "cbc98ce",
+      "note": "manual QA — H2 pipeline integration test caught 2 calibration round-trip bugs (free-form vs enum category mismatch); fixed gate to use seedBlocker.category. 3 new integration tests."
+    },
+    {
+      "item": "H3 #11",
+      "shippedAt": "2026-04-28T19:30Z",
+      "commit": "3de2d7e",
+      "note": "manual dev — autofix patches → answer-keys on merge (sidecar handoff + per-(blocker, patch) answer-key); 10 new tests"
     }
   ]
 }

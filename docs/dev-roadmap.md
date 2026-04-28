@@ -170,9 +170,19 @@ wired live.
 
 H2 has to be live first or this just feeds noise.
 
-11. **Autofix patch → answer-key auto-register.** When an autofix
-    commit gets merged, the (pre-diff, blocker, post-diff) tuple
-    becomes an answer-key. Worker starts seeing prior solutions.
+11. **Autofix patch → answer-key auto-register.** ✅ shipped 2026-04-28
+    (commit 3de2d7e, manual dev). When the autofix worker successfully
+    addresses a council blocker and the resulting PR merges, the
+    (blocker, patch) pair becomes a permanent answer-key with
+    `solutionPatch` populated. Sidecar handoff: autofix writes
+    `<memoryRoot>/pending-solutions/<repo>__pr-<N>__cycle-<C>.json`,
+    review reads it on cycleNumber > 1 and folds patches into
+    writeReview's solutionPatches; recordOutcome's classifier
+    matches removed blockers against solutionPatches via
+    matchPatchToRemoved (same category + message-substring overlap
+    or file match) and emits per-pair answer-keys with pattern
+    `autofix-solution/<category>`. 10 new hermetic tests
+    (4 classifier + 6 sidecar).
 12. **Rework-loop failure → failure-catalog.** "fuzzy dedupe missed →
     stall" becomes a stored pattern; subsequent verdicts of similar
     shape pre-apply the dedupe.
