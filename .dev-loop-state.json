@@ -1,8 +1,8 @@
 {
   "version": 1,
-  "currentItem": "H2 #10",
-  "lastShipped": "H2 #9",
-  "lastShippedAt": "2026-04-28T18:35:00Z",
+  "currentItem": "H3 #11",
+  "lastShipped": "H2 #10",
+  "lastShippedAt": "2026-04-28T19:00:00Z",
   "consecutiveFailures": 0,
   "totalSpentUsdToday": 0,
   "lastSpendResetDate": "2026-04-27T08:06:01.117Z",
@@ -78,6 +78,12 @@
       "shippedAt": "2026-04-28T18:35Z",
       "commit": "0903777",
       "note": "manual dev — diff splitter for large PRs (>500 lines bin-packed into chunks + integrated verdicts); 15 new tests"
+    },
+    {
+      "item": "H2 #10",
+      "shippedAt": "2026-04-28T19:00Z",
+      "commit": "b697e34",
+      "note": "manual dev — agent-score-weighted reject routing (low-score agent's reject demoted to rework); 14 new tests. H2 complete!"
     }
   ]
 }

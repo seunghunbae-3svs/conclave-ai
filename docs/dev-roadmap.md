@@ -153,8 +153,16 @@ wired live.
    summed). Config: `efficiency.diffSplitter` /
    `diffSplitterMaxLines` / `diffSplitterMaxFilesPerChunk`. 15 new
    hermetic tests.
-10. **Agent score routing** (decision #19, partially shipped via
-    `conclave scores`). Vote weights from past accuracy.
+10. **Agent score routing** ✅ shipped 2026-04-28 (commit b697e34, manual
+    dev). Decision #19's weighted vote now affects council verdicts: a
+    reject from an agent whose score < 0.5 is demoted to rework
+    (advisory). Brand-new agents (< 5 samples) keep full weight by
+    default. `tallyWeighted(results, weights, threshold)` is the shared
+    rule; Council + TieredCouncil both consume it. `deriveAgentWeights`
+    converts AgentScore[] into the weight map. review.ts wires it up
+    through computeAllAgentScores. Config knob
+    `council.agentScoreRouting` (default true) opts out. 14 new
+    hermetic tests.
 
 ---
 
