@@ -5,6 +5,7 @@ import {
   type OutcomeResult,
 } from "@conclave-ai/core";
 import { loadConfig, resolveMemoryRoot } from "../lib/config.js";
+import { autoPushOutcome } from "../lib/federated-auto-push.js";
 
 const HELP = `conclave record-outcome — close the self-evolve loop
 
@@ -61,11 +62,32 @@ export async function recordOutcome(argv: string[]): Promise<void> {
 
   const output = await writer.recordOutcome({ episodicId: args.id, outcome: args.result });
 
+  // H3 #14 — federation auto-push (opt-in). Pushes only the deltas the
+  // classifier just wrote so each outcome ships sub-second; pulls stay
+  // on the explicit `conclave sync` path. Best-effort.
+  const autoPush = await autoPushOutcome({
+    config,
+    written: { answerKeys: output.answerKeys, failures: output.failures },
+    ...(process.env["AI_CONCLAVE_FEDERATION_TOKEN"]
+      ? { apiToken: process.env["AI_CONCLAVE_FEDERATION_TOKEN"] }
+      : {}),
+  });
+  let autoPushLine = "";
+  if (autoPush.attempted) {
+    autoPushLine = autoPush.error
+      ? `  fed-auto-push: failed — ${autoPush.error}\n`
+      : `  fed-auto-push: ${autoPush.pushed} baseline(s) accepted\n`;
+  } else if (autoPush.skipReason && autoPush.skipReason !== "federation disabled") {
+    // Don't spam users who haven't opted in.
+    autoPushLine = `  fed-auto-push: skipped (${autoPush.skipReason})\n`;
+  }
+
   process.stdout.write(
     `conclave record-outcome:\n` +
       `  episodic:     ${args.id}\n` +
       `  outcome:      ${args.result}\n` +
       `  answer-keys:  ${output.answerKeys.length} written\n` +
-      `  failures:     ${output.failures.length} written\n`,
+      `  failures:     ${output.failures.length} written\n` +
+      autoPushLine,
   );
 }

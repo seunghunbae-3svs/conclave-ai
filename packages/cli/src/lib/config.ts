@@ -162,6 +162,16 @@ export const ConclaveConfigSchema = z.object({
     .object({
       enabled: z.boolean().default(false),
       endpoint: z.string().url().optional(),
+      /**
+       * H3 #14 — push the just-written redacted baselines automatically
+       * at record-outcome time. Default false (existing behaviour: users
+       * push only via explicit `conclave sync`). When true, every
+       * merge/reject/rework outcome triggers a non-blocking push of the
+       * answer-keys / failures the classifier just wrote. Pulls stay on
+       * the explicit-sync path — auto-push would otherwise add network
+       * latency to every outcome write.
+       */
+      autoPush: z.boolean().default(false),
     })
     .optional(),
   visual: z
