@@ -15,7 +15,10 @@ import {
   formatAnswerKeyForPrompt,
   formatFailureForPrompt,
   generatePlainSummary,
+  integrateChunkOutcomes,
   newEpisodicId,
+  splitDiff,
+  type CouncilOutcome,
   type FailureGateResult,
   type Agent,
   type MetricsSink,
@@ -772,7 +775,43 @@ export async function review(argv: string[]): Promise<void> {
     }
   }
 
-  const rawOutcome = await council.deliberate(reviewCtx);
+  // H2 #9 — when the diff exceeds the splitter threshold, run council
+  // chunk-by-chunk and integrate. Each chunk reuses the same retrieved
+  // RAG context (answer-keys / failures are repo-level signals, not
+  // chunk-level). Caches in the efficiency gate stay warm across chunks.
+  const splitterEnabled = config.efficiency.diffSplitter !== false;
+  const splitterMaxLines = config.efficiency.diffSplitterMaxLines ?? 500;
+  const splitterMaxFiles = config.efficiency.diffSplitterMaxFilesPerChunk ?? 20;
+  const totalChangedLines = countDiffChangedLines(loaded.diff);
+  const useSplitter = splitterEnabled && totalChangedLines > splitterMaxLines;
+  let rawOutcome: CouncilOutcome;
+  if (useSplitter) {
+    const chunks = splitDiff(loaded.diff, {
+      maxLinesPerChunk: splitterMaxLines,
+      maxChangedFilesPerChunk: splitterMaxFiles,
+    });
+    if (chunks.length <= 1) {
+      // Diff has no per-file boundaries (or fits one chunk) — fall back to single pass.
+      rawOutcome = await council.deliberate(reviewCtx);
+    } else {
+      infoOut(
+        `conclave review: diff-splitter active — ${totalChangedLines} changed lines across ${chunks.length} chunks ` +
+          `(max ${splitterMaxLines} lines/chunk, ${splitterMaxFiles} files/chunk)\n`,
+      );
+      const chunkOutcomes: CouncilOutcome[] = [];
+      for (let i = 0; i < chunks.length; i += 1) {
+        const chunk = chunks[i]!;
+        infoOut(
+          `conclave review: chunk ${i + 1}/${chunks.length} — ${chunk.changedLines} lines, ${chunk.files.length} file(s)\n`,
+        );
+        const chunkCtx: ReviewContext = { ...reviewCtx, diff: chunk.diff };
+        chunkOutcomes.push(await council.deliberate(chunkCtx));
+      }
+      rawOutcome = integrateChunkOutcomes(chunkOutcomes);
+    }
+  } else {
+    rawOutcome = await council.deliberate(reviewCtx);
+  }
 
   // 5b. H2 #7 — active failure-catalog gating. Scan the diff against
   //     retrieved failure-catalog entries; inject sticky blockers for
@@ -1255,4 +1294,18 @@ export function summarizeDiff(diff: string): {
     linesRemoved,
     topFiles,
   };
+}
+
+/**
+ * H2 #9 — count total +/- content lines in a unified diff (excludes
+ * `+++ b/<path>` / `--- a/<path>` headers). Used to decide whether the
+ * diff-splitter should kick in.
+ */
+function countDiffChangedLines(diff: string): number {
+  let n = 0;
+  for (const line of diff.split("\n")) {
+    if (line.startsWith("+++") || line.startsWith("---")) continue;
+    if (line.startsWith("+") || line.startsWith("-")) n += 1;
+  }
+  return n;
 }

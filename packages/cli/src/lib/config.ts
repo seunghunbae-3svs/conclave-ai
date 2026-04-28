@@ -19,8 +19,25 @@ export const ConclaveConfigSchema = z.object({
     .object({
       cacheEnabled: z.boolean(),
       compactEnabled: z.boolean(),
+      /**
+       * H2 #9 — diff splitter for large PRs. When the diff exceeds
+       * `diffSplitterMaxLines` total +/- lines, the CLI bin-packs the
+       * per-file blocks into chunks and runs council per chunk, then
+       * integrates the verdicts. Default true; opt out by setting
+       * `diffSplitter: false` (everything reviews in one pass like
+       * pre-H2 #9).
+       */
+      diffSplitter: z.boolean().default(true),
+      diffSplitterMaxLines: z.number().int().min(50).default(500),
+      diffSplitterMaxFilesPerChunk: z.number().int().min(1).default(20),
     })
-    .default({ cacheEnabled: true, compactEnabled: true }),
+    .default({
+      cacheEnabled: true,
+      compactEnabled: true,
+      diffSplitter: true,
+      diffSplitterMaxLines: 500,
+      diffSplitterMaxFilesPerChunk: 20,
+    }),
   memory: z
     .object({
       answerKeysDir: z.string(),
@@ -268,7 +285,13 @@ export const DEFAULT_CONFIG: ConclaveConfig = {
   version: 1,
   agents: ["claude"],
   budget: { perPrUsd: 0.5 },
-  efficiency: { cacheEnabled: true, compactEnabled: true },
+  efficiency: {
+    cacheEnabled: true,
+    compactEnabled: true,
+    diffSplitter: true,
+    diffSplitterMaxLines: 500,
+    diffSplitterMaxFilesPerChunk: 20,
+  },
   council: { maxRounds: 3, enableDebate: true },
   memory: {
     answerKeysDir: ".conclave/answer-keys",
