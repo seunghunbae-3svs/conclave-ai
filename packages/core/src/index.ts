@@ -130,6 +130,7 @@ export {
   CalibrationEntrySchema,
   FileSystemCalibrationStore,
   SolutionPatchSchema,
+  writeReworkLoopFailure,
 } from "./memory/index.js";
 export type {
   AnswerKey,
@@ -158,6 +159,8 @@ export type {
   RecordOverrideInput,
   FsCalibrationStoreOptions,
   SolutionPatch,
+  ReworkLoopFailureInput,
+  ReworkLoopFailureOutput,
 } from "./memory/index.js";
 
 // Federated sync (decision #21) — redact answer-keys + failures to the

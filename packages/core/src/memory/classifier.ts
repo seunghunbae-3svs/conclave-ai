@@ -278,7 +278,7 @@ const ALLOWED_CATEGORIES: FailureEntry["category"][] = [
   "other",
 ];
 
-function mapCategory(raw: string): FailureEntry["category"] {
+export function mapCategory(raw: string): FailureEntry["category"] {
   const normalized = raw.toLowerCase().replace(/\s+/g, "-");
   for (const c of ALLOWED_CATEGORIES) {
     if (c === normalized) return c;

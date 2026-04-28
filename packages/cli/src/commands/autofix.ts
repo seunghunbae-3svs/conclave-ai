@@ -15,6 +15,7 @@ import {
   dedupeBlockersAcrossAgents,
   isFuzzyDuplicate,
   summarizeAutofixPatches,
+  writeReworkLoopFailure,
   type AutofixIteration,
   type AutofixResult,
   type AutofixResultStatus,
@@ -1417,6 +1418,28 @@ export async function runAutofix(args: AutofixArgs, deps: AutofixDeps = {}): Pro
     status = iterations.length === 0 ? "bailed-no-patches" : "awaiting-approval";
   }
 
+  // H3 #12 — when the rework loop bails, persist a failure-catalog entry
+  // so the next review (on this or any future PR with similar shape)
+  // sees "this kind of thing has stalled before" via the H2 #7 active
+  // gate. Best-effort: catalog write failures never propagate — autofix
+  // has already done its job (or failed), and the user's verdict stands.
+  const finalRemaining = remainingBlockersFrom(currentReviews);
+  if (status.startsWith("bailed-") && repo) {
+    try {
+      const memory = new FileSystemMemoryStore({ root: memoryRoot });
+      await writeReworkLoopFailure(memory, {
+        repo,
+        bailStatus: status,
+        iterationsAttempted: iterations.length,
+        totalCostUsd: totalCost,
+        remainingBlockers: finalRemaining,
+        ...(progressEpisodicId ? { episodicId: progressEpisodicId } : {}),
+      });
+    } catch (err) {
+      stderr(`autofix: rework-loop-failure catalog write failed — ${(err as Error).message}\n`);
+    }
+  }
+
   return {
     code,
     result: {
@@ -1424,7 +1447,7 @@ export async function runAutofix(args: AutofixArgs, deps: AutofixDeps = {}): Pro
       iterations,
       totalCostUsd: totalCost,
       finalVerdict,
-      remainingBlockers: remainingBlockersFrom(currentReviews),
+      remainingBlockers: finalRemaining,
       mergeStatus,
     },
   };

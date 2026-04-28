@@ -44,6 +44,12 @@ export type {
 export { applyFailureGate } from "./failure-gate.js";
 export type { FailureGateOptions, FailureGateResult } from "./failure-gate.js";
 
+export { writeReworkLoopFailure } from "./rework-loop-writer.js";
+export type {
+  ReworkLoopFailureInput,
+  ReworkLoopFailureOutput,
+} from "./rework-loop-writer.js";
+
 export { RuleBasedClassifier, newEpisodicId } from "./classifier.js";
 export type { Classifier, ClassificationOutput, OutcomeResult } from "./classifier.js";
 
