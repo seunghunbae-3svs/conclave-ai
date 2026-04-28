@@ -131,6 +131,8 @@ export {
   FileSystemCalibrationStore,
   SolutionPatchSchema,
   writeReworkLoopFailure,
+  extractPriorBailHints,
+  renderPriorBailHintsSection,
 } from "./memory/index.js";
 export type {
   AnswerKey,
@@ -161,6 +163,8 @@ export type {
   SolutionPatch,
   ReworkLoopFailureInput,
   ReworkLoopFailureOutput,
+  ExtractPriorBailHintsOptions,
+  PriorBailHint,
 } from "./memory/index.js";
 
 // Federated sync (decision #21) — redact answer-keys + failures to the

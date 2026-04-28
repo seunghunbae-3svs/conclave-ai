@@ -79,6 +79,12 @@ export interface BuildPerBlockerContextInput {
    * sees what broke.
    */
   buildErrorTail?: string;
+  /**
+   * H3 #13 — auto-tuned hint lines from past `rework-loop-failure`
+   * catalog entries. The worker prompt builder splices them into the
+   * cache-prefix so the worker sees concrete prior failure shapes.
+   */
+  priorBailHints?: readonly string[];
 }
 
 /**
@@ -109,6 +115,7 @@ export function buildPerBlockerContext(
   if (input.diff !== undefined) ctx.diff = input.diff;
   if (input.answerKeys && input.answerKeys.length > 0) ctx.answerKeys = input.answerKeys;
   if (input.failureCatalog && input.failureCatalog.length > 0) ctx.failureCatalog = input.failureCatalog;
+  if (input.priorBailHints && input.priorBailHints.length > 0) ctx.priorBailHints = input.priorBailHints;
   return ctx;
 }
 

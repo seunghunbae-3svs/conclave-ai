@@ -50,6 +50,17 @@ export interface WorkerContext {
    * landed at line 18").
    */
   previousAttempts?: readonly WorkerRejectedAttempt[];
+  /**
+   * H3 #13 — auto-tuned hints synthesized from past `rework-loop-failure`
+   * catalog entries (one short line each, e.g.
+   * `bailed-no-patches on debug-noise: console.log left in compressImage`).
+   * The worker prompt builder splices them into a dedicated "Past
+   * bails — avoid these failure modes" section so the worker sees
+   * concrete prior failure shapes instead of leaning on a static
+   * prompt that drifts. Populated by the autofix CLI from
+   * extractPriorBailHints over the retrieved failure-catalog.
+   */
+  priorBailHints?: readonly string[];
 }
 
 /** Result of a worker invocation — ready to hand to `git apply` + commit. */

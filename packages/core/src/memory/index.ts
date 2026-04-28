@@ -50,6 +50,12 @@ export type {
   ReworkLoopFailureOutput,
 } from "./rework-loop-writer.js";
 
+export { extractPriorBailHints, renderPriorBailHintsSection } from "./prior-bail-hints.js";
+export type {
+  ExtractPriorBailHintsOptions,
+  PriorBailHint,
+} from "./prior-bail-hints.js";
+
 export { RuleBasedClassifier, newEpisodicId } from "./classifier.js";
 export type { Classifier, ClassificationOutput, OutcomeResult } from "./classifier.js";
 

@@ -133,5 +133,23 @@ export function buildCacheablePrefix(ctx: WorkerContext): string {
   if (ctx.failureCatalog && ctx.failureCatalog.length > 0) {
     parts.push("failure-catalog:\n" + ctx.failureCatalog.slice(0, 8).join("\n"));
   }
+  // H3 #13 — auto-tuned hints from past worker bails. Same prefix slot
+  // as the answer-keys / failure-catalog so Anthropic prompt caching
+  // still hits across calls when the hint set is stable.
+  if (ctx.priorBailHints && ctx.priorBailHints.length > 0) {
+    const lines = ctx.priorBailHints
+      .slice(0, 5)
+      .map((h, i) => `${i + 1}. ${h}`);
+    parts.push(
+      [
+        "## Past worker bails — avoid these failure modes",
+        "Previous autofix runs on similar shapes hit these terminal states.",
+        "Take extra care to produce a complete, applicable patch that doesn't",
+        "repeat the same root cause.",
+        "",
+        ...lines,
+      ].join("\n"),
+    );
+  }
   return parts.join("\n---\n");
 }

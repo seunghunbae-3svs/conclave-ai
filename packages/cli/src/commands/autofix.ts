@@ -13,6 +13,7 @@ import {
   MetricsRecorder,
   OutcomeWriter,
   dedupeBlockersAcrossAgents,
+  extractPriorBailHints,
   isFuzzyDuplicate,
   summarizeAutofixPatches,
   writeReworkLoopFailure,
@@ -708,6 +709,42 @@ export async function runAutofix(args: AutofixArgs, deps: AutofixDeps = {}): Pro
     ? buildNotifiers(cfg.config)
     : [];
 
+  // H3 #13 — pull rework-loop-failure entries out of the failure-catalog
+  // and synthesize prior-bail hints. The worker prompt builder splices
+  // them into its cache prefix so successive autofix runs see "this kind
+  // of bail happened before; avoid the same root cause." Best-effort:
+  // any retrieval failure leaves priorBailHints undefined, the worker
+  // falls back to the static prompt, autofix proceeds normally.
+  let priorBailHints: string[] | undefined;
+  try {
+    const memoryForHints = new FileSystemMemoryStore({ root: memoryRoot });
+    // Use the first remaining blocker's category + message as the
+    // retrieval query — it's the most relevant signal for "what past
+    // bails resemble this run". Falls back to the repo string when no
+    // blockers (rare for autofix; that case bails immediately anyway).
+    const queryPieces: string[] = [repo ?? ""];
+    const firstReview = currentReviews[0];
+    const firstBlocker = firstReview?.blockers[0];
+    if (firstBlocker) {
+      queryPieces.push(firstBlocker.category, firstBlocker.message);
+    }
+    const retrieved = await memoryForHints.retrieve({
+      query: queryPieces.join(" "),
+      domain: "code",
+      ...(repo ? { repo } : {}),
+      k: 8,
+    });
+    const hints = extractPriorBailHints(retrieved.failures);
+    if (hints.length > 0) {
+      priorBailHints = hints.map((h) => h.text);
+      stdout(`autofix: ${hints.length} prior-bail hint(s) injected into worker prompt\n`);
+    }
+  } catch (err) {
+    stderr(
+      `autofix: prior-bail hint retrieval failed (non-fatal) — ${(err as Error).message}\n`,
+    );
+  }
+
   for (let i = 0; i < args.maxIterations; i += 1) {
     // v0.7 — collect unique (agent, blocker) pairs across the council.
     const targets = dedupeBlockersAcrossAgents(currentReviews);
@@ -782,6 +819,7 @@ export async function runAutofix(args: AutofixArgs, deps: AutofixDeps = {}): Pro
               agent: t.agent,
               blocker: t.blocker,
               ...(previousBuildErrorTail ? { buildErrorTail: previousBuildErrorTail } : {}),
+              ...(priorBailHints ? { priorBailHints } : {}),
             },
             {
               worker,
