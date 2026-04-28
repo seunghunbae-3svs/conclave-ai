@@ -7,9 +7,23 @@ import type { SolutionPatch } from "@conclave-ai/core";
  * `conclave review` cycle.
  *
  * Layout: `<memoryRoot>/pending-solutions/<repoSlug>__pr-<N>__cycle-<C>.json`
- * where C is the cycle number that the autofix run PRODUCED (i.e. the
- * `--rework-cycle` value passed to the *next* review). Each file is a
- * JSON array of SolutionPatch objects.
+ *
+ * **Semantic of `cycleNumber`** (load-bearing — H3 #11 audit found a
+ * silent off-by-one before this comment was here):
+ *   `cycleNumber` MUST equal the `EpisodicEntry.cycleNumber` that the
+ *   review CONSUMING this sidecar will write. Both writer (autofix)
+ *   and reader (review) must agree on this exact key.
+ *
+ * Concretely:
+ *   - review.ts computes `cycleNumber = (--rework-cycle ?? 0) + 1`
+ *     and reads the sidecar at that key.
+ *   - autofix.ts must therefore write at the value the NEXT review's
+ *     formula will produce, NOT at the commit-marker cycle. Marker
+ *     cycle = `reworkCycle + 1`; episodic cycleNumber the next review
+ *     will write = `reworkCycle + 2` = `markerCycle + 1`.
+ *   - For first autofix run (reworkCycle 0): marker=1, sidecar=2.
+ *
+ * Each file is a JSON array of SolutionPatch objects.
  *
  * Lifecycle:
  *   - autofix writes the file after a successful patch + push.

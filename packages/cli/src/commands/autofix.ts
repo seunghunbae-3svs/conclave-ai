@@ -1280,6 +1280,20 @@ export async function runAutofix(args: AutofixArgs, deps: AutofixDeps = {}): Pro
     // H3 #11 — write a solution sidecar so the next review cycle can
     // attach the (blocker, patch) pairs to its EpisodicEntry. On merge,
     // recordOutcome promotes them to answer-keys with `solutionPatch`.
+    //
+    // Semantic of sidecar.cycleNumber: it must equal the
+    // episodic.cycleNumber that the NEXT review (consuming this sidecar)
+    // will write. The chain:
+    //   - review.ts: cycleNumber = (args.reworkCycle ?? 0) + 1
+    //   - workflow: extracts cycle N from commit marker [cycle:N],
+    //     re-runs review with --rework-cycle N, so review.cycleNumber = N+1
+    //   - autofix: nextCycle is the MARKER's cycle (= reworkCycle + 1)
+    //   - therefore the consuming review's episodic.cycleNumber = nextCycle + 1
+    //
+    // Earlier code wrote at `cycleNumber: nextCycle` which silently
+    // off-by-one'd every handoff (sidecar key = N, lookup key = N+1).
+    // The H3 #11 fullchain audit caught this; production never saw a
+    // single solutionPatch make it to an answer-key.
     if (repo && typeof prNumber === "number" && committedFixes.length > 0) {
       try {
         const patches = committedFixes
@@ -1293,8 +1307,14 @@ export async function runAutofix(args: AutofixArgs, deps: AutofixDeps = {}): Pro
             agent: f.agent,
           }));
         if (patches.length > 0) {
+          const nextReviewCycleNumber = nextCycle + 1;
           await writeSolutionSidecar(
-            { memoryRoot, repo, pullNumber: prNumber, cycleNumber: nextCycle },
+            {
+              memoryRoot,
+              repo,
+              pullNumber: prNumber,
+              cycleNumber: nextReviewCycleNumber,
+            },
             patches,
           );
         }
