@@ -18,6 +18,14 @@ export interface TieredCouncilOptions {
   tier2MaxRounds?: number;
   /** Default false. Set true to force every review to escalate. */
   alwaysEscalate?: boolean;
+  /**
+   * H2 #10 — agent-score-weighted reject. Same semantics as
+   * `Council.agentWeights`; passed through to both tier councils so
+   * tier-1 and tier-2 share calibration.
+   */
+  agentWeights?: ReadonlyMap<string, number>;
+  /** Mirror of `Council.rejectThreshold`. Default 0.5. */
+  rejectThreshold?: number;
 }
 
 /**
@@ -82,6 +90,8 @@ export class TieredCouncil {
     this.tier1Council = new Council({
       agents: opts.tier1Agents,
       maxRounds: opts.tier1MaxRounds ?? 1,
+      ...(opts.agentWeights ? { agentWeights: opts.agentWeights } : {}),
+      ...(opts.rejectThreshold !== undefined ? { rejectThreshold: opts.rejectThreshold } : {}),
     });
     // Tier 2 may be empty if the user is running tier-1-only on a
     // domain that never escalates (idea-like workflows). Guard against
@@ -93,6 +103,8 @@ export class TieredCouncil {
       // `never-runs` guard.
       agents: this.tier2HasAgents ? opts.tier2Agents : [unreachableAgent],
       maxRounds: opts.tier2MaxRounds ?? 2,
+      ...(opts.agentWeights ? { agentWeights: opts.agentWeights } : {}),
+      ...(opts.rejectThreshold !== undefined ? { rejectThreshold: opts.rejectThreshold } : {}),
     });
   }
 

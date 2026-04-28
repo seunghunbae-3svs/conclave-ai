@@ -17,8 +17,14 @@ export type {
 } from "./notifier.js";
 export { resolveFirstPreview } from "./platform.js";
 export type { Platform, PreviewResolution, ResolvePreviewInput } from "./platform.js";
-export { computeAgentScore, computeAllAgentScores, AGENT_SCORE_WEIGHTS } from "./scoring.js";
-export type { AgentScore, AgentScoreComponents } from "./scoring.js";
+export {
+  computeAgentScore,
+  computeAllAgentScores,
+  deriveAgentWeights,
+  AGENT_SCORE_WEIGHTS,
+} from "./scoring.js";
+export type { AgentScore, AgentScoreComponents, DeriveAgentWeightsOptions } from "./scoring.js";
+export { tallyWeighted } from "./council.js";
 
 // UI / design-surface detection (v0.9.3 — shared between
 // @conclave-ai/cli's domain-detect and @conclave-ai/agent-design's

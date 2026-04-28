@@ -87,6 +87,52 @@ export async function computeAllAgentScores(store: MemoryStore): Promise<AgentSc
   return [...agents].sort().map((agent) => computeAgentScore(agent, entries));
 }
 
+export interface DeriveAgentWeightsOptions {
+  /**
+   * Agents with `sampleCount < minSamples` are treated as "not enough
+   * data" and given full weight (1.0). Default 5 — pulled from the
+   * solo-cto-agent gate where 5 episodic data points was the inflection
+   * point between noise and signal.
+   */
+  minSamples?: number;
+  /**
+   * Score below which an agent's reject is demoted (rejectThreshold in
+   * Council/TieredCouncil reads from this). The weight is the score
+   * itself, but bounded to `[floor, 1]` so even a brand-new low-scoring
+   * agent isn't fully silenced by a noisy first batch. Default 0.2.
+   */
+  floor?: number;
+}
+
+/**
+ * H2 #10 — turn AgentScore[] into the agent-id → weight map that
+ * Council/TieredCouncil consume. Below `minSamples` data points, every
+ * agent is full-weight (no opinion yet). At/above `minSamples`, weight
+ * is `clamp(score, floor, 1)`.
+ *
+ * Pairs naturally with Council's default `rejectThreshold: 0.5` —
+ * agents with score < 0.5 lose their hard-block power but still
+ * contribute through their blockers + summary which the council renders
+ * to humans.
+ */
+export function deriveAgentWeights(
+  scores: readonly AgentScore[],
+  opts: DeriveAgentWeightsOptions = {},
+): Map<string, number> {
+  const minSamples = opts.minSamples ?? 5;
+  const floor = opts.floor ?? 0.2;
+  const out = new Map<string, number>();
+  for (const s of scores) {
+    if (s.sampleCount < minSamples) {
+      out.set(s.agent, 1.0);
+      continue;
+    }
+    const clamped = Math.max(floor, Math.min(1, s.score));
+    out.set(s.agent, Math.round(clamped * 10_000) / 10_000);
+  }
+  return out;
+}
+
 // ─── component calculators ─────────────────────────────────────────
 
 /** Fraction of this agent's reviews where its individual verdict was `approve`. */

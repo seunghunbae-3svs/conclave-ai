@@ -12,6 +12,8 @@ import {
   TieredCouncil,
   applyFailureGate,
   buildFrequencyMap,
+  computeAllAgentScores,
+  deriveAgentWeights,
   formatAnswerKeyForPrompt,
   formatFailureForPrompt,
   generatePlainSummary,
@@ -395,6 +397,30 @@ export async function review(argv: string[]): Promise<void> {
     return null;
   }
 
+  // H2 #10 — derive agent weights from past episodic outcomes. Weights
+  // soften the "any reject blocks" rule for low-trust agents (score < 0.5
+  // → can't single-handedly reject, demoted to rework). Brand-new agents
+  // (< 5 samples) keep full weight by default. Best-effort: a calibration
+  // failure here NEVER kills the review — fall back to flat weights.
+  const agentScoringEnabled = config.council?.agentScoreRouting !== false;
+  let agentWeights: Map<string, number> | undefined;
+  if (agentScoringEnabled) {
+    try {
+      const scores = await computeAllAgentScores(store);
+      agentWeights = deriveAgentWeights(scores);
+      const weighted = [...agentWeights.entries()]
+        .filter(([, w]) => w < 1.0)
+        .map(([a, w]) => `${a}=${w.toFixed(2)}`);
+      if (weighted.length > 0) {
+        infoOut(`conclave review: agent score weights — ${weighted.join(", ")}\n`);
+      }
+    } catch (err) {
+      process.stderr.write(
+        `conclave review: agent-score routing skipped — ${(err as Error).message}\n`,
+      );
+    }
+  }
+
   type CouncilLike = {
     deliberate: (ctx: ReviewContext) => Promise<TieredCouncilOutcome | Awaited<ReturnType<Council["deliberate"]>>>;
   };
@@ -474,6 +500,7 @@ export async function review(argv: string[]): Promise<void> {
       tier1MaxRounds,
       tier2MaxRounds,
       alwaysEscalate,
+      ...(agentWeights ? { agentWeights } : {}),
     });
   } else {
     // Legacy flat-Council path — used when config.council.domains is absent.
@@ -491,6 +518,7 @@ export async function review(argv: string[]): Promise<void> {
       agents: flatAgents,
       maxRounds: config.council.maxRounds,
       enableDebate: config.council.enableDebate,
+      ...(agentWeights ? { agentWeights } : {}),
     });
   }
 

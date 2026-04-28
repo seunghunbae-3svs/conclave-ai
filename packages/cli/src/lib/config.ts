@@ -116,6 +116,14 @@ export const ConclaveConfigSchema = z.object({
       maxRounds: z.number().int().min(1).max(5).default(3),
       enableDebate: z.boolean().default(true),
       /**
+       * H2 #10 — agent-score-weighted reject (decision #19). When true
+       * (default), the CLI computes weights from past episodic
+       * performance and demotes low-trust agents' rejects to advisory
+       * rework signals. Set false to fall back to "any reject blocks"
+       * (pre-H2 #10 behaviour).
+       */
+      agentScoreRouting: z.boolean().default(true),
+      /**
        * 2-tier council config per domain (reopens decisions #7 / #26 /
        * #28; see docs/decision-status.md). When present, overrides the
        * flat fields above.
@@ -149,7 +157,7 @@ export const ConclaveConfigSchema = z.object({
         )
         .optional(),
     })
-    .default({ maxRounds: 3, enableDebate: true }),
+    .default({ maxRounds: 3, enableDebate: true, agentScoreRouting: true }),
   federated: z
     .object({
       enabled: z.boolean().default(false),
@@ -292,7 +300,7 @@ export const DEFAULT_CONFIG: ConclaveConfig = {
     diffSplitterMaxLines: 500,
     diffSplitterMaxFilesPerChunk: 20,
   },
-  council: { maxRounds: 3, enableDebate: true },
+  council: { maxRounds: 3, enableDebate: true, agentScoreRouting: true },
   memory: {
     answerKeysDir: ".conclave/answer-keys",
     failureCatalogDir: ".conclave/failure-catalog",
