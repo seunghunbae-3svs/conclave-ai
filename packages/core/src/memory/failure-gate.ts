@@ -59,6 +59,19 @@ export interface FailureGateResult {
  * of the same category covering the same file — duplicates would be
  * noise, not signal.
  */
+/**
+ * The "effective" category of a FailureEntry is the FREE-FORM string the
+ * original blocker carried (preserved on seedBlocker), NOT the closed-
+ * enum FailureEntry.category mapCategory coerced it to. Every gate
+ * decision — calibration lookup, council-overlap suppression, sticky
+ * construction, dedup keys — must round-trip through this same string
+ * or calibration counters and council suppression will silently break
+ * (the QA bug from H2 #6→#10 ship). One helper, one source of truth.
+ */
+function effectiveCategory(failure: FailureEntry): string {
+  return failure.seedBlocker?.category ?? failure.category;
+}
+
 export function applyFailureGate(
   outcome: CouncilOutcome,
   retrievedFailures: readonly FailureEntry[],
@@ -70,6 +83,10 @@ export function applyFailureGate(
   const diffAddedTokens = extractAddedLineTokens(ctx.diff);
   const changedFiles = extractChangedFiles(ctx.diff);
 
+  // Index by FREE-FORM category — same key the gate uses below for
+  // alreadyCoveredByCouncil. Council blockers carry free-form
+  // categories already (Blocker schema is free-form), so this is just
+  // ensuring symmetric lookup.
   const existingByCategory = new Map<string, Blocker[]>();
   for (const review of outcome.results) {
     for (const blocker of review.blockers) {
@@ -90,34 +107,24 @@ export function applyFailureGate(
     const matchedTokens = matchTokens(failure, diffAddedTokens, minOverlap);
     if (matchedTokens.length === 0) continue;
 
-    if (alreadyCoveredByCouncil(failure, existingByCategory, changedFiles)) continue;
+    const cat = effectiveCategory(failure);
 
-    // Sticky uses the original FREE-FORM blocker category (preserved on
-    // seedBlocker) rather than the closed-enum FailureEntry.category, so
-    // (a) calibration can round-trip through OutcomeWriter recordOverride
-    //     keyed on the same string the gate looked up, and
-    // (b) end-users see the same category name they originally wrote in
-    //     blocker.category, not the mapCategory-coerced enum.
-    const stickyCategory = failure.seedBlocker?.category ?? failure.category;
-    const stickyKey = `${stickyCategory}|${truncate(failure.title, 60)}`;
+    // Single source of truth: pass the free-form `cat` so the council
+    // overlap check uses the same key the council blockers were indexed
+    // under. Pre-fix this used `failure.category` (enum) and missed
+    // every council blocker that carried the free-form name.
+    if (alreadyCoveredByCouncil(failure, cat, existingByCategory, changedFiles)) continue;
+
+    const stickyKey = `${cat}|${truncate(failure.title, 60)}`;
     if (seenStickyKeys.has(stickyKey)) continue;
     seenStickyKeys.add(stickyKey);
 
-    // H2 #8 — apply per-repo calibration before constructing the sticky.
-    // Calibration is keyed on the FREE-FORM blocker category (what the
-    // agent emitted, e.g. "debug-noise") because OutcomeWriter records
-    // overrides from blocker.category. FailureEntry.category is a closed
-    // enum (mapped via classifier.mapCategory) — using it here would miss
-    // calibrations recorded under free-form names. seedBlocker preserves
-    // the original; fall back to failure.category for legacy entries
-    // without a seedBlocker.
-    const calLookupCategory = failure.seedBlocker?.category ?? failure.category;
-    const calEntry = opts.calibration?.get(calLookupCategory);
+    const calEntry = opts.calibration?.get(cat);
     const calibrated = applyCalibrationToSeverity(failure.severity, calEntry?.overrideCount ?? 0);
     if (calibrated === null) {
       calibrationSkips.push({
         failureId: failure.id,
-        category: calLookupCategory,
+        category: cat,
         overrideCount: calEntry?.overrideCount ?? 0,
       });
       continue;
@@ -125,11 +132,11 @@ export function applyFailureGate(
 
     const calibratedNote =
       calibrated !== failure.severity
-        ? ` (severity demoted ${failure.severity}→${calibrated} — repo overrode "${calLookupCategory}" ${calEntry?.overrideCount ?? 0}x)`
+        ? ` (severity demoted ${failure.severity}→${calibrated} — repo overrode "${cat}" ${calEntry?.overrideCount ?? 0}x)`
         : "";
     const sticky: Blocker = {
       severity: calibrated,
-      category: stickyCategory,
+      category: cat,
       message:
         `[sticky from failure-catalog] ${failure.title} — ${truncate(failure.body, 240)}${calibratedNote}`,
       ...(failure.seedBlocker?.file ? { file: failure.seedBlocker.file } : {}),
@@ -241,10 +248,11 @@ function matchTokens(
 
 function alreadyCoveredByCouncil(
   failure: FailureEntry,
+  effectiveCat: string,
   existingByCategory: ReadonlyMap<string, readonly Blocker[]>,
   changedFiles: readonly string[],
 ): boolean {
-  const sameCat = existingByCategory.get(failure.category);
+  const sameCat = existingByCategory.get(effectiveCat);
   if (!sameCat || sameCat.length === 0) return false;
   // If the catalog entry has no file context, any same-category blocker counts as coverage.
   const seedFile = failure.seedBlocker?.file;
