@@ -35,9 +35,12 @@ on:
         required: false
         type: string
         default: ''
-  schedule:
-    - cron: '*/15 * * * *'  # every 15 minutes — concurrency:dev-loop
-                             # below queues runs so back-to-back is safe
+  # schedule:
+  #   - cron: '*/15 * * * *'  # disabled 2026-04-28: doing manual dev
+  #                            # locally, freeing runner capacity for
+  #                            # parallel automation on another project.
+  #                            # Re-enable after confirming `claude exited
+  #                            # null` root cause from H1.5 B retries.
 
 concurrency:
   group: dev-loop
