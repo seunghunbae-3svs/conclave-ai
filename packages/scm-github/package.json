@@ -1,6 +1,6 @@
 {
   "name": "@conclave-ai/scm-github",
-  "version": "0.5.20",
+  "version": "0.5.21",
   "description": "Conclave AI SCM adapter for GitHub — resolve PR state for automatic outcome capture.",
   "license": "MIT",
   "type": "module",

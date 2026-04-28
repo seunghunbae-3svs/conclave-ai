@@ -1,6 +1,6 @@
 {
   "name": "@conclave-ai/platform-cloudflare",
-  "version": "0.5.20",
+  "version": "0.5.21",
   "description": "Conclave AI Cloudflare Pages adapter — resolve preview URL for a commit SHA via Cloudflare API.",
   "license": "MIT",
   "type": "module",
