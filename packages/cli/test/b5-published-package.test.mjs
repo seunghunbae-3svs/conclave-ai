@@ -24,10 +24,13 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-const CLI_PKG_DIR = path.resolve(
-  path.dirname(new URL(import.meta.url).pathname.replace(/^\//, "")),
-  "..",
-);
+// `import.meta.dirname` returns the test file's directory as an
+// absolute path on every platform (Linux runners, Windows local). The
+// previous URL.pathname.replace(/^\//, "") form silently broke on
+// Linux: `pathname` like "/home/runner/.../test" became "home/runner/..."
+// (relative), then path.resolve(cwd, that) doubled the path. Caught by
+// release run 25084378500 with all 11 B.5 tests failing.
+const CLI_PKG_DIR = path.resolve(import.meta.dirname, "..");
 
 function captureCmd(cmd, opts = {}) {
   try {
