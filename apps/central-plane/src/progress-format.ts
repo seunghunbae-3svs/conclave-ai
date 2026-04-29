@@ -25,7 +25,12 @@ export type ProgressStage =
   | "escalating-to-tier2"
   | "tier2-done"
   | "autofix-iter-started"
-  | "autofix-iter-done";
+  | "autofix-iter-done"
+  // UX-2 / UX-3 — added in cli@0.14.2 to mirror the integration-telegram
+  // package. Drift caused HTTP 400 on every emit (eventbadge PR #40).
+  | "autofix-cycle-ended"
+  | "autofix-blocker-started"
+  | "autofix-blocker-done";
 
 export interface ProgressPayload {
   repo?: string;
@@ -39,11 +44,24 @@ export interface ProgressPayload {
   iteration?: number;
   fixesVerified?: number;
   reason?: string;
+  // UX-2 — terminal status fields.
+  bailStatus?: string;
+  iterationsAttempted?: number;
+  totalCostUsd?: number;
+  remainingBlockerCount?: number;
+  // UX-3 — per-blocker fields.
+  blockerIndex?: number;
+  blockerTotal?: number;
+  blockerLabel?: string;
+  blockerOutcome?: string;
 }
 
 export interface ProgressLine {
   stage: ProgressStage;
   text: string;
+  // UX-2 — preserve bailStatus across re-renders so stageEmoji can
+  // pick the right terminal glyph.
+  bailStatus?: string;
 }
 
 const IN_PROGRESS_STAGES: readonly ProgressStage[] = [
@@ -51,9 +69,20 @@ const IN_PROGRESS_STAGES: readonly ProgressStage[] = [
   "visual-capture-started",
   "escalating-to-tier2",
   "autofix-iter-started",
+  "autofix-blocker-started",
 ];
 
-function stageEmoji(stage: ProgressStage): string {
+const TERMINAL_BAIL_PREFIXES = ["bailed-", "loop-guard-trip"];
+
+function stageEmoji(stage: ProgressStage, payload?: { bailStatus?: string }): string {
+  // UX-2 — terminal cycle ended emoji selection.
+  if (stage === "autofix-cycle-ended") {
+    const bs = payload?.bailStatus ?? "";
+    if (bs === "approved" || bs === "awaiting-approval") return "✅";
+    if (bs === "deferred-to-next-review") return "⏭";
+    if (TERMINAL_BAIL_PREFIXES.some((p) => bs === p || bs.startsWith(p))) return "🛑";
+    return "ℹ️";
+  }
   return IN_PROGRESS_STAGES.includes(stage) ? "🔵" : "✅";
 }
 
@@ -115,6 +144,35 @@ export function renderProgressLine(stage: ProgressStage, payload: ProgressPayloa
         : "";
       return { stage, text: `Autofix iteration ${n} done${fixed}` };
     }
+    // UX-3 — per-blocker progress.
+    case "autofix-blocker-started": {
+      const idx = typeof p.blockerIndex === "number" ? p.blockerIndex : 0;
+      const tot = typeof p.blockerTotal === "number" ? p.blockerTotal : 0;
+      const label = p.blockerLabel ? escapeHtml(p.blockerLabel) : "";
+      return { stage, text: `  → fixing blocker ${idx}/${tot}${label ? ` — ${label}` : ""}` };
+    }
+    case "autofix-blocker-done": {
+      const idx = typeof p.blockerIndex === "number" ? p.blockerIndex : 0;
+      const tot = typeof p.blockerTotal === "number" ? p.blockerTotal : 0;
+      const out = p.blockerOutcome ?? "";
+      const outGlyph = out === "ready" ? "✓" : out === "skipped" ? "⊘" : out === "conflict" ? "✗" : out === "secret-block" ? "🔒" : out === "worker-error" ? "⚠" : "·";
+      return { stage, text: `  ${outGlyph} blocker ${idx}/${tot}${out ? ` — ${escapeHtml(out)}` : ""}` };
+    }
+    // UX-2 — terminal cycle status.
+    case "autofix-cycle-ended": {
+      const status = p.bailStatus ?? "ended";
+      const iters = typeof p.iterationsAttempted === "number" ? p.iterationsAttempted : 0;
+      const cost = typeof p.totalCostUsd === "number" ? `, $${p.totalCostUsd.toFixed(4)}` : "";
+      const remaining = typeof p.remainingBlockerCount === "number" && p.remainingBlockerCount > 0
+        ? `, ${p.remainingBlockerCount} blocker${p.remainingBlockerCount === 1 ? "" : "s"} remain`
+        : "";
+      const reason = p.reason ? ` — ${escapeHtml(p.reason).slice(0, 120)}` : "";
+      return {
+        stage,
+        text: `Cycle ended: ${escapeHtml(status)} (${iters} iter${iters === 1 ? "" : "s"}${cost}${remaining})${reason}`,
+        bailStatus: status,
+      };
+    }
   }
 }
 
@@ -129,7 +187,7 @@ export function renderProgressMessage(
   const header = target
     ? `<b>🤖 Conclave review</b> — ${target} <i>(${escapeHtml(epShort)})</i>`
     : `<b>🤖 Conclave review</b> <i>(${escapeHtml(epShort)})</i>`;
-  const body = lines.map((l) => `${stageEmoji(l.stage)} ${l.text}`).join("\n");
+  const body = lines.map((l) => `${stageEmoji(l.stage, { bailStatus: l.bailStatus })} ${l.text}`).join("\n");
   return body.length > 0 ? `${header}\n${body}` : header;
 }
 

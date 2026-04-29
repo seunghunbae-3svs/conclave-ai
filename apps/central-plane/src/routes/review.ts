@@ -465,6 +465,14 @@ export function createReviewRoutes(
     "tier2-done",
     "autofix-iter-started",
     "autofix-iter-done",
+    // UX-2 / UX-3 — added in cli@0.14.2. Pre-update the central plane
+    // returned HTTP 400 for these and Telegram never saw cycle-ended /
+    // per-blocker progress. LIVE-caught on eventbadge PR #40 rework run
+    // #25121646235 — every emit failed, the message stopped updating
+    // after "auto fixing 1/3" again.
+    "autofix-cycle-ended",
+    "autofix-blocker-started",
+    "autofix-blocker-done",
   ];
 
   app.post("/review/notify-progress", async (c) => {
