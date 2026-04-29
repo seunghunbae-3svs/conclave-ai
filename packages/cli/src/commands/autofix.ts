@@ -277,6 +277,13 @@ export interface AutofixDeps {
   /** Safety guards. */
   loopGuard?: LoopGuard;
   breaker?: CircuitBreaker;
+  /**
+   * UX-2 / UX-3 — override the progress notifier list. Production code
+   * builds them from the config via `buildNotifiers`; tests inject a
+   * capture stub so they can assert on emitted stages without a live
+   * Telegram bot. When omitted, the production path runs.
+   */
+  notifiers?: Notifier[];
 }
 
 const defaultGit: GitLike = async (bin, args, opts) => {
@@ -517,6 +524,26 @@ export async function runAutofix(args: AutofixArgs, deps: AutofixDeps = {}): Pro
         `autofix: terminal-summary PR comment failed (${statusTag}) — ${err instanceof Error ? err.message : String(err)}\n`,
       );
     }
+    // UX-2 — also emit to the progress stream so Telegram / Discord /
+    // Slack notifiers render the terminal status. Pre-UX-2 the bail
+    // summary went only to the PR comment (UX-1), and Bae watching
+    // Telegram never saw cycle outcome — the message just stopped
+    // updating after "auto fixing 1/3".
+    if (progressEpisodicId) {
+      await emitProgress(progressNotifiers, {
+        episodicId: progressEpisodicId,
+        stage: "autofix-cycle-ended",
+        payload: {
+          bailStatus: statusTag,
+          iterationsAttempted: summaryCtx.iterationsAttempted,
+          totalCostUsd: summaryCtx.totalCostUsd,
+          remainingBlockerCount: summaryCtx.remainingBlockers.length,
+          ...(summaryCtx.reason ? { reason: summaryCtx.reason } : {}),
+          ...(repoSlug ? { repo: repoSlug } : {}),
+          ...(typeof pr === "number" ? { pullNumber: pr } : {}),
+        },
+      });
+    }
   };
   const readVerdict = deps.readVerdictFile ?? ((p: string) => fs.readFile(p, "utf8"));
   const readStdin = deps.readStdin ?? defaultReadStdin;
@@ -742,7 +769,7 @@ export async function runAutofix(args: AutofixArgs, deps: AutofixDeps = {}): Pro
   // and there's no message to edit on. emitProgress no-ops on an empty
   // notifier list, so the per-iteration calls below stay cost-free.
   const progressNotifiers: Notifier[] = progressEpisodicId
-    ? buildNotifiers(cfg.config)
+    ? (deps.notifiers ?? buildNotifiers(cfg.config))
     : [];
 
   // H3 #13 — pull rework-loop-failure entries out of the failure-catalog
@@ -821,11 +848,31 @@ export async function runAutofix(args: AutofixArgs, deps: AutofixDeps = {}): Pro
     //     it) — they're tracked in `handlerStagedFixes` so the
     //     apply-sequentially loop below can skip them.
     const handlerStagedFixes = new Set<BlockerFix>();
-    for (const t of targets) {
+    const blockerTotal = targets.length;
+    for (let bIdx = 0; bIdx < targets.length; bIdx += 1) {
+      const t = targets[bIdx]!;
       // Budget early-exit — never burn past the cap.
       if (totalCost >= args.budgetUsd) {
         stdout(`autofix: budget ($${args.budgetUsd}) hit mid-iteration — finishing early\n`);
         break;
+      }
+      // UX-3 — emit per-blocker progress so the user sees concrete work.
+      // Pre-UX-3 the only signal was "auto fixing 1/3" (cycle-level); 9
+      // blockers in one iteration looked like nothing was happening.
+      if (progressEpisodicId) {
+        const blockerLabel = `${t.blocker.category ?? "uncategorized"}: ${(t.blocker.message ?? "").slice(0, 60)}`;
+        await emitProgress(progressNotifiers, {
+          episodicId: progressEpisodicId,
+          stage: "autofix-blocker-started",
+          payload: {
+            iteration: i + 1,
+            blockerIndex: bIdx + 1,
+            blockerTotal,
+            blockerLabel,
+            ...(repo ? { repo } : {}),
+            ...(typeof prNumber === "number" ? { pullNumber: prNumber } : {}),
+          },
+        });
       }
       // Try the special-handlers first. These handle blockers the
       // unified-diff pipeline can't (binary files, etc.) and count as
@@ -841,6 +888,20 @@ export async function runAutofix(args: AutofixArgs, deps: AutofixDeps = {}): Pro
           handlerStagedFixes.add(handled.fix);
         }
         totalCost += handled.fix.costUsd ?? 0;
+        if (progressEpisodicId) {
+          await emitProgress(progressNotifiers, {
+            episodicId: progressEpisodicId,
+            stage: "autofix-blocker-done",
+            payload: {
+              iteration: i + 1,
+              blockerIndex: bIdx + 1,
+              blockerTotal,
+              blockerOutcome: handled.fix.status,
+              ...(repo ? { repo } : {}),
+              ...(typeof prNumber === "number" ? { pullNumber: prNumber } : {}),
+            },
+          });
+        }
         continue;
       }
 
@@ -890,6 +951,21 @@ export async function runAutofix(args: AutofixArgs, deps: AutofixDeps = {}): Pro
       }
       fixes.push(bfix);
       totalCost += bfix.costUsd ?? 0;
+      // UX-3 — emit per-blocker outcome.
+      if (progressEpisodicId) {
+        await emitProgress(progressNotifiers, {
+          episodicId: progressEpisodicId,
+          stage: "autofix-blocker-done",
+          payload: {
+            iteration: i + 1,
+            blockerIndex: bIdx + 1,
+            blockerTotal,
+            blockerOutcome: bfix.status,
+            ...(repo ? { repo } : {}),
+            ...(typeof prNumber === "number" ? { pullNumber: prNumber } : {}),
+          },
+        });
+      }
     }
 
     // --- Secret-guard + file-deny already applied per-patch. Now run
@@ -1017,13 +1093,17 @@ export async function runAutofix(args: AutofixArgs, deps: AutofixDeps = {}): Pro
       };
     }
 
-    // --- Apply patches sequentially ------------------------------------
+    // --- Apply patches sequentially (AF-1: partial-apply rescue) -------
     //     Each patch runs through `git apply --recount` (already validated
-    //     individually). If a later patch conflicts after earlier ones
-    //     landed, we ROLLBACK the whole staging area and bail — partial
-    //     autofix is worse than no autofix.
+    //     individually). When one patch conflicts mid-iteration, we restore
+    //     ONLY its target files via `git checkout HEAD -- <files>`, mark
+    //     the fix as conflict, and continue with the rest. Pre-AF-1 the
+    //     policy was "rollback all, partial autofix is worse than no
+    //     autofix" — but with 9 blockers per cycle (eventbadge PR #39 LIVE
+    //     catch: code + design + runtime), one off-by-N hunk killed every
+    //     other clean patch. New rule: keep what applied, drop what didn't,
+    //     proceed to commit + push. Remaining blockers go to next cycle.
     const appliedPaths: string[] = [];
-    let applyFailed = false;
     for (const rf of stillReady) {
       const tempPath = path.join(args.cwd, `.conclave-autofix-apply-${shortId()}.patch`);
       // v0.13.10 — programmatically rewrite hunk headers so B/D match
@@ -1033,7 +1113,14 @@ export async function runAutofix(args: AutofixArgs, deps: AutofixDeps = {}): Pro
       // mid-hunk). recountHunkHeaders is idempotent for already-correct
       // patches, so it's safe to always run.
       const fixedPatch = recountHunkHeaders(rf.patch!);
-      await fs.writeFile(tempPath, fixedPatch, "utf8").catch(() => undefined);
+      // Use deps.writeTempPatch when injected (test path) so the test
+       // can intercept the patch body. Falls back to fs.writeFile in
+       // production. Errors are swallowed both ways — the apply step
+       // immediately below detects a missing file via its own error.
+      const writeTempPatchHook = deps.writeTempPatch ?? (async (p: string, c: string) => {
+        await fs.writeFile(p, c, "utf8");
+      });
+      await writeTempPatchHook(tempPath, fixedPatch).catch(() => undefined);
       try {
         // re-check then apply (files may have shifted after earlier patches).
         await git("git", ["apply", "--check", "--recount", tempPath], { cwd: args.cwd });
@@ -1139,38 +1226,67 @@ export async function runAutofix(args: AutofixArgs, deps: AutofixDeps = {}): Pro
           ? `\n--- patch(1) --fuzz=3 fallback also failed ---\n${fuzzReason.slice(0, 800)}`
           : "";
         rf.reason = `${reason}${fuzzSection}\n--- generated patch (head 1500c) ---\n${patchDump}${recountedSection}\n--- target file head 12 lines ---\n${fileSnippet}`;
-        applyFailed = true;
-        break;
+        // AF-1 — partial-apply rescue. Pre-AF-1 a single conflict
+        // killed the whole iteration via `applyFailed = true; break;`,
+        // wiping every other patch that had landed cleanly via
+        // `git reset --hard HEAD`. With 9 blockers per cycle (real
+        // case: eventbadge PR #39 — code + design + runtime), one
+        // conflict among them dropped the whole cycle to zero
+        // applied fixes and the loop stalled.
+        //
+        // Now: restore ONLY the files this conflicting patch tried to
+        // touch (back to HEAD or to whatever earlier patches in this
+        // iteration left them at — see below), mark the fix as
+        // conflict, and continue. The other patches' changes stay in
+        // the worktree and get committed in the normal flow.
+        //
+        // Subtlety: GNU patch's fuzz fallback may have partially
+        // modified the file before failing (no --dry-run on the apply
+        // path). `git checkout HEAD -- <file>` cleanly restores it
+        // because we haven't staged those changes yet.
+        const filesToRestore = (rf.appliedFiles ?? []).filter((f) => f.length > 0);
+        if (filesToRestore.length > 0) {
+          await git(
+            "git",
+            ["checkout", "HEAD", "--", ...filesToRestore],
+            { cwd: args.cwd },
+          ).catch((restoreErr) => {
+            stderr(
+              `autofix: AF-1 partial-restore failed for ${filesToRestore.join(", ")} — ${restoreErr instanceof Error ? restoreErr.message : String(restoreErr)}; subsequent fixes may see this file in a partial state\n`,
+            );
+          });
+        }
+        rf.status = "conflict";
+        stderr(
+          `autofix: AF-1 — patch for blocker [${rf.blocker.category}] @ ${rf.blocker.file ?? "<unscoped>"} rejected; dropped this patch and continuing with remaining ${stillReady.length - 1 - stillReady.indexOf(rf)} fix(es) in this iteration\n`,
+        );
+        continue;
       } finally {
         await fs.unlink(tempPath).catch(() => undefined);
       }
     }
 
-    if (applyFailed) {
-      // Roll back: hard reset working tree to HEAD. We do NOT touch the
-      // commit graph — only the index + worktree.
+    // AF-1 — count fixes that successfully landed on the worktree.
+    // Pre-AF-1 we bailed on first conflict; post-AF-1 we proceed if at
+    // least one ready fix made it through. Only when ALL fixes failed
+    // do we hit the no-patches bail below.
+    const survivedFixes = stillReady.filter((rf) => rf.status === "ready");
+    if (survivedFixes.length === 0) {
+      // Every patch in stillReady ended up conflict — nothing to commit.
+      // Reset is defensive: AF-1 partial-restore already cleaned the
+      // failed patches' files, but this catches anything we missed.
       await git("git", ["reset", "--hard", "HEAD"], { cwd: args.cwd }).catch(() => undefined);
-      // v0.13.2 — surface the actual git apply reason. Pre-fix, the
-      // log just said "apply conflict mid-iteration" with no context;
-      // operators couldn't tell whether it was a context-mismatch
-      // (line ending / encoding), a missing file, or a real merge
-      // collision. Now we dump the rejecting fix's file + reason tail
-      // so the failure mode is debuggable from CI logs alone.
       const conflicting = fixes.filter((f) => f.status === "conflict");
-      stderr(`autofix: apply conflict mid-iteration — rolled back staged changes (${conflicting.length} fix(es) rejected)\n`);
+      stderr(`autofix: every patch this iteration conflicted — ${conflicting.length} fix(es) rejected\n`);
       for (const cf of conflicting) {
-        // v0.13.5 — show the full reason, not just last 500 chars,
-        // because patch dumps embedded by the apply-conflict catch
-        // run 1500-3000 chars and the tail cut hid the patch start.
         stderr(`autofix:   reject — ${cf.blocker.file ?? "<unknown>"}:\n${cf.reason ?? "(no detail)"}\n`);
       }
-      iterations.push(finalizeIteration(i, fixes, false, ["apply-conflict"]));
-      // UX-1 — unified summary; explicit reason so user sees apply-conflict.
+      iterations.push(finalizeIteration(i, fixes, false, ["apply-conflict-all"]));
       await postBailSummary(prNumber, repo, "bailed-no-patches", {
         iterationsAttempted: iterations.length,
         totalCostUsd: totalCost,
         remainingBlockers: remainingBlockersFrom(currentReviews),
-        reason: "apply-conflict mid-iteration (one or more patches rejected after others applied)",
+        reason: "every patch this iteration rejected (apply-conflict on all stillReady fixes)",
       });
       return {
         code: 1,

@@ -64,7 +64,25 @@ export type ProgressStage =
   | "escalating-to-tier2"
   | "tier2-done"
   | "autofix-iter-started"
-  | "autofix-iter-done";
+  | "autofix-iter-done"
+  /**
+   * UX-2 — terminal stage for any cycle ending (success OR bail). Emits
+   * once per autofix run, with `bailStatus` carrying the AutofixResult
+   * status tag ("approved" / "awaiting-approval" / "deferred-to-next-review"
+   * / "bailed-no-patches" / "bailed-build-failed" / "bailed-tests-failed"
+   * / "bailed-secret-guard" / "bailed-max-iterations" / "bailed-budget"
+   * / "loop-guard-trip"). Pre-UX-2 the terminal state went only to PR
+   * comment via UX-1 — Telegram users never saw cycle outcome.
+   */
+  | "autofix-cycle-ended"
+  /**
+   * UX-3 — emitted before each per-blocker worker call so the user sees
+   * concrete progress ("fixing blocker 3/9: Stray console.log"). One
+   * emit per blocker per iteration; pre-UX-3 the only visible signal was
+   * the iteration-level "auto fixing 1/3".
+   */
+  | "autofix-blocker-started"
+  | "autofix-blocker-done";
 
 /**
  * Optional payload carried with a progress stage. Notifiers render this
@@ -94,6 +112,27 @@ export interface ProgressPayload {
   fixesVerified?: number;
   /** Free-form reason / failure tail. Truncated by the notifier renderer. */
   reason?: string;
+  /**
+   * UX-2 — terminal AutofixResult.status tag. Notifier renders a
+   * status-specific glyph + headline (✅ approved, ⚠️ deferred, 🛑 bailed-*).
+   */
+  bailStatus?: string;
+  /** UX-2 — total iterations attempted (1..maxIterations). */
+  iterationsAttempted?: number;
+  /** UX-2 — total cost spent across the cycle (USD). */
+  totalCostUsd?: number;
+  /** UX-2 — count of blockers still unresolved at terminal time. */
+  remainingBlockerCount?: number;
+  /**
+   * UX-3 — 1-based blocker index within the iteration (1..blockerTotal).
+   */
+  blockerIndex?: number;
+  /** UX-3 — total blocker count for this iteration. */
+  blockerTotal?: number;
+  /** UX-3 — short label for the blocker being worked ("category: msg head"). */
+  blockerLabel?: string;
+  /** UX-3 — per-blocker outcome: "ready" / "skipped" / "conflict" / "secret-block" / "worker-error". */
+  blockerOutcome?: string;
 }
 
 export interface NotifyProgressInput {
