@@ -14,6 +14,7 @@ import type {
   WorkerRejectedAttempt,
 } from "@conclave-ai/agent-worker";
 import { recountHunkHeaders } from "./patch-fixup.js";
+import { classifyAnthropicError, formatClassifiedReason } from "./anthropic-error-classify.js";
 
 export type WorkerLike = {
   work: (ctx: WorkerContext) => Promise<WorkerOutcome>;
@@ -238,11 +239,15 @@ export async function runPerBlocker(
     try {
       outcome = await deps.worker.work(ctx);
     } catch (err) {
+      // PIA-6 — classify Anthropic API errors so PR comments / Telegram
+      // surface a one-line user-action message instead of a raw "400
+      // invalid_request_error: credit balance is too low" blob.
+      const classification = classifyAnthropicError(err);
       return {
         agent: input.agent,
         blocker: input.blocker,
         status: "worker-error",
-        reason: err instanceof Error ? err.message : String(err),
+        reason: formatClassifiedReason(classification),
         ...(totalCostUsd > 0 ? { costUsd: totalCostUsd } : {}),
         ...(totalTokensUsed > 0 ? { tokensUsed: totalTokensUsed } : {}),
       };
