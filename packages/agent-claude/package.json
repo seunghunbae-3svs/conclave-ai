@@ -1,6 +1,6 @@
 {
   "name": "@conclave-ai/agent-claude",
-  "version": "0.8.2",
+  "version": "0.8.3",
   "description": "Conclave AI Claude agent — wraps @anthropic-ai/claude-agent-sdk.",
   "license": "MIT",
   "type": "module",
