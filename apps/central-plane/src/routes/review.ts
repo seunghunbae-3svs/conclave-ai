@@ -473,6 +473,8 @@ export function createReviewRoutes(
     "autofix-cycle-ended",
     "autofix-blocker-started",
     "autofix-blocker-done",
+    // UX-4 — terminal user-facing report.
+    "review-finished",
   ];
 
   app.post("/review/notify-progress", async (c) => {
@@ -558,6 +560,20 @@ export function createReviewRoutes(
     let edited = 0;
     for (const chatId of chatIds) {
       try {
+        // UX-4 — review-finished is a SEPARATE terminal report message,
+        // not an append to the progress chain. Send via sendMessage so
+        // it lands as a fresh Telegram message in the chat. The progress
+        // chain message stays put as the running log; the terminal
+        // report is a single big "여기서 끝났습니다" card.
+        if (stage === "review-finished") {
+          await telegram.sendMessage({
+            chatId,
+            text: newLine.text,
+            parseMode: "HTML",
+          });
+          sent += 1;
+          continue;
+        }
         const existing = await findProgressMessage(c.env, install.id, body.episodic_id, chatId);
         if (!existing) {
           const lines: ProgressLine[] = [newLine];

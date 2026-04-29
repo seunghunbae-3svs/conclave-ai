@@ -37,6 +37,11 @@ import { fetchPrState, fetchDeployStatus as defaultFetchDeployStatus, type Deplo
 import { loadConfig, resolveMemoryRoot, type ConclaveConfig } from "../lib/config.js";
 import { runPerBlocker, type GitLike, type WorkerLike } from "../lib/autofix-worker.js";
 import { renderBailSummary, shouldPostSummary } from "../lib/bail-summary.js";
+import {
+  buildTerminalReport,
+  isAutonomyTerminal,
+  type DeployOutcome,
+} from "../lib/terminal-report.js";
 import { recountHunkHeaders } from "../lib/patch-fixup.js";
 import { runSpecialHandlers } from "../lib/autofix-handlers/index.js";
 import { writeSolutionSidecar } from "../lib/solution-sidecar.js";
@@ -509,6 +514,9 @@ export async function runAutofix(args: AutofixArgs, deps: AutofixDeps = {}): Pro
   ) => {
     if (!pr) return;
     if (!shouldPostSummary(statusTag)) return;
+    // Diagnostic — surfaces in CI logs so we can confirm the path fires
+    // even when the user only sees a PR comment / no Telegram update.
+    stdout(`autofix: posting terminal summary (status=${statusTag}, pr=${pr}, repo=${repoSlug ?? "?"}, episodicId=${progressEpisodicId ?? "<none>"})\n`);
     try {
       const body = renderBailSummary(statusTag, summaryCtx);
       // Pass --repo only when we have it; otherwise let gh infer from
@@ -530,6 +538,7 @@ export async function runAutofix(args: AutofixArgs, deps: AutofixDeps = {}): Pro
     // Telegram never saw cycle outcome — the message just stopped
     // updating after "auto fixing 1/3".
     if (progressEpisodicId) {
+      stdout(`autofix: emitting autofix-cycle-ended to ${progressNotifiers.length} notifier(s)\n`);
       await emitProgress(progressNotifiers, {
         episodicId: progressEpisodicId,
         stage: "autofix-cycle-ended",
@@ -543,6 +552,9 @@ export async function runAutofix(args: AutofixArgs, deps: AutofixDeps = {}): Pro
           ...(typeof pr === "number" ? { pullNumber: pr } : {}),
         },
       });
+      stdout(`autofix: autofix-cycle-ended emit completed\n`);
+    } else {
+      stdout(`autofix: skipping autofix-cycle-ended emit — no progressEpisodicId in scope\n`);
     }
   };
   const readVerdict = deps.readVerdictFile ?? ((p: string) => fs.readFile(p, "utf8"));
@@ -1699,6 +1711,60 @@ export async function runAutofix(args: AutofixArgs, deps: AutofixDeps = {}): Pro
     } catch (err) {
       stderr(`autofix: rework-loop-failure catalog write failed — ${(err as Error).message}\n`);
     }
+  }
+
+  // UX-4 — terminal user-facing report. Fires once per autonomy loop
+  // termination (NOT per cycle). Gated by isAutonomyTerminal so a
+  // deferred cycle doesn't double-emit (next cycle's autofix will).
+  const terminal = isAutonomyTerminal({
+    status,
+    pushedThisRun: anyIterationPushed,
+    reworkCycle: args.reworkCycle ?? 0,
+    maxCycles: 3,
+  });
+  if (terminal && progressEpisodicId) {
+    // Best-effort deploy probe. We only know the outcome from autofix's
+    // own post-push poll (deps.fetchDeployStatus). On bail-without-push
+    // we use the prior known state if any, else "unknown".
+    // The terminal block at this point only sees a narrowed subset
+    // of AutofixResultStatus (TS narrowing) — bailed-build-failed
+    // and bailed-tests-failed are early-returned upstream and never
+    // reach here. Use a string-cast comparison so future status
+    // additions don't silently lose the deploy=failure mapping if
+    // they DO route through this block.
+    let deployOutcome: DeployOutcome = "unknown";
+    if (mergeStatus === "merged") {
+      deployOutcome = "success";
+    } else {
+      const s = status as string;
+      if (s === "bailed-build-failed" || s === "bailed-tests-failed") {
+        deployOutcome = "failure";
+      }
+    }
+    const report = buildTerminalReport({
+      status,
+      iterations,
+      remainingBlockers: finalRemaining,
+      totalCostUsd: totalCost,
+      cyclesRun: (args.reworkCycle ?? 0) + 1,
+      deployOutcome,
+    });
+    stdout(
+      `autofix: emitting review-finished (status=${status}, cycles=${report.cyclesRun}, found=${report.totalBlockersFound}, fixed=${report.blockersAutofixed}, outstanding=${report.blockersOutstanding}, recommendation=${report.recommendation})\n`,
+    );
+    await emitProgress(progressNotifiers, {
+      episodicId: progressEpisodicId,
+      stage: "review-finished",
+      payload: {
+        ...report,
+        ...(repo ? { repo } : {}),
+        ...(typeof prNumber === "number" ? { pullNumber: prNumber } : {}),
+      },
+    });
+  } else if (progressEpisodicId) {
+    stdout(
+      `autofix: NOT emitting review-finished (autonomy not terminal — status=${status}, pushed=${anyIterationPushed}, cycle=${args.reworkCycle ?? 0}/${3})\n`,
+    );
   }
 
   return {

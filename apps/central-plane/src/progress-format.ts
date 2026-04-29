@@ -30,7 +30,11 @@ export type ProgressStage =
   // package. Drift caused HTTP 400 on every emit (eventbadge PR #40).
   | "autofix-cycle-ended"
   | "autofix-blocker-started"
-  | "autofix-blocker-done";
+  | "autofix-blocker-done"
+  // UX-4 — terminal user-facing report. Sent as a SEPARATE Telegram
+  // message (new sendMessage, not editMessageText) at the end of the
+  // autonomy loop, AFTER deploy status has settled.
+  | "review-finished";
 
 export interface ProgressPayload {
   repo?: string;
@@ -54,6 +58,15 @@ export interface ProgressPayload {
   blockerTotal?: number;
   blockerLabel?: string;
   blockerOutcome?: string;
+  // UX-4 — terminal report fields (mirrors @conclave-ai/core).
+  cyclesRun?: number;
+  totalBlockersFound?: number;
+  blockersAutofixed?: number;
+  blockersOutstanding?: number;
+  fixedItems?: string[];
+  outstandingItems?: string[];
+  deployOutcome?: string;
+  recommendation?: string;
 }
 
 export interface ProgressLine {
@@ -172,6 +185,36 @@ export function renderProgressLine(stage: ProgressStage, payload: ProgressPayloa
         text: `Cycle ended: ${escapeHtml(status)} (${iters} iter${iters === 1 ? "" : "s"}${cost}${remaining})${reason}`,
         bailStatus: status,
       };
+    }
+    // UX-4 — terminal user-facing report (non-dev language). Note:
+    // this case returns only the rendered text; the actual SEND uses
+    // sendMessage (not editMessageText) so it lands as a separate
+    // Telegram message. Caller in routes/review.ts detects this stage
+    // and routes to renderTerminalReport instead of the chain editor.
+    case "review-finished": {
+      const cycles = typeof p.cyclesRun === "number" ? p.cyclesRun : 1;
+      const found = typeof p.totalBlockersFound === "number" ? p.totalBlockersFound : 0;
+      const fixed = typeof p.blockersAutofixed === "number" ? p.blockersAutofixed : 0;
+      const outstanding = typeof p.blockersOutstanding === "number" ? p.blockersOutstanding : 0;
+      const cost = typeof p.totalCostUsd === "number" ? p.totalCostUsd.toFixed(4) : "0.00";
+      const deploy = p.deployOutcome ?? "unknown";
+      const rec = p.recommendation ?? "hold";
+      const fixedList = (p.fixedItems ?? []).slice(0, 8).map((s) => `  • ${escapeHtml(s)}`).join("\n");
+      const outstandingList = (p.outstandingItems ?? []).slice(0, 8).map((s) => `  • ${escapeHtml(s)}`).join("\n");
+      const deployGlyph = deploy === "success" ? "✅" : deploy === "failure" ? "❌" : deploy === "pending" ? "⏳" : "❔";
+      const recHeadline = rec === "approve" ? "✅ <b>승인 권장</b>" : rec === "reject" ? "❌ <b>거부 권장</b>" : "⏸ <b>보류 권장</b>";
+      const lines = [
+        `<b>🤖 Conclave 검토 완료</b>`,
+        ``,
+        `${cycles}회의 검토 사이클을 거쳐 총 ${found}건의 문제를 발견했습니다.`,
+        `자동 수정: ${fixed}건 · 사람 손 필요: ${outstanding}건 · 비용: $${cost}`,
+        `배포 상태: ${deployGlyph} ${escapeHtml(deploy)}`,
+        ``,
+      ];
+      if (fixedList) lines.push(`<b>고친 내용</b>`, fixedList, ``);
+      if (outstandingList) lines.push(`<b>남은 항목 (사람 검토 필요)</b>`, outstandingList, ``);
+      lines.push(recHeadline);
+      return { stage, text: lines.join("\n") };
     }
   }
 }

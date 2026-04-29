@@ -82,7 +82,22 @@ export type ProgressStage =
    * the iteration-level "auto fixing 1/3".
    */
   | "autofix-blocker-started"
-  | "autofix-blocker-done";
+  | "autofix-blocker-done"
+  /**
+   * UX-4 — terminal user-facing report. Fires ONCE at the end of the
+   * autonomy loop (approve / awaiting-approval / cycle-ceiling / bail-
+   * with-no-recovery), AFTER deploy status has settled. Renderer writes
+   * a non-developer summary in the user's language: what was found,
+   * what was fixed, what's left, how much it cost, and a verdict
+   * recommendation. Action buttons (approve / hold / reject) are
+   * appended by the notifier when the surface supports them
+   * (Telegram inline keyboard).
+   *
+   * Distinct from autofix-cycle-ended (per-cycle status line). One
+   * cycle has many cycle-ended emits over its lifetime; the loop has
+   * exactly ONE review-finished.
+   */
+  | "review-finished";
 
 /**
  * Optional payload carried with a progress stage. Notifiers render this
@@ -133,6 +148,36 @@ export interface ProgressPayload {
   blockerLabel?: string;
   /** UX-3 — per-blocker outcome: "ready" / "skipped" / "conflict" / "secret-block" / "worker-error". */
   blockerOutcome?: string;
+  // UX-4 — terminal user-facing report fields. Notifier renders these
+  // in the user's language (defaults to Korean for Bae's install; CLI
+  // config selects locale).
+  /** Total cycles that ran (1..maxCycles). */
+  cyclesRun?: number;
+  /** Total blockers caught across all cycles. */
+  totalBlockersFound?: number;
+  /** Blockers that autofix successfully patched + landed. */
+  blockersAutofixed?: number;
+  /** Blockers still requiring human attention. */
+  blockersOutstanding?: number;
+  /**
+   * Short non-dev summary lines describing what was fixed. Each entry
+   * is a one-line bullet rendered as-is. The renderer joins them.
+   */
+  fixedItems?: string[];
+  /**
+   * Short non-dev summary lines describing what's still outstanding.
+   */
+  outstandingItems?: string[];
+  /**
+   * Deploy outcome at terminal time: "success" | "failure" | "pending"
+   * | "unknown". Used to pick the verdict glyph.
+   */
+  deployOutcome?: string;
+  /**
+   * Verdict recommendation: "approve" | "hold" | "reject". Notifier
+   * highlights this on the corresponding action button.
+   */
+  recommendation?: string;
 }
 
 export interface NotifyProgressInput {
