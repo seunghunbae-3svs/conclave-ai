@@ -356,3 +356,57 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           gh pr comment "${{ inputs.pr-number }}" --body "Conclave rework loop hit the cycle ceiling (${{ inputs.cycle }}/${{ inputs.max-cycles }}). Human review needed — see open blockers above." || true
+
+      # UX-4 follow-on — when the cycle-ceiling guard skips autofix, the
+      # autonomy loop is genuinely done. Emit review-finished to the
+      # central plane so the user gets the unified terminal report
+      # card on Telegram. Pre-this, ceiling-skip ended in silence on
+      # Telegram (only a PR comment).
+      - name: Emit review-finished (cycle ceiling)
+        if: steps.guard.outputs.skip == 'true' && inputs.episodic != ''
+        env:
+          CONCLAVE_TOKEN: ${{ secrets.CONCLAVE_TOKEN }}
+          CONCLAVE_CENTRAL_URL: ${{ vars.CONCLAVE_CENTRAL_URL || '' }}
+          EPISODIC: ${{ inputs.episodic }}
+          CYCLE: ${{ inputs.cycle }}
+          MAX_CYCLES: ${{ inputs.max-cycles }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ inputs.pr-number }}
+        run: |
+          set -euo pipefail
+          BASE="${CONCLAVE_CENTRAL_URL:-https://conclave-ai.seunghunbae.workers.dev}"
+          BASE="${BASE%/}"
+          if [ -z "${CONCLAVE_TOKEN:-}" ]; then
+            echo "::warning::CONCLAVE_TOKEN unset — skipping review-finished emit"
+            exit 0
+          fi
+          PAYLOAD=$(jq -n \
+            --arg repo "$REPO" \
+            --argjson pr "${PR_NUMBER:-0}" \
+            --argjson cycles "${CYCLE:-0}" \
+            --arg status "bailed-cycle-ceiling" \
+            --arg reason "Autonomy loop hit cycle ceiling (${CYCLE}/${MAX_CYCLES}) — human review needed" \
+            '{
+              repo_slug: $repo,
+              episodic_id: env.EPISODIC,
+              stage: "review-finished",
+              payload: {
+                repo: $repo,
+                pullNumber: $pr,
+                bailStatus: $status,
+                cyclesRun: $cycles,
+                totalBlockersFound: 0,
+                blockersAutofixed: 0,
+                blockersOutstanding: 0,
+                totalCostUsd: 0,
+                deployOutcome: "unknown",
+                recommendation: "hold",
+                reason: $reason
+              }
+            }')
+          curl -fsS -X POST \
+            -H "Authorization: Bearer ${CONCLAVE_TOKEN}" \
+            -H "Content-Type: application/json" \
+            -d "$PAYLOAD" \
+            "${BASE}/review/notify-progress" | head -c 200 || \
+            echo "::warning::review-finished emit failed (non-fatal)"

@@ -1371,6 +1371,53 @@ export async function review(argv: string[]): Promise<void> {
     await langfuseSink.shutdown();
   }
 
+  // UX-4 follow-on — review.ts emits review-finished when the autonomy
+  // loop is terminating WITHOUT autofix invocation (verdict=approve OR
+  // cycle == max). autofix.ts's emitReviewFinishedIfTerminal covers the
+  // bail-from-autofix paths; this path covers approve-from-council.
+  // Pre-this, an autofix push that cleared all blockers ended cycle N+1
+  // with a normal "approve" notifyReview but no unified terminal report
+  // card. Bae's complaint: "결국 뭘 어떻게 고쳤는지 결과보고는 안 와".
+  const reworkCycleNum = args.reworkCycle ?? 0;
+  const terminalReview =
+    (outcome.verdict === "approve" && reworkCycleNum > 0) ||
+    (reworkCycleNum > 0 && outcome.verdict === "reject");
+  if (terminalReview && episodicId) {
+    try {
+      const remainingBlockerCount = outcome.results.reduce(
+        (sum, r) => sum + r.blockers.filter((b) => b.severity === "blocker" || b.severity === "major").length,
+        0,
+      );
+      const recommendation: "approve" | "hold" | "reject" =
+        outcome.verdict === "approve" ? "approve" : outcome.verdict === "reject" ? "reject" : "hold";
+      const payload: Record<string, unknown> = {
+        bailStatus: outcome.verdict === "approve" ? "approved" : "rejected",
+        iterationsAttempted: reworkCycleNum,
+        totalCostUsd: 0,
+        remainingBlockerCount,
+        cyclesRun: reworkCycleNum,
+        totalBlockersFound: remainingBlockerCount,
+        blockersAutofixed: 0, // unknown from review.ts vantage — autofix.ts emits its own report
+        blockersOutstanding: remainingBlockerCount,
+        fixedItems: [],
+        outstandingItems: [],
+        deployOutcome: "unknown",
+        recommendation,
+      };
+      if (loaded.repo) payload.repo = loaded.repo;
+      if (typeof loaded.pullNumber === "number") payload.pullNumber = loaded.pullNumber;
+      await emitProgress(notifiers, {
+        episodicId,
+        stage: "review-finished",
+        payload,
+      });
+    } catch (err) {
+      process.stderr.write(
+        `conclave review: review-finished emit failed — ${(err as Error).message}\n`,
+      );
+    }
+  }
+
   process.exit(verdictToExitCode(outcome.verdict));
 }
 
