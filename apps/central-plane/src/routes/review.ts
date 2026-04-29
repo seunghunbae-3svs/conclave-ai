@@ -574,7 +574,17 @@ export function createReviewRoutes(
           sent += 1;
           continue;
         }
-        const existing = await findProgressMessage(c.env, install.id, body.episodic_id, chatId);
+        // UX-5 — review-started ALWAYS creates a fresh message in this
+        // chat (no findProgressMessage lookup). Each cycle's review.yml
+        // run emits its own review-started, so each cycle gets its own
+        // Telegram message. Subsequent stages within the cycle update
+        // the most recent message via the standard find→edit path.
+        // Pre-UX-5, all cycles' progress collapsed into ONE long edited
+        // message — Bae could see "blocker 1/10..10/10" but had no
+        // separation between cycle 1 and cycle 2 events.
+        const existing = stage === "review-started"
+          ? null
+          : await findProgressMessage(c.env, install.id, body.episodic_id, chatId);
         if (!existing) {
           const lines: ProgressLine[] = [newLine];
           const text = renderProgressMessage(lines, meta);
@@ -618,6 +628,7 @@ export function createReviewRoutes(
             installId: install.id,
             episodicId: body.episodic_id,
             chatId,
+            messageId: existing.messageId,
             lastLines: JSON.stringify(lines),
             lastText: text,
             now,
@@ -635,6 +646,7 @@ export function createReviewRoutes(
           installId: install.id,
           episodicId: body.episodic_id,
           chatId,
+          messageId: existing.messageId,
           lastLines: JSON.stringify(lines),
           lastText: text,
           now,

@@ -539,7 +539,11 @@ export async function runAutofix(args: AutofixArgs, deps: AutofixDeps = {}): Pro
       iterations: iters,
       remainingBlockers,
       totalCostUsd: cost,
-      cyclesRun: (args.reworkCycle ?? 0) + 1,
+      // The user-visible cycle counter is 1-indexed and equals
+      // args.reworkCycle (rework.yml dispatches the first rework as
+      // cycle=1). When reworkCycle is 0 (legacy / non-rework path)
+      // surface as 1 so the report says "1번의 사이클" not "0".
+      cyclesRun: Math.max(args.reworkCycle ?? 0, 1),
       deployOutcome: deployHint,
     });
     stdout(

@@ -53,8 +53,14 @@ export async function findProgressMessage(
   episodicId: string,
   chatId: number,
 ): Promise<ProgressRow | null> {
+  // UX-5 — return the MOST RECENT row for (install, episodic, chat).
+  // Pre-UX-5 the SQL had no ORDER BY, so D1 returned the first row
+  // matching the key — fine when there was always one. With per-cycle
+  // separate messages there are now N rows, one per cycle; we want
+  // updates within a cycle to land on THAT cycle's row, which is the
+  // most recently created.
   const row = await env.DB.prepare(
-    "SELECT * FROM progress_messages WHERE install_id = ? AND episodic_id = ? AND chat_id = ?",
+    "SELECT * FROM progress_messages WHERE install_id = ? AND episodic_id = ? AND chat_id = ? ORDER BY created_at DESC LIMIT 1",
   )
     .bind(installId, episodicId, chatId)
     .first<DbRow>();
@@ -102,6 +108,14 @@ export async function updateProgressMessage(
     installId: string;
     episodicId: string;
     chatId: number;
+    /**
+     * UX-5 — Telegram message_id of the row to update. Pre-UX-5 the
+     * UPDATE matched on the (install, episodic, chat) tuple alone,
+     * which is no longer unique once per-cycle separate messages
+     * exist (multiple rows per tuple, one per cycle). Pinning by
+     * message_id targets exactly the cycle whose row this is.
+     */
+    messageId: number;
     lastLines: string;
     lastText: string;
     now: string;
@@ -110,7 +124,7 @@ export async function updateProgressMessage(
   await env.DB.prepare(
     `UPDATE progress_messages
        SET last_lines = ?, last_text = ?, updated_at = ?
-     WHERE install_id = ? AND episodic_id = ? AND chat_id = ?`,
+     WHERE install_id = ? AND episodic_id = ? AND chat_id = ? AND message_id = ?`,
   )
     .bind(
       input.lastLines,
@@ -119,6 +133,7 @@ export async function updateProgressMessage(
       input.installId,
       input.episodicId,
       input.chatId,
+      input.messageId,
     )
     .run();
 }
