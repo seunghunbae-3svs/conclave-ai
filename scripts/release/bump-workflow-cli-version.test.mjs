@@ -92,20 +92,24 @@ test("LIVE INVARIANT: workflow file count is exactly 3 (no orphans, no missing)"
   assert.equal(WORKFLOW_FILES.length, 3);
 });
 
-// PIA-1 follow-on — release.yml must grant `workflows: write` so its
-// GITHUB_TOKEN can push the auto-bumped workflow files. Without this,
-// bump-workflow-cli-version.mjs runs successfully but `git push` is
-// rejected with "refusing to allow a GitHub App to create or update
-// workflow ...". Live-caught on release run #25104136096.
-test("LIVE INVARIANT: release.yml grants `workflows: write` so PIA-1 push doesn't fail", () => {
+// PIA-1 follow-on — release.yml's checkout MUST use ORCHESTRATOR_PAT
+// (a PAT with the `workflow` GitHub scope) so the auto-bump push of
+// .github/workflows/{review,rework,merge}.yml goes through. The
+// default GITHUB_TOKEN cannot modify workflow files no matter what
+// permissions are granted — GitHub blocks workflows from rewriting
+// themselves by design. Live-caught on release run #25104136096
+// where the bump ran successfully but `git push` was rejected with
+// "refusing to allow a GitHub App to create or update workflow ...".
+test("LIVE INVARIANT: release.yml checkout uses ORCHESTRATOR_PAT so PIA-1 auto-bump can push workflow files", () => {
   const release = fs.readFileSync(path.join(REPO_ROOT, ".github/workflows/release.yml"), "utf8");
-  // Match the top-level `permissions:` block (the one followed by
-  // `jobs:`). Inside it, look for `workflows: write`.
-  const permsBlock = release.match(/^permissions:\n([\s\S]*?)\njobs:/m);
-  assert.ok(permsBlock, "release.yml has a top-level permissions block");
+  // The checkout step's `token:` line must reference ORCHESTRATOR_PAT.
+  // We accept fallback patterns like `secrets.ORCHESTRATOR_PAT || secrets.GITHUB_TOKEN`
+  // so the workflow degrades gracefully when the PAT isn't set in CI.
+  const checkoutBlock = release.match(/uses:\s*actions\/checkout@v4[\s\S]*?(?=\n\s{0,4}-\s|\n\s*$)/);
+  assert.ok(checkoutBlock, "release.yml has an actions/checkout step");
   assert.match(
-    permsBlock[1],
-    /^\s+workflows:\s+write/m,
-    "release.yml's permissions block must include `workflows: write` — without it, PIA-1's auto-bump push gets rejected by GitHub Actions",
+    checkoutBlock[0],
+    /token:[\s\S]*?ORCHESTRATOR_PAT/,
+    "release.yml's checkout token must include ORCHESTRATOR_PAT — without it, PIA-1's workflow-bump push is rejected by GitHub Actions",
   );
 });

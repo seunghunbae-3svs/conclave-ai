@@ -33,13 +33,16 @@ concurrency:
 permissions:
   contents: write     # push bump commit + create tag (workflow_dispatch path)
   id-token: write     # npm provenance
-  # PIA-1 follow-on — bump-workflow-cli-version writes to
-  # .github/workflows/{review,rework,merge}.yml. The default GITHUB_TOKEN
-  # cannot modify workflow files without `workflows: write`; live-caught
-  # on release run #25104136096 (cli@0.14.1 attempt) where the bump succeeded
-  # locally on the runner but `git push` was rejected with
-  # "refusing to allow a GitHub App to create or update workflow ...".
-  workflows: write
+  # PIA-1 follow-on note — `workflows: write` is NOT a valid GitHub
+  # Actions permission scope (rejected with HTTP 422 by the workflow
+  # parser). GITHUB_TOKEN cannot modify .github/workflows/*.yml at all
+  # by GitHub's design (prevents workflows from self-rewriting). The
+  # checkout step below uses ORCHESTRATOR_PAT (which has the `workflow`
+  # GitHub-PAT scope) so PIA-1's auto-bump push goes through. Falls
+  # back to GITHUB_TOKEN when the PAT isn't set (which means the bump
+  # push will fail and the release will need a re-run after manual
+  # workflow update — the LIVE INVARIANT in the bump script's tests
+  # would catch the drift on the next CI run).
 
 jobs:
   release:
@@ -48,7 +51,14 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          token: ${{ secrets.GITHUB_TOKEN }}
+          # PIA-1 follow-on — must be a PAT with `workflow` scope so the
+          # bump-changed-packages + bump-workflow-cli-version commit can
+          # push files under .github/workflows/. GITHUB_TOKEN can never
+          # modify workflow files by GitHub's design. Falls back to
+          # GITHUB_TOKEN when the PAT isn't set (release commit still
+          # lands; only the workflow-default bump push fails, surfaced
+          # as a fail status the operator can address by hand).
+          token: ${{ secrets.ORCHESTRATOR_PAT || secrets.GITHUB_TOKEN }}
 
       - uses: pnpm/action-setup@v4
         with:
