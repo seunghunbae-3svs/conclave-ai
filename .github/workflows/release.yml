@@ -33,6 +33,13 @@ concurrency:
 permissions:
   contents: write     # push bump commit + create tag (workflow_dispatch path)
   id-token: write     # npm provenance
+  # PIA-1 follow-on — bump-workflow-cli-version writes to
+  # .github/workflows/{review,rework,merge}.yml. The default GITHUB_TOKEN
+  # cannot modify workflow files without `workflows: write`; live-caught
+  # on release run #25104136096 (cli@0.14.1 attempt) where the bump succeeded
+  # locally on the runner but `git push` was rejected with
+  # "refusing to allow a GitHub App to create or update workflow ...".
+  workflows: write
 
 jobs:
   release:

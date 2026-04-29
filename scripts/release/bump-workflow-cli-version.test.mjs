@@ -91,3 +91,21 @@ test("LIVE INVARIANT: workflow file count is exactly 3 (no orphans, no missing)"
   }
   assert.equal(WORKFLOW_FILES.length, 3);
 });
+
+// PIA-1 follow-on — release.yml must grant `workflows: write` so its
+// GITHUB_TOKEN can push the auto-bumped workflow files. Without this,
+// bump-workflow-cli-version.mjs runs successfully but `git push` is
+// rejected with "refusing to allow a GitHub App to create or update
+// workflow ...". Live-caught on release run #25104136096.
+test("LIVE INVARIANT: release.yml grants `workflows: write` so PIA-1 push doesn't fail", () => {
+  const release = fs.readFileSync(path.join(REPO_ROOT, ".github/workflows/release.yml"), "utf8");
+  // Match the top-level `permissions:` block (the one followed by
+  // `jobs:`). Inside it, look for `workflows: write`.
+  const permsBlock = release.match(/^permissions:\n([\s\S]*?)\njobs:/m);
+  assert.ok(permsBlock, "release.yml has a top-level permissions block");
+  assert.match(
+    permsBlock[1],
+    /^\s+workflows:\s+write/m,
+    "release.yml's permissions block must include `workflows: write` — without it, PIA-1's auto-bump push gets rejected by GitHub Actions",
+  );
+});
