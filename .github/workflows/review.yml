@@ -380,6 +380,46 @@ jobs:
       # that never had persist enabled (which is fine — payload path
       # handles it).
 
+      # PIA-4 — close the silent-skip loop. Pre-PIA-4 a sub-3-line PR
+      # (or — more commonly — an autofix cycle that perfectly resolved
+      # the only blocker by deleting dead code, leaving cycle 2's diff
+      # near-empty) hit this branch and ONLY logged to the runner.
+      # The PR page showed no review, the PR author saw silence, and the
+      # autonomy loop's terminal state was hidden. Now we post a brief
+      # PR comment AND a workflow-summary annotation so the resolution
+      # is visible from both surfaces.
       - name: Skip notice
-        if: env.SKIP_REVIEW == 'true'
-        run: echo "Diff under 3 lines — skipping review. This is intentional and does not fail the job."
+        if: env.SKIP_REVIEW == 'true' && github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          echo "Diff under 3 lines — skipping review. This is intentional and does not fail the job."
+          # Workflow summary — visible to anyone with Actions read access.
+          {
+            echo "## 🏛️ Conclave AI Review — skipped (sub-3-line diff)"
+            echo ""
+            echo "PR's effective diff vs. base is under 3 lines, which usually means one of:"
+            echo "- a previous autofix cycle resolved the only blocker by deleting code"
+            echo "- the PR is a deliberately tiny patch (typo, version bump)"
+            echo ""
+            echo "No review fired. If you expected a review on this push, push a non-trivial change."
+          } >> "$GITHUB_STEP_SUMMARY"
+          # PR comment — visible to the PR author + reviewers.
+          # Best-effort: gh pr comment can fail on archived/closed PRs;
+          # do not fail the workflow if it does.
+          {
+            echo "## 🏛️ Conclave AI Review — skipped"
+            echo ""
+            echo "Diff under 3 lines vs. base — review skipped (intentional)."
+            echo ""
+            echo "Common causes:"
+            echo "- a previous autofix cycle resolved the only blocker by deleting code"
+            echo "- the PR is a deliberately tiny patch"
+            echo ""
+            echo "_If a previous autofix cycle on this PR closed all blockers, this is the **terminal success** of the autonomy loop._"
+          } > /tmp/pr-skip-body.md
+          gh pr comment "${{ github.event.pull_request.number }}" \
+            --repo "${{ github.repository }}" \
+            --body-file /tmp/pr-skip-body.md || \
+            echo "::warning::skip-notice PR comment failed (non-fatal)"
