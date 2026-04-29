@@ -36,6 +36,7 @@ import { formatFinding, scanPatch, type ScanResult } from "@conclave-ai/secret-g
 import { fetchPrState, fetchDeployStatus as defaultFetchDeployStatus, type DeployStatus, type GhRunner, type PullRequestState } from "@conclave-ai/scm-github";
 import { loadConfig, resolveMemoryRoot, type ConclaveConfig } from "../lib/config.js";
 import { runPerBlocker, type GitLike, type WorkerLike } from "../lib/autofix-worker.js";
+import { renderBailSummary, shouldPostSummary } from "../lib/bail-summary.js";
 import { recountHunkHeaders } from "../lib/patch-fixup.js";
 import { runSpecialHandlers } from "../lib/autofix-handlers/index.js";
 import { writeSolutionSidecar } from "../lib/solution-sidecar.js";
@@ -487,6 +488,36 @@ export async function runAutofix(args: AutofixArgs, deps: AutofixDeps = {}): Pro
   const memoryRoot = resolveMemoryRoot(cfg.config, cfg.configDir);
   const git = deps.git ?? defaultGit;
   const gh = deps.gh ?? defaultGh;
+
+  // UX-1 — post a unified terminal summary to the PR. Best-effort: a
+  // gh failure (e.g., archived PR, missing token) only logs to stderr.
+  // Caller passes the AutofixResult-shaped status + iterationsAttempted
+  // + cost + remainingBlockers so the renderer can build a consistent
+  // body across all bail paths.
+  const postBailSummary = async (
+    pr: number | undefined,
+    repoSlug: string | undefined,
+    statusTag: string,
+    summaryCtx: { iterationsAttempted: number; totalCostUsd: number; remainingBlockers: Blocker[]; reason?: string },
+  ) => {
+    if (!pr) return;
+    if (!shouldPostSummary(statusTag)) return;
+    try {
+      const body = renderBailSummary(statusTag, summaryCtx);
+      // Pass --repo only when we have it; otherwise let gh infer from
+      // git config remote.origin.url. This matches pre-UX-1 behavior
+      // (the inline body used `repo!` non-null assertion which gh
+      // accepted as an empty string).
+      const args = ["pr", "comment", String(pr)];
+      if (repoSlug) args.push("--repo", repoSlug);
+      args.push("--body", body);
+      await gh("gh", args);
+    } catch (err) {
+      stderr(
+        `autofix: terminal-summary PR comment failed (${statusTag}) — ${err instanceof Error ? err.message : String(err)}\n`,
+      );
+    }
+  };
   const readVerdict = deps.readVerdictFile ?? ((p: string) => fs.readFile(p, "utf8"));
   const readStdin = deps.readStdin ?? defaultReadStdin;
   const spawnReview = deps.spawnReview ?? defaultSpawnReview;
@@ -966,6 +997,13 @@ export async function runAutofix(args: AutofixArgs, deps: AutofixDeps = {}): Pro
         stderr(`autofix:   [${f.status}] ${f.blocker.category} @ ${f.blocker.file ?? "<unscoped>"}: ${reasonTail || "(no detail)"}\n`);
       }
       iterations.push(finalizeIteration(i, fixes, false, ["no-ready-patches"]));
+      // UX-1 — unified summary.
+      await postBailSummary(prNumber, repo, "bailed-no-patches", {
+        iterationsAttempted: iterations.length,
+        totalCostUsd: totalCost,
+        remainingBlockers: remainingBlockersFrom(currentReviews),
+        reason: "no applicable patches this iteration",
+      });
       return {
         code: 1,
         result: {
@@ -1127,6 +1165,13 @@ export async function runAutofix(args: AutofixArgs, deps: AutofixDeps = {}): Pro
         stderr(`autofix:   reject — ${cf.blocker.file ?? "<unknown>"}:\n${cf.reason ?? "(no detail)"}\n`);
       }
       iterations.push(finalizeIteration(i, fixes, false, ["apply-conflict"]));
+      // UX-1 — unified summary; explicit reason so user sees apply-conflict.
+      await postBailSummary(prNumber, repo, "bailed-no-patches", {
+        iterationsAttempted: iterations.length,
+        totalCostUsd: totalCost,
+        remainingBlockers: remainingBlockersFrom(currentReviews),
+        reason: "apply-conflict mid-iteration (one or more patches rejected after others applied)",
+      });
       return {
         code: 1,
         result: {
@@ -1158,6 +1203,14 @@ export async function runAutofix(args: AutofixArgs, deps: AutofixDeps = {}): Pro
       );
       // Feed back into next iteration via previousBuildErrorTail pickup.
       if (i + 1 >= args.maxIterations) {
+        // UX-1 — unified summary so the user sees the build-failed
+        // terminal state without digging through Actions logs.
+        await postBailSummary(prNumber, repo, "bailed-build-failed", {
+          iterationsAttempted: iterations.length,
+          totalCostUsd: totalCost,
+          remainingBlockers: remainingBlockersFrom(currentReviews),
+          reason: "build failed after max iterations",
+        });
         return {
           code: 1,
           result: {
@@ -1192,6 +1245,13 @@ export async function runAutofix(args: AutofixArgs, deps: AutofixDeps = {}): Pro
         }),
       );
       if (i + 1 >= args.maxIterations) {
+        // UX-1 — unified summary.
+        await postBailSummary(prNumber, repo, "bailed-tests-failed", {
+          iterationsAttempted: iterations.length,
+          totalCostUsd: totalCost,
+          remainingBlockers: remainingBlockersFrom(currentReviews),
+          reason: "tests failed after max iterations",
+        });
         return {
           code: 1,
           result: {
@@ -1479,24 +1539,24 @@ export async function runAutofix(args: AutofixArgs, deps: AutofixDeps = {}): Pro
         `autofix: bailed after ${iterations.length} iterations with NO pushed patch — remaining blockers: ${remainingBlockersFrom(currentReviews).length}\n`,
       );
     }
-    // Best-effort PR comment.
-    try {
-      await gh("gh", [
-        "pr",
-        "comment",
-        String(prNumber),
-        "--repo",
-        repo!,
-        "--body",
-        `autofix bailed after ${iterations.length} iterations. Remaining blockers:\n${remainingBlockersFrom(currentReviews).slice(0, 10).map((b) => `- [${b.severity}/${b.category}] ${b.message}`).join("\n")}`,
-      ]);
-    } catch (err) {
-      stderr(`autofix: post-bailout comment failed — ${err instanceof Error ? err.message : String(err)}\n`);
-    }
+    // UX-1 — unified summary comment via the shared renderer (replaces
+    // pre-UX-1's inline ad-hoc body which only ran for the reachedMax
+    // branch).
+    await postBailSummary(prNumber, repo, status, {
+      iterationsAttempted: iterations.length,
+      totalCostUsd: totalCost,
+      remainingBlockers: remainingBlockersFrom(currentReviews),
+    });
   } else if (totalCost >= args.budgetUsd) {
     status = "bailed-budget";
     code = 1;
     stdout(`autofix: budget exhausted at $${totalCost.toFixed(4)}\n`);
+    // UX-1 — unified summary comment.
+    await postBailSummary(prNumber, repo, status, {
+      iterationsAttempted: iterations.length,
+      totalCostUsd: totalCost,
+      remainingBlockers: remainingBlockersFrom(currentReviews),
+    });
   } else {
     // Terminated early without approve — likely mid-loop break with no
     // new blockers but verdict stayed at rework.
