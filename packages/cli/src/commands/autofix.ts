@@ -506,6 +506,56 @@ export async function runAutofix(args: AutofixArgs, deps: AutofixDeps = {}): Pro
   // Caller passes the AutofixResult-shaped status + iterationsAttempted
   // + cost + remainingBlockers so the renderer can build a consistent
   // body across all bail paths.
+  // UX-4 — emit review-finished from any terminal path (NOT just the
+  // tail-block). Pre-fix, early-return paths like bailed-build-failed,
+  // bailed-tests-failed, bailed-no-patches (mid-iteration) never reached
+  // the end-of-function emit, so Telegram never saw the terminal report.
+  // Caught LIVE on eventbadge PR #42 rework run #25123387450.
+  const emitReviewFinishedIfTerminal = async (
+    pr: number | undefined,
+    repoSlug: string | undefined,
+    statusTag: AutofixResultStatus,
+    pushedThisRun: boolean,
+    iters: AutofixIteration[],
+    remainingBlockers: Blocker[],
+    cost: number,
+    deployHint: DeployOutcome,
+  ) => {
+    if (!progressEpisodicId) return;
+    const terminal = isAutonomyTerminal({
+      status: statusTag,
+      pushedThisRun,
+      reworkCycle: args.reworkCycle ?? 0,
+      maxCycles: 3,
+    });
+    if (!terminal) {
+      stdout(
+        `autofix: NOT emitting review-finished — autonomy not terminal (status=${statusTag}, pushed=${pushedThisRun}, cycle=${args.reworkCycle ?? 0}/3)\n`,
+      );
+      return;
+    }
+    const report = buildTerminalReport({
+      status: statusTag,
+      iterations: iters,
+      remainingBlockers,
+      totalCostUsd: cost,
+      cyclesRun: (args.reworkCycle ?? 0) + 1,
+      deployOutcome: deployHint,
+    });
+    stdout(
+      `autofix: emitting review-finished (status=${statusTag}, cycles=${report.cyclesRun}, found=${report.totalBlockersFound}, fixed=${report.blockersAutofixed}, outstanding=${report.blockersOutstanding}, recommendation=${report.recommendation})\n`,
+    );
+    await emitProgress(progressNotifiers, {
+      episodicId: progressEpisodicId,
+      stage: "review-finished",
+      payload: {
+        ...report,
+        ...(repoSlug ? { repo: repoSlug } : {}),
+        ...(typeof pr === "number" ? { pullNumber: pr } : {}),
+      },
+    });
+  };
+
   const postBailSummary = async (
     pr: number | undefined,
     repoSlug: string | undefined,
@@ -1092,6 +1142,17 @@ export async function runAutofix(args: AutofixArgs, deps: AutofixDeps = {}): Pro
         remainingBlockers: remainingBlockersFrom(currentReviews),
         reason: "no applicable patches this iteration",
       });
+      // UX-4 — terminal report.
+      await emitReviewFinishedIfTerminal(
+        prNumber,
+        repo,
+        "bailed-no-patches",
+        anyIterationPushed,
+        iterations,
+        remainingBlockersFrom(currentReviews),
+        totalCost,
+        "unknown",
+      );
       return {
         code: 1,
         result: {
@@ -1300,6 +1361,17 @@ export async function runAutofix(args: AutofixArgs, deps: AutofixDeps = {}): Pro
         remainingBlockers: remainingBlockersFrom(currentReviews),
         reason: "every patch this iteration rejected (apply-conflict on all stillReady fixes)",
       });
+      // UX-4 — terminal report.
+      await emitReviewFinishedIfTerminal(
+        prNumber,
+        repo,
+        "bailed-no-patches",
+        anyIterationPushed,
+        iterations,
+        remainingBlockersFrom(currentReviews),
+        totalCost,
+        "unknown",
+      );
       return {
         code: 1,
         result: {
@@ -1339,6 +1411,17 @@ export async function runAutofix(args: AutofixArgs, deps: AutofixDeps = {}): Pro
           remainingBlockers: remainingBlockersFrom(currentReviews),
           reason: "build failed after max iterations",
         });
+        // UX-4 — terminal report.
+        await emitReviewFinishedIfTerminal(
+          prNumber,
+          repo,
+          "bailed-build-failed",
+          anyIterationPushed,
+          iterations,
+          remainingBlockersFrom(currentReviews),
+          totalCost,
+          "failure",
+        );
         return {
           code: 1,
           result: {
@@ -1380,6 +1463,17 @@ export async function runAutofix(args: AutofixArgs, deps: AutofixDeps = {}): Pro
           remainingBlockers: remainingBlockersFrom(currentReviews),
           reason: "tests failed after max iterations",
         });
+        // UX-4 — terminal report.
+        await emitReviewFinishedIfTerminal(
+          prNumber,
+          repo,
+          "bailed-tests-failed",
+          anyIterationPushed,
+          iterations,
+          remainingBlockersFrom(currentReviews),
+          totalCost,
+          "failure",
+        );
         return {
           code: 1,
           result: {
@@ -1713,59 +1807,24 @@ export async function runAutofix(args: AutofixArgs, deps: AutofixDeps = {}): Pro
     }
   }
 
-  // UX-4 — terminal user-facing report. Fires once per autonomy loop
-  // termination (NOT per cycle). Gated by isAutonomyTerminal so a
-  // deferred cycle doesn't double-emit (next cycle's autofix will).
-  const terminal = isAutonomyTerminal({
+  // UX-4 — terminal user-facing report at the tail of runAutofix. The
+  // early-return bail paths (bailed-build-failed, bailed-tests-failed,
+  // bailed-no-patches both variants) call emitReviewFinishedIfTerminal
+  // at their respective sites. This tail-block call covers the
+  // remaining statuses (approved, awaiting-approval, deferred-to-next-
+  // review, bailed-max-iterations, bailed-budget).
+  let tailDeploy: DeployOutcome = "unknown";
+  if (mergeStatus === "merged") tailDeploy = "success";
+  await emitReviewFinishedIfTerminal(
+    prNumber,
+    repo,
     status,
-    pushedThisRun: anyIterationPushed,
-    reworkCycle: args.reworkCycle ?? 0,
-    maxCycles: 3,
-  });
-  if (terminal && progressEpisodicId) {
-    // Best-effort deploy probe. We only know the outcome from autofix's
-    // own post-push poll (deps.fetchDeployStatus). On bail-without-push
-    // we use the prior known state if any, else "unknown".
-    // The terminal block at this point only sees a narrowed subset
-    // of AutofixResultStatus (TS narrowing) — bailed-build-failed
-    // and bailed-tests-failed are early-returned upstream and never
-    // reach here. Use a string-cast comparison so future status
-    // additions don't silently lose the deploy=failure mapping if
-    // they DO route through this block.
-    let deployOutcome: DeployOutcome = "unknown";
-    if (mergeStatus === "merged") {
-      deployOutcome = "success";
-    } else {
-      const s = status as string;
-      if (s === "bailed-build-failed" || s === "bailed-tests-failed") {
-        deployOutcome = "failure";
-      }
-    }
-    const report = buildTerminalReport({
-      status,
-      iterations,
-      remainingBlockers: finalRemaining,
-      totalCostUsd: totalCost,
-      cyclesRun: (args.reworkCycle ?? 0) + 1,
-      deployOutcome,
-    });
-    stdout(
-      `autofix: emitting review-finished (status=${status}, cycles=${report.cyclesRun}, found=${report.totalBlockersFound}, fixed=${report.blockersAutofixed}, outstanding=${report.blockersOutstanding}, recommendation=${report.recommendation})\n`,
-    );
-    await emitProgress(progressNotifiers, {
-      episodicId: progressEpisodicId,
-      stage: "review-finished",
-      payload: {
-        ...report,
-        ...(repo ? { repo } : {}),
-        ...(typeof prNumber === "number" ? { pullNumber: prNumber } : {}),
-      },
-    });
-  } else if (progressEpisodicId) {
-    stdout(
-      `autofix: NOT emitting review-finished (autonomy not terminal — status=${status}, pushed=${anyIterationPushed}, cycle=${args.reworkCycle ?? 0}/${3})\n`,
-    );
-  }
+    anyIterationPushed,
+    iterations,
+    finalRemaining,
+    totalCost,
+    tailDeploy,
+  );
 
   return {
     code,
