@@ -566,10 +566,25 @@ export function createReviewRoutes(
         // chain message stays put as the running log; the terminal
         // report is a single big "여기서 끝났습니다" card.
         if (stage === "review-finished") {
+          // UX-7 — action buttons (승인 / 보류 / 거부). Reuse the
+          // existing ep:<id>:<outcome> callback_data vocabulary so the
+          // existing webhook handler routes the click correctly:
+          //   - 승인 → "merged" (signals approve+merge)
+          //   - 보류 → "hold" (no-op; user revisits later)
+          //   - 거부 → "rejected"
           await telegram.sendMessage({
             chatId,
             text: newLine.text,
             parseMode: "HTML",
+            replyMarkup: {
+              inline_keyboard: [
+                [
+                  { text: "✅ 승인", callback_data: `ep:${body.episodic_id}:merged` },
+                  { text: "⏸ 보류", callback_data: `ep:${body.episodic_id}:hold` },
+                  { text: "❌ 거부", callback_data: `ep:${body.episodic_id}:rejected` },
+                ],
+              ],
+            },
           });
           sent += 1;
           continue;

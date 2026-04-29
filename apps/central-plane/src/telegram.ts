@@ -163,7 +163,11 @@ export type CallbackOutcome =
   | "reject"
   | "merge-unsafe"
   | "merge-confirmed"
-  | "cancel";
+  | "cancel"
+  // UX-7 — review-finished card's "보류" (hold) button. Treated as a
+  // no-op acknowledgement so the user can revisit later. No
+  // repository_dispatch fires; the click just acks via the webhook.
+  | "hold";
 
 const VALID_OUTCOMES: readonly CallbackOutcome[] = [
   "merged",
@@ -174,6 +178,7 @@ const VALID_OUTCOMES: readonly CallbackOutcome[] = [
   "merge-unsafe",
   "merge-confirmed",
   "cancel",
+  "hold",
 ];
 
 /**
@@ -222,6 +227,9 @@ export function classifyOutcome(outcome: CallbackOutcome):
       return { kind: "confirm-unsafe" };
     case "cancel":
       return { kind: "cancel" };
+    // UX-7 — hold = no-op ack (user revisits later).
+    case "hold":
+      return { kind: "cancel" };
   }
 }
 
@@ -254,6 +262,8 @@ export function labelForOutcome(outcome: CallbackOutcome): string {
       return "⚠️ Unsafe merge requested";
     case "cancel":
       return "↩️ Cancelled";
+    case "hold":
+      return "⏸ 보류 — 나중에 다시 검토하세요";
   }
 }
 
