@@ -83,6 +83,16 @@ jobs:
           # even when the package code hadn't moved.
           # See scripts/release/bump-changed-packages.test.mjs for unit tests.
           node scripts/release/bump-changed-packages.mjs | tee /tmp/bump-summary.json
+          # PIA-1 — keep .github/workflows/{review,rework,merge}.yml's
+          # `cli-version: default: X.Y.Z` pin in lockstep with the just-
+          # bumped packages/cli/package.json .version. Pre-PIA-1 this was
+          # a hand-bumped "chore(workflows): ..." commit; forgetting it
+          # left consumer-side wrappers (`uses: ...@v0.4`) installing the
+          # OLD CLI on every PR even after v0.4 floating tag moved
+          # (caught LIVE on cli@0.14.0 release / eventbadge PR #38).
+          # Idempotent; CI invariant test catches drift outside release
+          # runs (see scripts/release/bump-workflow-cli-version.test.mjs).
+          node scripts/release/bump-workflow-cli-version.mjs | tee /tmp/workflow-bump.json
           ROOT_VERSION=$(node -p "require('./packages/core/package.json').version")
           # Idempotent: only commit when there are actual changes (covers
           # pnpm no-op re-runs and manual-bump recoveries).

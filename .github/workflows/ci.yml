@@ -33,3 +33,14 @@ jobs:
       - run: pnpm typecheck
       - run: pnpm build
       - run: pnpm test
+
+      # PIA-1 — release scripts live OUTSIDE the turbo-managed packages/
+      # tree, so `pnpm test` skips them. Run them explicitly. Until
+      # PIA-1 added bump-workflow-cli-version, the dead-CI gap meant
+      # bump-changed-packages.test.mjs was authored but never green-
+      # lit by any pipeline. The LIVE INVARIANT inside
+      # bump-workflow-cli-version.test.mjs catches drift between
+      # workflow cli-version pins and packages/cli/package.json on
+      # every PR.
+      - name: Run release-scripts tests
+        run: node --test scripts/release/*.test.mjs
