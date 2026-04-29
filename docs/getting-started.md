@@ -91,6 +91,37 @@ only the agents you set keys for:
 }
 ```
 
+## 3.5 Register a Personal Access Token (REQUIRED for autonomy loop)
+
+The autonomy loop pushes autofix commits back to your PR branch and
+relies on those pushes to trigger the next review run. GitHub's default
+`GITHUB_TOKEN` cannot trigger downstream workflows (security policy:
+prevents loops), so without a PAT the loop **stalls at cycle 1 forever**
+— autofix lands the patch but `pull_request:synchronize` never fires
+and review.yml stays put.
+
+**Create the PAT once** (Classic; fine-grained also works):
+
+1. https://github.com/settings/tokens/new
+2. Scopes: `repo` (full) + `workflow`
+3. Expiration: 6 months – 1 year (renew before it lapses)
+
+**Register it as a repo secret:**
+
+```powershell
+gh secret set ORCHESTRATOR_PAT --repo <owner>/<repo> --body "ghp_..."
+```
+
+The reusable rework workflow looks for `AUTOFIX_PUSH_TOKEN` first,
+then `ORCHESTRATOR_PAT`, then falls back to `GITHUB_TOKEN`. Use
+`AUTOFIX_PUSH_TOKEN` if you want a separate token for the autofix
+push specifically (not commonly needed).
+
+**Skip if you don't use the autonomy loop** (just the one-shot
+`conclave review` flow without auto-rework). Verify with
+`conclave doctor` — it warns when no PAT is found and you have
+`.github/workflows/conclave.yml` referencing the rework workflow.
+
 ## 4. First review
 
 For a PR:

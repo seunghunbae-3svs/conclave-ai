@@ -283,6 +283,12 @@ test("runDoctor: prints results + returns code 0 when no fails", async () => {
     if (url.includes("/healthz")) return { ok: true, status: 200, headers, json: async () => ({ service: "cp", version: "0.11.0", db: "up" }) };
     return { ok: true, status: 200, headers, json: async () => ({ version: "0.13.6" }) };
   };
+  // Stub runProcess for the new ORCHESTRATOR_PAT check (PIA-1 follow-on).
+  const runProcess = async (bin, args) => {
+    if (bin === "git") return { stdout: "https://github.com/acme/app.git\n", stderr: "" };
+    if (bin === "gh") return { stdout: "ORCHESTRATOR_PAT  2026-04-30T00:00:00Z\n", stderr: "" };
+    return { stdout: "", stderr: "" };
+  };
   const { code, results } = await runDoctor([], {
     env,
     fetch: fakeFetch,
@@ -291,10 +297,11 @@ test("runDoctor: prints results + returns code 0 when no fails", async () => {
     cliVersion: "0.13.6",
     cwd: "/repo",
     stdout: (s) => lines.push(s),
+    runProcess,
   });
   assert.equal(code, 0);
-  // 4 env + 1 worker + 1 workflow + 1 npm + 1 telegram-webhook = 8 results (v0.13.11)
-  assert.equal(results.length, 8);
+  // 4 env + 1 worker + 1 workflow + 1 npm + 1 telegram-webhook + 1 PAT = 9 results (PIA-1 follow-on)
+  assert.equal(results.length, 9);
   // The telegram-webhook check makes a real network probe to /admin/
   // unless the fakeFetch handles that URL — happy-path test now sees
   // the matching outcome from the same fakeFetch (returns version JSON
@@ -337,6 +344,76 @@ test("runDoctor: warns only (no fails) → exit code 0", async () => {
   assert.equal(code, 0, "warn-only must NOT exit 1 — doctor is informational");
   const wfWarn = results.find((r) => r.label === ".github/workflows/");
   assert.equal(wfWarn.status, "warn");
+});
+
+// ---- checkOrchestratorPat (PIA-1 follow-on) ----------------------------
+
+import { checkOrchestratorPat } from "../dist/commands/doctor.js";
+
+test("checkOrchestratorPat: ORCHESTRATOR_PAT present → OK", async () => {
+  const runProcess = async (bin, args) => {
+    if (bin === "git") return { stdout: "git@github.com:acme/app.git\n", stderr: "" };
+    if (bin === "gh" && args[0] === "secret") return { stdout: "ANTHROPIC_API_KEY  2026-04-01\nORCHESTRATOR_PAT  2026-04-30\n", stderr: "" };
+    throw new Error("unexpected");
+  };
+  const r = await checkOrchestratorPat("/repo", { runProcess });
+  assert.equal(r.status, "ok");
+  assert.match(r.detail, /ORCHESTRATOR_PAT registered on acme\/app/);
+});
+
+test("checkOrchestratorPat: AUTOFIX_PUSH_TOKEN present (alternate) → OK", async () => {
+  const runProcess = async (bin, args) => {
+    if (bin === "git") return { stdout: "https://github.com/acme/app\n", stderr: "" };
+    if (bin === "gh") return { stdout: "AUTOFIX_PUSH_TOKEN  2026-04-30\n", stderr: "" };
+    throw new Error("unexpected");
+  };
+  const r = await checkOrchestratorPat("/repo", { runProcess });
+  assert.equal(r.status, "ok");
+  assert.match(r.detail, /AUTOFIX_PUSH_TOKEN/);
+});
+
+test("checkOrchestratorPat: neither PAT secret → WARN with getting-started hint", async () => {
+  const runProcess = async (bin, args) => {
+    if (bin === "git") return { stdout: "https://github.com/acme/app.git\n", stderr: "" };
+    if (bin === "gh") return { stdout: "ANTHROPIC_API_KEY  2026-04-01\n", stderr: "" };
+    throw new Error("unexpected");
+  };
+  const r = await checkOrchestratorPat("/repo", { runProcess });
+  assert.equal(r.status, "warn");
+  assert.match(r.detail, /neither.*ORCHESTRATOR_PAT.*AUTOFIX_PUSH_TOKEN/);
+  assert.match(r.hint, /repo.*workflow.*scope|getting-started.md/);
+});
+
+test("checkOrchestratorPat: non-GitHub remote → WARN, skip check", async () => {
+  const runProcess = async (bin) => {
+    if (bin === "git") return { stdout: "https://gitlab.com/acme/app.git\n", stderr: "" };
+    throw new Error("should not run gh");
+  };
+  const r = await checkOrchestratorPat("/repo", { runProcess });
+  assert.equal(r.status, "warn");
+  assert.match(r.detail, /not a GitHub URL/);
+});
+
+test("checkOrchestratorPat: no git remote → WARN, skip check", async () => {
+  const runProcess = async (bin) => {
+    if (bin === "git") throw new Error("fatal: not a git repository");
+    throw new Error("should not run gh");
+  };
+  const r = await checkOrchestratorPat("/repo", { runProcess });
+  assert.equal(r.status, "warn");
+  assert.match(r.detail, /no git remote/);
+});
+
+test("checkOrchestratorPat: gh secret list fails (e.g. unauthenticated) → WARN with auth hint", async () => {
+  const runProcess = async (bin, args) => {
+    if (bin === "git") return { stdout: "https://github.com/acme/app.git\n", stderr: "" };
+    if (bin === "gh") throw new Error("authentication required");
+    throw new Error("unexpected");
+  };
+  const r = await checkOrchestratorPat("/repo", { runProcess });
+  assert.equal(r.status, "warn");
+  assert.match(r.detail, /gh secret list failed/);
+  assert.match(r.hint, /gh auth login|stalls at cycle 1/);
 });
 
 // ---- checkTelegramWebhook (v0.13.11) -----------------------------------

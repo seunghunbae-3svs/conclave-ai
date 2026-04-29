@@ -1,6 +1,10 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 import { CLI_VERSION } from "../version.js";
+
+const execFileP = promisify(execFile);
 
 /**
  * `conclave doctor` — single-command diagnostic of the install + central-
@@ -59,6 +63,15 @@ export interface DoctorDeps {
   /** Override the expected reusable repo + tag (tests). */
   readonly expectedReusableRepo?: string;
   readonly expectedReusableTag?: string;
+  /**
+   * Subprocess runner used for `gh secret list`. Defaults to execFile.
+   * Tests inject a stub. Returns stdout + exitCode; on failure throws
+   * with `.code` set so the doctor can degrade gracefully (warn, not fail).
+   */
+  readonly runProcess?: (
+    bin: string,
+    args: readonly string[],
+  ) => Promise<{ stdout: string; stderr: string }>;
   /** stdout / stderr sinks. Default to process.stdout/stderr. */
   readonly stdout?: (s: string) => void;
   readonly stderr?: (s: string) => void;
@@ -82,6 +95,7 @@ export async function runDoctor(
     checkWorkflowFiles(cwd, deps).then((r) => [r]),
     checkCliVersion(deps.cliVersion ?? CLI_VERSION, deps.npmRegistryUrl ?? DEFAULT_NPM_REGISTRY, fetchImpl).then((r) => [r]),
     checkTelegramWebhook(workerBase, conclaveToken, fetchImpl).then((r) => [r]),
+    checkOrchestratorPat(cwd, deps).then((r) => [r]),
   ];
   const results = (await Promise.all(checks)).flat();
 
@@ -552,6 +566,101 @@ export function compareSemver(a: string, b: string): number {
     if (x !== y) return x < y ? -1 : 1;
   }
   return 0;
+}
+
+// ---- ORCHESTRATOR_PAT presence ----------------------------------------
+
+/**
+ * PIA-1 follow-on / consumer-facing — the autonomy loop's rework leg
+ * pushes autofix commits via a token. GitHub's default GITHUB_TOKEN
+ * cannot trigger downstream workflows (security policy: prevents
+ * loops), so without a PAT in repo secrets the autonomy loop stalls
+ * at cycle 1 forever. rework.yml looks for AUTOFIX_PUSH_TOKEN first,
+ * then ORCHESTRATOR_PAT, then falls back to GITHUB_TOKEN.
+ *
+ * This check shells out to `gh secret list` against the current repo
+ * (resolved from `git remote get-url origin`) and warns when neither
+ * PAT secret is present. WARN, not FAIL — users who only run
+ * `conclave review` (no autofix loop) don't need a PAT.
+ *
+ * Degrades gracefully: when gh isn't installed, isn't authenticated,
+ * or the repo can't be resolved, returns warn with a hint pointing at
+ * docs/getting-started.md §3.5.
+ */
+export async function checkOrchestratorPat(
+  cwd: string,
+  deps: DoctorDeps,
+): Promise<DoctorCheckResult> {
+  const run = deps.runProcess ?? (async (bin: string, args: readonly string[]) => {
+    const { stdout, stderr } = await execFileP(bin, args as string[], {
+      cwd,
+      timeout: 10_000,
+    });
+    return { stdout, stderr };
+  });
+  const HINT =
+    "register a PAT with `repo`+`workflow` scopes — see docs/getting-started.md §3.5 (`gh secret set ORCHESTRATOR_PAT --body <token>`); needed for the autonomy rework loop to trigger downstream workflows";
+
+  // 1. Resolve current repo slug from git remote.
+  let repoSlug: string;
+  try {
+    const r = await run("git", ["config", "--get", "remote.origin.url"]);
+    const url = r.stdout.trim();
+    const m = url.match(/github\.com[/:]([\w.-]+)\/([\w.-]+?)(?:\.git)?$/);
+    if (!m) {
+      return {
+        key: "orchestrator-pat",
+        label: "rework loop PAT",
+        status: "warn",
+        detail: "remote.origin.url not a GitHub URL",
+        hint: "skipping PAT check — not a GitHub-hosted repo",
+      };
+    }
+    repoSlug = `${m[1]}/${m[2]}`;
+  } catch {
+    return {
+      key: "orchestrator-pat",
+      label: "rework loop PAT",
+      status: "warn",
+      detail: "no git remote.origin",
+      hint: "run inside a GitHub-hosted repo to check PAT registration",
+    };
+  }
+
+  // 2. Run `gh secret list --repo <slug>` and look for either PAT name.
+  let secrets: string;
+  try {
+    const r = await run("gh", ["secret", "list", "--repo", repoSlug]);
+    secrets = r.stdout;
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return {
+      key: "orchestrator-pat",
+      label: "rework loop PAT",
+      status: "warn",
+      detail: `gh secret list failed (${msg.slice(0, 80)})`,
+      hint: "ensure `gh auth login` is done; without a PAT the autonomy rework loop stalls at cycle 1",
+    };
+  }
+
+  const hasOrch = /^ORCHESTRATOR_PAT\b/m.test(secrets);
+  const hasAutofix = /^AUTOFIX_PUSH_TOKEN\b/m.test(secrets);
+  if (hasOrch || hasAutofix) {
+    const which = hasAutofix ? "AUTOFIX_PUSH_TOKEN" : "ORCHESTRATOR_PAT";
+    return {
+      key: "orchestrator-pat",
+      label: "rework loop PAT",
+      status: "ok",
+      detail: `${which} registered on ${repoSlug}`,
+    };
+  }
+  return {
+    key: "orchestrator-pat",
+    label: "rework loop PAT",
+    status: "warn",
+    detail: `neither ORCHESTRATOR_PAT nor AUTOFIX_PUSH_TOKEN set on ${repoSlug}`,
+    hint: HINT,
+  };
 }
 
 // ---- entry --------------------------------------------------------------

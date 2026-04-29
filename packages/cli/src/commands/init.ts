@@ -260,6 +260,10 @@ export async function runInit(args: InitArgs, deps: RunInitDeps = {}): Promise<n
               ? `  • Install Gemini key:\n       gh secret set GEMINI_API_KEY --repo ${repoSlug} --body "$GEMINI_API_KEY"\n`
               : "")
           : `Next steps:\n  • Set at least one LLM API key secret on ${repoSlug} before opening a PR (ANTHROPIC_API_KEY required).\n`) +
+        `  • Register a PAT for the autonomy rework loop (REQUIRED for autofix → next-cycle review chain to fire):\n` +
+        `       1. Create a token at https://github.com/settings/tokens/new with \`repo\` + \`workflow\` scopes\n` +
+        `       2. gh secret set ORCHESTRATOR_PAT --repo ${repoSlug} --body "ghp_..."\n` +
+        `       (Skip if you only run one-shot \`conclave review\` without auto-rework. \`conclave doctor\` will warn if missing.)\n` +
         `  • Commit:\n` +
         `       git add ${CONFIG_FILENAME} ${WORKFLOW_PATH} ${REWORK_WORKFLOW_PATH} ${MERGE_WORKFLOW_PATH}\n` +
         `       git commit -m "chore: install conclave-ai review"\n` +

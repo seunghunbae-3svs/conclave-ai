@@ -8,6 +8,20 @@ work — you almost never run `npm publish` locally.
 
 - `NPM_TOKEN` secret on the GitHub repo — Automation-type token scoped
   to the `@conclave-ai` org with Publish permission. Rotate annually.
+- `ORCHESTRATOR_PAT` secret on the GitHub repo — a Personal Access
+  Token with `repo` + `workflow` scopes. **REQUIRED** because PIA-1's
+  `bump-workflow-cli-version.mjs` step modifies
+  `.github/workflows/{review,rework,merge}.yml` to keep the
+  `cli-version` default in lockstep with the just-bumped
+  `packages/cli/package.json` `.version`. The default `GITHUB_TOKEN`
+  cannot push commits that touch workflow files (GitHub blocks
+  workflows from self-rewriting by design). Without the PAT, the
+  bump succeeds locally on the runner but `git push` is rejected
+  with "refusing to allow a GitHub App to create or update workflow
+  ...". Caught LIVE on release run #25104136096 / cli@0.14.1 attempt.
+  - Create at https://github.com/settings/tokens/new (Classic, scopes
+    `repo` + `workflow`) and register with
+    `gh secret set ORCHESTRATOR_PAT --repo <org>/<repo> --body "ghp_..."`.
 - Workflow permissions: `Settings → Actions → General → Workflow
   permissions` set to **Read and write** (needed for the commit + tag
   the workflow pushes back to `main`).
