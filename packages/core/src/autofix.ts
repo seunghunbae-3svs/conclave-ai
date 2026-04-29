@@ -92,7 +92,17 @@ export type AutofixResultStatus =
   | "bailed-build-failed"
   | "bailed-tests-failed"
   | "bailed-secret-guard"
-  | "dry-run";
+  | "dry-run"
+  /**
+   * PIA-5 — terminal status when autofix successfully committed AND
+   * pushed a patch THIS run, but `--max-iterations` cap stopped the
+   * internal verify loop. The next review.yml run (auto-triggered by
+   * the push) is the authoritative outcome. This is NOT a failure;
+   * exit code is 0. Pre-PIA-5 this collapsed into bailed-max-iterations
+   * with exit 1, painting GitHub Actions red even when the cycle was
+   * advancing correctly. (Caught LIVE on eventbadge PR #38.)
+   */
+  | "deferred-to-next-review";
 
 export interface AutofixResult {
   status: AutofixResultStatus;

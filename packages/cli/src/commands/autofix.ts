@@ -696,6 +696,11 @@ export async function runAutofix(args: AutofixArgs, deps: AutofixDeps = {}): Pro
   const worker = deps.worker ?? buildWorker(deps, cfg.config);
   const iterations: AutofixIteration[] = [];
   let totalCost = 0;
+  // PIA-5 — set true the first time an iteration successfully pushes a
+  // patch. When max-iterations bails the loop afterwards, the run is
+  // "deferred-to-next-review" (exit 0) instead of "bailed-max-iterations"
+  // (exit 1) because the push itself advances the cycle.
+  let anyIterationPushed = false;
   let currentReviews = initialReviews;
   let finalVerdict: "approve" | "rework" | "reject" = initialVerdict;
 
@@ -1273,9 +1278,17 @@ export async function runAutofix(args: AutofixArgs, deps: AutofixDeps = {}): Pro
       ],
       { cwd: args.cwd },
     );
-    await git("git", ["push"], { cwd: args.cwd }).catch((err) => {
+    let pushedThisRun = false;
+    try {
+      await git("git", ["push"], { cwd: args.cwd });
+      pushedThisRun = true;
+    } catch (err) {
       stderr(`autofix: git push warning — ${err instanceof Error ? err.message : String(err)}\n`);
-    });
+    }
+    // PIA-5 — record the push success on a closure-scoped variable the
+    // bail-status logic below reads. Captured in the outer scope via
+    // anyIterationPushed.
+    if (pushedThisRun) anyIterationPushed = true;
 
     // H3 #11 — write a solution sidecar so the next review cycle can
     // attach the (blocker, patch) pairs to its EpisodicEntry. On merge,
@@ -1449,9 +1462,23 @@ export async function runAutofix(args: AutofixArgs, deps: AutofixDeps = {}): Pro
       stdout(`autofix: complete, awaiting Bae approval (L2)\n`);
     }
   } else if (reachedMax) {
-    status = "bailed-max-iterations";
-    code = 1;
-    stdout(`autofix: bailed after ${iterations.length} iterations — remaining blockers: ${remainingBlockersFrom(currentReviews).length}\n`);
+    // PIA-5 — distinguish "patch pushed; let next review verify" from
+    // "actually stuck". The former is success-shaped (cycle advanced
+    // via the push) and exits 0 so GitHub Actions doesn't paint red
+    // and Telegram doesn't fire a misleading failure card.
+    if (anyIterationPushed) {
+      status = "deferred-to-next-review";
+      code = 0;
+      stdout(
+        `autofix: pushed cycle's patch + max-iterations cap reached — deferring verdict to the next review.yml run on the new push (status=deferred-to-next-review, exit 0).\n`,
+      );
+    } else {
+      status = "bailed-max-iterations";
+      code = 1;
+      stdout(
+        `autofix: bailed after ${iterations.length} iterations with NO pushed patch — remaining blockers: ${remainingBlockersFrom(currentReviews).length}\n`,
+      );
+    }
     // Best-effort PR comment.
     try {
       await gh("gh", [

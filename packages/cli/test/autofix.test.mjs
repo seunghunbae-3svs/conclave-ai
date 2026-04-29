@@ -997,7 +997,13 @@ test("runAutofix: --verdict JSON bypasses initial review", async () => {
 });
 
 // 15. Max iterations reached → post bailout comment
-test("runAutofix: max iterations reached → bailed-max-iterations", async () => {
+test("runAutofix: max iterations reached + pushes succeeded → deferred-to-next-review (PIA-5)", async () => {
+  // PIA-5 — when autofix commits + pushes the cycle's patches and then
+  // hits the max-iterations cap, the run is "deferred-to-next-review"
+  // (exit 0) because the push itself triggers a new review.yml run that
+  // is the authoritative verdict. Pre-PIA-5 this collapsed into
+  // bailed-max-iterations (exit 1), painting GitHub Actions red even
+  // when the cycle was advancing correctly.
   const worker = makeWorker();
   const git = makeGit();
   const verifier = makeVerifier();
@@ -1025,8 +1031,8 @@ test("runAutofix: max iterations reached → bailed-max-iterations", async () =>
     },
   );
 
-  assert.equal(code, 1);
-  assert.equal(result.status, "bailed-max-iterations");
+  assert.equal(code, 0, "PIA-5 — pushed cycle = exit 0 (next review.yml is the authority)");
+  assert.equal(result.status, "deferred-to-next-review");
   // gh pr comment should have been attempted
   const commentCalls = ghCalls.filter((a) => a[0] === "pr" && a[1] === "comment");
   assert.ok(commentCalls.length >= 1, "should post bailout comment");
