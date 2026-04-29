@@ -39,10 +39,15 @@ function cleanup(root) {
 const fakeFetch = async () => {
   // Stub fetch — return a successful response for /healthz so unrelated
   // checks don't dominate the output we're inspecting.
-  return new Response(JSON.stringify({ ok: true, version: "v0.13.24" }), {
-    status: 200,
-    headers: { "content-type": "application/json" },
-  });
+  // OP-7 — body must include `service` field; doctor now validates the
+  // /healthz JSON shape to catch CF Access intercepts that 200-and-HTML.
+  return new Response(
+    JSON.stringify({ service: "conclave-central-plane", version: "v0.13.24", db: "up" }),
+    {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    },
+  );
 };
 
 const stableNpmFetch = async () => {

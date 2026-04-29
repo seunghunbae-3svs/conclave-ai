@@ -163,8 +163,33 @@ export async function checkWorkerHealth(
   const ctrl = new AbortController();
   const t = setTimeout(() => ctrl.abort(), HTTP_TIMEOUT_MS);
   try {
-    const res = await fetchImpl(url, { signal: ctrl.signal });
+    // OP-7 — redirect: "manual" so Cloudflare Access intercepts (302 →
+    // cloudflareaccess.com login page) don't masquerade as success. With
+    // the default `redirect: "follow"`, fetch silently follows the
+    // redirect to the login page (HTTP 200 with HTML), `res.ok` is true,
+    // JSON parsing quietly fails, and the doctor reports "ok" while the
+    // worker is in fact unreachable. Live-caught during eventbadge Phase
+    // C verification — Bae had to remove the CF Access Application
+    // policy to unblock the autonomy loop, and `conclave doctor` was
+    // green the entire time.
+    const res = await fetchImpl(url, { signal: ctrl.signal, redirect: "manual" });
     clearTimeout(t);
+    // 3xx → either a CF Access wall or a legitimate worker redirect.
+    // Neither is a healthy /healthz; treat as fail with a CF-Access-aware
+    // hint when the location header points there.
+    if (res.status >= 300 && res.status < 400) {
+      const loc = res.headers.get("location") ?? "";
+      const isCfAccess = /cloudflareaccess\.com|cloudflare-access/i.test(loc);
+      return {
+        key: "worker-healthz",
+        label: "central-plane /healthz",
+        status: "fail",
+        detail: `HTTP ${res.status} → ${loc.slice(0, 120) || "(no location header)"}`,
+        hint: isCfAccess
+          ? "Cloudflare Access is intercepting /healthz — remove the Zero Trust Application policy on this worker (or scope it to /admin/* only)"
+          : "worker is redirecting /healthz — verify route configuration",
+      };
+    }
     if (!res.ok) {
       return {
         key: "worker-healthz",
@@ -174,12 +199,29 @@ export async function checkWorkerHealth(
         hint: "check Cloudflare Worker deploy + D1 binding (`wrangler tail` for live errors)",
       };
     }
+    // OP-7 — validate the body is the expected JSON shape. /healthz returns
+    // { service, version, db } — anything else (HTML, plain text) means we
+    // hit something other than the worker (CF challenge page, generic 200).
+    const ct = res.headers.get("content-type") ?? "";
     let detail = "200 ok";
+    let parsedBody = false;
     try {
       const body = (await res.json()) as { service?: string; version?: string; db?: string };
-      if (body.service) detail = `${body.service} v${body.version ?? "?"} db=${body.db ?? "?"}`;
+      if (body && typeof body.service === "string") {
+        detail = `${body.service} v${body.version ?? "?"} db=${body.db ?? "?"}`;
+        parsedBody = true;
+      }
     } catch {
-      // non-JSON body is fine — we already have 2xx
+      // JSON parse failure handled below.
+    }
+    if (!parsedBody) {
+      return {
+        key: "worker-healthz",
+        label: "central-plane /healthz",
+        status: "fail",
+        detail: `HTTP 200 but response is not /healthz JSON (content-type: ${ct.slice(0, 80) || "unknown"})`,
+        hint: "the URL returned 200 but no `service` field — likely a Cloudflare interstitial or wrong URL; confirm the worker route",
+      };
     }
     return { key: "worker-healthz", label: "central-plane /healthz", status: "ok", detail };
   } catch (err) {

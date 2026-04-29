@@ -80,19 +80,36 @@ test("checkEnvKeys: empty-string env values are treated as missing", () => {
 
 // ---- checkWorkerHealth ---------------------------------------------------
 
+// Helper for the OP-7 fetch shape (headers + redirect support).
+function mkResponse({
+  ok = true,
+  status = 200,
+  contentType = "application/json",
+  location = null,
+  json,
+}) {
+  return {
+    ok,
+    status,
+    headers: { get: (k) => (k.toLowerCase() === "content-type" ? contentType : k.toLowerCase() === "location" ? location : null) },
+    json: json ?? (async () => ({})),
+  };
+}
+
 test("checkWorkerHealth: 200 + JSON body → OK with version detail", async () => {
-  const fakeFetch = async () => ({
-    ok: true,
-    status: 200,
-    json: async () => ({ service: "conclave-central-plane", version: "0.11.0", db: "up" }),
-  });
+  const fakeFetch = async () =>
+    mkResponse({
+      ok: true,
+      status: 200,
+      json: async () => ({ service: "conclave-central-plane", version: "0.11.0", db: "up" }),
+    });
   const r = await checkWorkerHealth("https://x/healthz", fakeFetch);
   assert.equal(r.status, "ok");
   assert.ok(r.detail?.includes("conclave-central-plane v0.11.0 db=up"));
 });
 
 test("checkWorkerHealth: 5xx → FAIL with hint", async () => {
-  const fakeFetch = async () => ({ ok: false, status: 503, json: async () => ({}) });
+  const fakeFetch = async () => mkResponse({ ok: false, status: 503, json: async () => ({}) });
   const r = await checkWorkerHealth("https://x/healthz", fakeFetch);
   assert.equal(r.status, "fail");
   assert.ok(r.detail?.includes("503"));
@@ -104,6 +121,88 @@ test("checkWorkerHealth: network error → FAIL", async () => {
   const r = await checkWorkerHealth("https://x/healthz", fakeFetch);
   assert.equal(r.status, "fail");
   assert.ok(r.detail?.includes("ECONNREFUSED"));
+});
+
+// ---- OP-7 — Cloudflare Access false-positive --------------------------
+
+test("OP-7: 302 redirect to cloudflareaccess.com → FAIL with CF-Access hint (NOT silent ok)", async () => {
+  // Pre-OP-7 fetch followed the redirect to the CF Access login page,
+  // got 200 OK with HTML, and reported "ok". The pass-through wall let
+  // an actual outage masquerade as healthy.
+  const fakeFetch = async () =>
+    mkResponse({
+      ok: false,
+      status: 302,
+      contentType: "text/html",
+      location: "https://example.cloudflareaccess.com/cdn-cgi/access/login/...",
+    });
+  const r = await checkWorkerHealth("https://x/healthz", fakeFetch);
+  assert.equal(r.status, "fail");
+  assert.match(r.detail ?? "", /302/);
+  assert.match(r.hint ?? "", /Cloudflare Access|Zero Trust|Application policy/i);
+});
+
+test("OP-7: 302 redirect to non-CF URL → FAIL with generic redirect hint", async () => {
+  const fakeFetch = async () =>
+    mkResponse({
+      ok: false,
+      status: 302,
+      contentType: "text/html",
+      location: "https://other.example.com/somewhere",
+    });
+  const r = await checkWorkerHealth("https://x/healthz", fakeFetch);
+  assert.equal(r.status, "fail");
+  assert.match(r.detail ?? "", /302/);
+  assert.match(r.hint ?? "", /redirect|route configuration/i);
+});
+
+test("OP-7: 200 OK but body is HTML (not JSON) → FAIL (CF interstitial / wrong URL)", async () => {
+  // The other CF Access mode: a 200 page with the JS challenge inline.
+  // ok=true, fetch parses (or fails to parse) the body as JSON. Pre-OP-7
+  // the JSON-parse failure was swallowed and the check reported ok with
+  // detail "200 ok". Now we require the `service` field to be present.
+  const fakeFetch = async () =>
+    mkResponse({
+      ok: true,
+      status: 200,
+      contentType: "text/html; charset=utf-8",
+      json: async () => {
+        throw new Error("not JSON");
+      },
+    });
+  const r = await checkWorkerHealth("https://x/healthz", fakeFetch);
+  assert.equal(r.status, "fail");
+  assert.match(r.detail ?? "", /not.+JSON|content-type.*html/i);
+  assert.match(r.hint ?? "", /interstitial|service.+field|worker route/i);
+});
+
+test("OP-7: 200 OK with JSON missing `service` field → FAIL", async () => {
+  const fakeFetch = async () =>
+    mkResponse({
+      ok: true,
+      status: 200,
+      contentType: "application/json",
+      json: async () => ({ unrelated: "yes" }),
+    });
+  const r = await checkWorkerHealth("https://x/healthz", fakeFetch);
+  assert.equal(r.status, "fail");
+});
+
+test("OP-7: real fetch is called with redirect:'manual' so no follow-the-redirect happens", async () => {
+  // Pin the contract: doctor MUST pass redirect:"manual" so the helper
+  // can detect 3xx vs. silently follow. If a future refactor drops this
+  // option, this test fails immediately.
+  let receivedInit;
+  const fakeFetch = async (_url, init) => {
+    receivedInit = init;
+    return mkResponse({
+      ok: true,
+      status: 200,
+      json: async () => ({ service: "conclave-central-plane", version: "0.12.0", db: "up" }),
+    });
+  };
+  await checkWorkerHealth("https://x/healthz", fakeFetch);
+  assert.equal(receivedInit?.redirect, "manual", "doctor MUST request redirect:'manual' to detect CF Access intercepts");
 });
 
 // ---- checkWorkflowFiles --------------------------------------------------
@@ -179,9 +278,10 @@ test("checkCliVersion: installed > latest (dev install) → OK (don't downgrade)
 test("runDoctor: prints results + returns code 0 when no fails", async () => {
   const lines = [];
   const env = { ANTHROPIC_API_KEY: "x", OPENAI_API_KEY: "x", GEMINI_API_KEY: "x", CONCLAVE_TOKEN: "x" };
+  const headers = { get: (k) => (k.toLowerCase() === "content-type" ? "application/json" : null) };
   const fakeFetch = async (url) => {
-    if (url.includes("/healthz")) return { ok: true, status: 200, json: async () => ({ service: "cp", version: "0.11.0", db: "up" }) };
-    return { ok: true, status: 200, json: async () => ({ version: "0.13.6" }) };
+    if (url.includes("/healthz")) return { ok: true, status: 200, headers, json: async () => ({ service: "cp", version: "0.11.0", db: "up" }) };
+    return { ok: true, status: 200, headers, json: async () => ({ version: "0.13.6" }) };
   };
   const { code, results } = await runDoctor([], {
     env,
@@ -209,7 +309,8 @@ test("runDoctor: prints results + returns code 0 when no fails", async () => {
 
 test("runDoctor: any FAIL → exit code 1", async () => {
   const env = { ANTHROPIC_API_KEY: "x", GEMINI_API_KEY: "x", CONCLAVE_TOKEN: "x" }; // OPENAI missing
-  const fakeFetch = async () => ({ ok: true, status: 200, json: async () => ({ version: "0.13.6", service: "cp", db: "up" }) });
+  const headers = { get: (k) => (k.toLowerCase() === "content-type" ? "application/json" : null) };
+  const fakeFetch = async () => ({ ok: true, status: 200, headers, json: async () => ({ version: "0.13.6", service: "cp", db: "up" }) });
   const { code } = await runDoctor([], {
     env,
     fetch: fakeFetch,
@@ -223,7 +324,8 @@ test("runDoctor: any FAIL → exit code 1", async () => {
 
 test("runDoctor: warns only (no fails) → exit code 0", async () => {
   const env = { ANTHROPIC_API_KEY: "x", OPENAI_API_KEY: "x", GEMINI_API_KEY: "x", CONCLAVE_TOKEN: "x" };
-  const fakeFetch = async () => ({ ok: true, status: 200, json: async () => ({ version: "0.13.6", service: "cp", db: "up" }) });
+  const headers = { get: (k) => (k.toLowerCase() === "content-type" ? "application/json" : null) };
+  const fakeFetch = async () => ({ ok: true, status: 200, headers, json: async () => ({ version: "0.13.6", service: "cp", db: "up" }) });
   const { code, results } = await runDoctor([], {
     env,
     fetch: fakeFetch,
