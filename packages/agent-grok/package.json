@@ -1,6 +1,6 @@
 {
   "name": "@conclave-ai/agent-grok",
-  "version": "0.6.6",
+  "version": "0.6.7",
   "description": "Conclave AI Grok agent — OpenAI-wire-compatible, routes to xAI's api.x.ai/v1 with strict-JSON-schema structured output.",
   "license": "MIT",
   "type": "module",
