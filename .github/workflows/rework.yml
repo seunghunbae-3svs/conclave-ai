@@ -97,11 +97,15 @@ jobs:
           set -euo pipefail
           CYCLE=${{ inputs.cycle }}
           MAX=${{ inputs.max-cycles }}
-          # Hard upper bound: refuse to run when cycle has already reached
-          # max. The central plane normally won't fire a dispatch in that
-          # state, but defense-in-depth is cheap.
-          if [ "$CYCLE" -ge "$MAX" ]; then
-            echo "::warning::Rework cycle $CYCLE has reached max $MAX — skipping autofix."
+          # Fence-post: max=3 means cycles 1, 2, 3 are ALL valid. Pre-fix
+          # `>= max` rejected cycle 3 (the last valid cycle), cutting
+          # the autonomy loop one cycle short. Now skip only when CYCLE
+          # > MAX (genuinely past the ceiling). LIVE-caught on
+          # eventbadge PR #48: cycle 2 bailed → AF-2 dispatched cycle 3
+          # → guard rejected cycle 3 with "ceiling reached" → loop
+          # ended one cycle early instead of getting its third attempt.
+          if [ "$CYCLE" -gt "$MAX" ]; then
+            echo "::warning::Rework cycle $CYCLE has exceeded max $MAX — skipping autofix."
             echo "skip=true" >> "$GITHUB_OUTPUT"
           else
             echo "skip=false" >> "$GITHUB_OUTPUT"
@@ -383,8 +387,10 @@ jobs:
         run: |
           set -euo pipefail
           NEXT=$(( CYCLE + 1 ))
-          if [ "$NEXT" -ge "$MAX" ]; then
-            echo "::notice::Autofix failed at cycle $CYCLE; next cycle ($NEXT) would hit the ceiling — letting cycle ceiling skip emit review-finished"
+          # Fence-post: max=3 → cycles 1, 2, 3 all valid. Dispatch
+          # NEXT only when NEXT <= MAX (i.e., NEXT is a valid cycle).
+          if [ "$NEXT" -gt "$MAX" ]; then
+            echo "::notice::Autofix failed at cycle $CYCLE; next cycle ($NEXT) is past max ($MAX) — letting cycle ceiling skip emit review-finished"
             exit 0
           fi
           echo "::notice::Autofix failed at cycle $CYCLE; dispatching cycle $NEXT (max $MAX) so the loop keeps trying"
