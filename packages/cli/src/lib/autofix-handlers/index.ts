@@ -5,6 +5,7 @@ import {
   type BinaryEncodingHandlerDeps,
   type HandlerResult,
 } from "./binary-encoding.js";
+import { tryMissingImportFix } from "./missing-import.js";
 
 /**
  * v0.7.3 — autofix special-handler layer.
@@ -37,7 +38,13 @@ export type SpecialHandler = (
 ) => Promise<HandlerResult>;
 
 /** Ordered list — first handler to `claimed: true` wins. */
-export const SPECIAL_HANDLERS: readonly SpecialHandler[] = [tryBinaryEncodingFix];
+export const SPECIAL_HANDLERS: readonly SpecialHandler[] = [
+  tryBinaryEncodingFix,
+  // AF-4 — mechanical missing-import wrap. Runs before the worker so
+  // missing-module blockers don't go through the unreliable
+  // unified-diff path that keeps producing build-failing patches.
+  tryMissingImportFix,
+];
 
 /**
  * Try each handler in order. Returns the first claim (success or
