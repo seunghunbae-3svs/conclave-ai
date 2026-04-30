@@ -31,6 +31,34 @@ interface CheckRunsResponse {
 }
 
 /**
+ * A single commit status as GitHub returns it from `/repos/:owner/:repo/
+ * commits/:sha/status`. Vercel writes deploy state via the LEGACY commit
+ * statuses API (not check-runs), so we must query both endpoints to see
+ * Vercel deployments. (Live-caught on eventbadge PR #50: deployment was
+ * "failure" via commit status but check-runs showed nothing → fetchDeployStatus
+ * returned "unknown" → review-finished card said "deploy: unknown" instead
+ * of "deploy: failure".)
+ */
+interface CommitStatus {
+  context?: string;
+  state?: "success" | "failure" | "pending" | "error" | string;
+  description?: string;
+  target_url?: string;
+}
+
+interface CombinedStatusResponse {
+  state?: "success" | "failure" | "pending" | string;
+  statuses?: CommitStatus[];
+  total_count?: number;
+}
+
+function isDeployStatus(s: CommitStatus): boolean {
+  const hay = [s.context, s.description].filter(Boolean).join(" ").toLowerCase();
+  if (!hay) return false;
+  return /(vercel|netlify|cloudflare|cf-pages|railway|render|fly\.io|deploy|preview)/.test(hay);
+}
+
+/**
  * Heuristic that identifies a check-run as "a deploy" — Vercel, Netlify,
  * Cloudflare Pages, Railway, Render, Fly.io, generic "Deploy" / "Preview".
  * We don't care who owns it; if the check is named or produced by a
@@ -61,6 +89,20 @@ export async function fetchDeployStatus(
   deps: { run?: GhRunner } = {},
 ): Promise<DeployStatus> {
   const run = deps.run ?? defaultRunner;
+  // Probe BOTH check-runs (Cloudflare Pages, GitHub-app deploys) AND
+  // commit statuses (Vercel, Netlify legacy). Vercel writes only to
+  // the legacy commit-statuses API; check-runs alone returns "unknown"
+  // for Vercel-deployed repos. Live-caught on eventbadge PR #50.
+  const checkRunResult = await fetchCheckRunDeployStatus(repo, sha, run);
+  const commitStatusResult = await fetchCommitStatusDeployStatus(repo, sha, run);
+  return combineDeployStatus(checkRunResult, commitStatusResult);
+}
+
+async function fetchCheckRunDeployStatus(
+  repo: string,
+  sha: string,
+  run: GhRunner,
+): Promise<DeployStatus> {
   try {
     const { stdout } = await run("gh", [
       "api",
@@ -68,7 +110,6 @@ export async function fetchDeployStatus(
       "--paginate",
     ]);
     const parsed = JSON.parse(stdout) as CheckRunsResponse | CheckRunsResponse[];
-    // --paginate may return an array of response pages; flatten
     const allRuns: CheckRun[] = Array.isArray(parsed)
       ? parsed.flatMap((p) => p.check_runs ?? [])
       : parsed.check_runs ?? [];
@@ -87,4 +128,41 @@ export async function fetchDeployStatus(
   } catch {
     return "unknown";
   }
+}
+
+async function fetchCommitStatusDeployStatus(
+  repo: string,
+  sha: string,
+  run: GhRunner,
+): Promise<DeployStatus> {
+  try {
+    const { stdout } = await run("gh", [
+      "api",
+      `repos/${repo}/commits/${sha}/status`,
+    ]);
+    const parsed = JSON.parse(stdout) as CombinedStatusResponse;
+    const statuses = (parsed.statuses ?? []).filter(isDeployStatus);
+    if (statuses.length === 0) return "unknown";
+    const anyFailure = statuses.some((s) => s.state === "failure" || s.state === "error");
+    if (anyFailure) return "failure";
+    const anyPending = statuses.some((s) => s.state === "pending");
+    if (anyPending) return "pending";
+    const anySuccess = statuses.some((s) => s.state === "success");
+    return anySuccess ? "success" : "unknown";
+  } catch {
+    return "unknown";
+  }
+}
+
+/**
+ * Combine signals from check-runs and commit-statuses. Failure dominates
+ * (any failure → failure). Pending wins over success when both have signal
+ * (a partial deploy isn't fully green). When one source is unknown, take
+ * the other.
+ */
+function combineDeployStatus(a: DeployStatus, b: DeployStatus): DeployStatus {
+  if (a === "failure" || b === "failure") return "failure";
+  if (a === "pending" || b === "pending") return "pending";
+  if (a === "success" || b === "success") return "success";
+  return "unknown";
 }

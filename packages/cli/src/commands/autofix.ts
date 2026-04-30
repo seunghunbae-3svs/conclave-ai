@@ -534,6 +534,26 @@ export async function runAutofix(args: AutofixArgs, deps: AutofixDeps = {}): Pro
       );
       return;
     }
+    // UX-14 — actively probe deploy state at terminal time. Pre-UX-14 we
+    // used a hardcoded mapping (merged → success, build-fail → failure,
+    // else → unknown). bailed-no-patches / bailed-max-iter / cycle-ceiling
+    // all collapsed to "unknown" even when Vercel had recorded failure
+    // on the head commit (eventbadge PR #50). Now probe the GH Checks
+    // API + commit statuses (covers Vercel which uses the legacy API)
+    // and let probe override the static hint when probe is confident.
+    let probedDeploy: DeployOutcome = deployHint;
+    const probeFn = deps.fetchDeployStatus ?? defaultFetchDeployStatus;
+    if (repoSlug && headSha) {
+      try {
+        const probe = await probeFn(repoSlug, headSha);
+        if (probe !== "unknown") probedDeploy = probe as DeployOutcome;
+        stdout(`autofix: deploy probe for ${repoSlug}@${headSha.slice(0, 8)} → ${probe} (hint was ${deployHint}, using ${probedDeploy})\n`);
+      } catch (err) {
+        stderr(
+          `autofix: deploy probe failed (${err instanceof Error ? err.message : String(err)}) — using static hint=${deployHint}\n`,
+        );
+      }
+    }
     const report = buildTerminalReport({
       status: statusTag,
       iterations: iters,
@@ -544,7 +564,7 @@ export async function runAutofix(args: AutofixArgs, deps: AutofixDeps = {}): Pro
       // cycle=1). When reworkCycle is 0 (legacy / non-rework path)
       // surface as 1 so the report says "1번의 사이클" not "0".
       cyclesRun: Math.max(args.reworkCycle ?? 0, 1),
-      deployOutcome: deployHint,
+      deployOutcome: probedDeploy,
     });
     stdout(
       `autofix: emitting review-finished (status=${statusTag}, cycles=${report.cyclesRun}, found=${report.totalBlockersFound}, fixed=${report.blockersAutofixed}, outstanding=${report.blockersOutstanding}, recommendation=${report.recommendation})\n`,
