@@ -98,6 +98,36 @@ export async function fetchDeployStatus(
   return combineDeployStatus(checkRunResult, commitStatusResult);
 }
 
+/**
+ * UX-15 — extract a preview URL for the head commit. Vercel/Netlify
+ * write `target_url` on commit status; we surface that on the
+ * review-finished card so non-devs can click + see the rendered page.
+ * Returns the FIRST deploy-flavored target_url found, or null.
+ */
+export async function fetchPreviewUrl(
+  repo: string,
+  sha: string,
+  deps: { run?: GhRunner } = {},
+): Promise<string | null> {
+  const run = deps.run ?? defaultRunner;
+  try {
+    const { stdout } = await run("gh", [
+      "api",
+      `repos/${repo}/commits/${sha}/status`,
+    ]);
+    const parsed = JSON.parse(stdout) as CombinedStatusResponse;
+    const statuses = (parsed.statuses ?? []).filter(isDeployStatus);
+    for (const s of statuses) {
+      if (typeof s.target_url === "string" && s.target_url.length > 0) {
+        return s.target_url;
+      }
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
 async function fetchCheckRunDeployStatus(
   repo: string,
   sha: string,

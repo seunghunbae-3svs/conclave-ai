@@ -25,22 +25,44 @@ const blocker = (overrides = {}) => ({
   ...overrides,
 });
 
-test("UX-4 describeBlockerForUser: maps known categories to Korean phrases", () => {
+test("UX-4 describeBlockerForUser: produces Korean label + non-dev location + actionable hint", () => {
+  // UX-15 — output is "{label}: {plain location} — {action}". No more raw
+  // dev jargon (file paths, function names) leaked into the user-facing
+  // string. Bae on PR #56: "비개발자가 initFeatureFlagsRuntime 보고
+  // 뭐 어떻게 하라는 건지 알 수 있겠냐". The action sentence tells
+  // the user WHO should do WHAT.
+  const r1 = describeBlockerForUser(blocker({ category: "contrast", file: "src/Form.jsx", line: 12 }));
+  assert.match(r1, /글자 가독성/);
+  assert.match(r1, /디자이너/);
+
+  const r2 = describeBlockerForUser(blocker({ category: "logging", file: "src/util.js" }));
+  assert.match(r2, /디버그 로그/);
+  assert.match(r2, /개발자/);
+
+  const r3 = describeBlockerForUser(blocker({ category: "runtime-safety", file: "src/main.jsx" }));
+  assert.match(r3, /앱 시작 안전성/);
+  assert.match(r3, /앱 시작 파일/); // location translated, no raw filename
+  assert.match(r3, /개발자 확인/);
+
+  const r4 = describeBlockerForUser(blocker({ category: "style-drift", file: "src/Btn.jsx" }));
+  assert.match(r4, /디자인 시스템 일관성/);
+});
+
+test("UX-4 describeBlockerForUser: file location uses plain Korean (component / page / 앱 시작 파일 / utility)", () => {
+  // Components folder → "X 화면 부분".
   assert.match(
-    describeBlockerForUser(blocker({ category: "contrast", message: "low contrast" })),
-    /글자 가독성/,
+    describeBlockerForUser(blocker({ category: "contrast", file: "frontend/src/components/AddressSearch.jsx" })),
+    /AddressSearch 화면 부분/,
   );
+  // main.jsx → "앱 시작 파일".
   assert.match(
-    describeBlockerForUser(blocker({ category: "logging", message: "stray console.log" })),
-    /디버그 로그 제거/,
+    describeBlockerForUser(blocker({ category: "runtime-safety", file: "frontend/src/main.jsx" })),
+    /앱 시작 파일/,
   );
+  // utils → "X 도구".
   assert.match(
-    describeBlockerForUser(blocker({ category: "runtime-safety", message: "unconditional init" })),
-    /앱 시작 안전성/,
-  );
-  assert.match(
-    describeBlockerForUser(blocker({ category: "style-drift" })),
-    /디자인 시스템 일관성/,
+    describeBlockerForUser(blocker({ category: "logging", file: "frontend/src/utils/colorExtractor.js" })),
+    /colorExtractor 도구/,
   );
 });
 
@@ -49,10 +71,11 @@ test("UX-4 describeBlockerForUser: prefix categories (design-*/ui-*/visual-*) ma
   assert.match(describeBlockerForUser(blocker({ category: "visual-regression" })), /비주얼 회귀/);
 });
 
-test("UX-4 describeBlockerForUser: unknown category falls back to surface message", () => {
-  const out = describeBlockerForUser(blocker({ category: "esoteric-cat", message: "weird thing" }));
-  assert.match(out, /esoteric-cat/);
-  assert.match(out, /weird thing/);
+test("UX-4 describeBlockerForUser: unknown category → 기타 + generic hint", () => {
+  const out = describeBlockerForUser(blocker({ category: "esoteric-cat", file: "x.js" }));
+  // Unknown → just label "기타" + plain action — no raw dev category leaks.
+  assert.match(out, /기타/);
+  assert.match(out, /개발자 확인/);
 });
 
 test("UX-4 pickRecommendation: clean approved + deploy success → approve", () => {

@@ -190,19 +190,23 @@ export function renderProgressLine(input: NotifyProgressInput): ProgressLine {
         `${cycles}회의 검토 사이클을 거쳐 총 ${found}건의 문제를 발견했습니다.`,
         `자동 수정: ${fixed}건 · 사람 손 필요: ${outstanding}건 · 비용: $${cost}`,
         `배포 상태: ${deployGlyph} ${escapeHtml(deploy)}`,
-        ``,
       ];
-      if (fixedList) {
-        lines.push(`<b>고친 내용</b>`, fixedList, ``);
+      // UX-15 — clickable preview + PR links.
+      const links: string[] = [];
+      if (typeof p.previewUrl === "string" && p.previewUrl.length > 0) {
+        links.push(`<a href="${escapeHtml(p.previewUrl)}">미리보기 화면</a>`);
       }
-      if (outstandingList) {
-        lines.push(`<b>남은 항목 (사람 검토 필요)</b>`, outstandingList, ``);
+      if (typeof p.prUrl === "string" && p.prUrl.length > 0) {
+        links.push(`<a href="${escapeHtml(p.prUrl)}">PR 페이지</a>`);
       }
+      if (links.length > 0) {
+        lines.push(``, links.join(" · "));
+      }
+      lines.push(``);
+      if (fixedList) lines.push(`<b>고친 내용</b>`, fixedList, ``);
+      if (outstandingList) lines.push(`<b>남은 항목 (사람 검토 필요)</b>`, outstandingList, ``);
       lines.push(`${recHeadline}`);
-      return {
-        stage: input.stage,
-        text: lines.join("\n"),
-      };
+      return { stage: input.stage, text: lines.join("\n") };
     }
   }
 }

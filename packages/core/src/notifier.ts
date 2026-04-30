@@ -193,6 +193,18 @@ export interface ProgressPayload {
    * highlights this on the corresponding action button.
    */
   recommendation?: string;
+  /**
+   * UX-15 — preview URL for the live deploy of THIS PR head commit.
+   * Pulled from Vercel/Netlify/CF commit-status target_url at terminal
+   * time. Surfaced in the review-finished card so non-devs can click
+   * and SEE the result instead of reading code-shaped descriptions.
+   */
+  previewUrl?: string;
+  /**
+   * UX-15 — PR URL (github.com/...) so the user can land on the
+   * full PR view from the Telegram card.
+   */
+  prUrl?: string;
 }
 
 export interface NotifyProgressInput {

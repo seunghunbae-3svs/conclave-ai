@@ -42,54 +42,126 @@ export interface TerminalReportPayload {
 }
 
 /**
- * Translate a blocker into a single-sentence non-developer phrase.
- * Falls back to the blocker's message head when the category isn't
- * recognised — better to surface the worker's own words than render a
- * vague placeholder.
+ * Translate a blocker into a non-developer-readable description with an
+ * actionable hint. Format: "{한국어 카테고리}: {어디} — {뭘 해야 하나}"
+ *
+ * Pre-fix the message tail dumped raw English jargon
+ * ("initFeatureFlagsRuntime() runs before React renders…") which is
+ * unreadable for non-developers. Now: identifier-shaped tokens are
+ * normalized to "한 부분" / "한 함수", file paths get plain-language
+ * locations ("주소 검색 컴포넌트"), and a short user-action sentence
+ * is added ("개발자에게 임포트 누락 확인 요청해주세요").
  */
 export function describeBlockerForUser(b: Blocker): string {
   const cat = (b.category ?? "").toLowerCase();
-  const file = b.file ? ` (${b.file})` : "";
-  const tail = b.message ? ` — ${b.message.slice(0, 80)}` : "";
-  // Category → Korean user-language mapping. Keep entries SHORT (≤ 30
-  // chars before the file/message tail) so the rendered list stays
-  // scannable on a phone screen.
   const KOREAN: Record<string, string> = {
-    contrast: "글자 가독성 (대비) 개선",
-    accessibility: "접근성 개선",
+    contrast: "글자 가독성 (대비)",
+    accessibility: "접근성",
     "style-drift": "디자인 시스템 일관성",
-    "missing-state": "포커스/호버 상태 표시",
+    "missing-state": "포커스/호버 상태",
     "design-drift": "디자인 변경 검토",
     "design-spec": "디자인 명세 부합",
     "ui-": "UI 일관성",
     "visual-": "비주얼 회귀",
     "layout-regression": "레이아웃 회귀",
-    "cropped-text": "텍스트 잘림 수정",
-    overflow: "오버플로 수정",
-    regression: "회귀 (이전 동작 깨짐)",
-    "debug-code": "디버그 코드 제거",
-    logging: "디버그 로그 제거",
-    "dead-code": "사용하지 않는 코드 제거",
-    security: "보안 개선",
-    sec: "보안 개선",
-    "secrets-leak": "비밀 키 노출 방지",
-    perf: "성능 개선",
-    performance: "성능 개선",
-    "type-error": "타입 오류 수정",
+    "cropped-text": "텍스트 잘림",
+    overflow: "오버플로",
+    regression: "이전 동작 깨짐",
+    "debug-code": "디버그 코드 잔여",
+    logging: "디버그 로그 잔여",
+    "dead-code": "사용하지 않는 코드",
+    security: "보안",
+    sec: "보안",
+    "secrets-leak": "비밀 키 노출",
+    perf: "성능",
+    performance: "성능",
+    "type-error": "타입 오류",
     "runtime-safety": "앱 시작 안전성",
     stability: "앱 안정성",
     "regression-risk": "회귀 위험",
+    "missing-import": "임포트 누락",
+    "import-error": "임포트 오류",
     process: "검토 프로세스",
-    a11y: "접근성 개선",
+    a11y: "접근성",
   };
-  // First try exact category, then prefix-match for design/ui/visual
-  // namespaces.
-  if (KOREAN[cat]) return `${KOREAN[cat]}${file}${tail}`;
-  for (const k of Object.keys(KOREAN)) {
-    if (k.endsWith("-") && cat.startsWith(k)) return `${KOREAN[k]}${file}${tail}`;
+  // Action hint per category — what a non-developer should do.
+  const ACTION: Record<string, string> = {
+    contrast: "글자 색이 잘 보이도록 디자이너 검토 필요",
+    accessibility: "장애가 있는 사용자에게도 보이도록 디자이너/개발자 확인 필요",
+    "style-drift": "디자인 시스템 색을 다시 맞추도록 디자이너에게 요청",
+    "missing-state": "포커스/호버 표시를 더해야 함 (디자이너 검토)",
+    "missing-import": "개발자에게 임포트 누락 확인 요청",
+    "import-error": "개발자에게 임포트 경로 확인 요청",
+    regression: "이전과 비교해 동작이 바뀐 부분 — 개발자 확인 필요",
+    "debug-code": "릴리스 전에 개발자가 디버그 코드 제거",
+    logging: "릴리스 전에 개발자가 로그 코드 제거",
+    "dead-code": "개발자가 사용하지 않는 코드 정리",
+    security: "보안 검토 필수 — 개발자/보안 담당자 확인",
+    "secrets-leak": "보안 위험 — 즉시 키 폐기 + 개발자 확인",
+    perf: "성능 영향 — 개발자 검토",
+    performance: "성능 영향 — 개발자 검토",
+    "type-error": "타입 오류 — 개발자 수정 필요",
+    "runtime-safety": "앱이 시작 못 할 수 있음 — 개발자 확인 필요",
+    stability: "앱이 죽을 수 있음 — 개발자 확인 필요",
+    "regression-risk": "회귀 가능성 — 개발자 확인 필요",
+    "design-drift": "디자인 의도와 다름 — 디자이너 검토",
+    a11y: "접근성 검토 — 디자이너/개발자",
+    "layout-regression": "레이아웃 깨짐 — 디자이너 검토",
+    "cropped-text": "텍스트가 잘림 — 디자이너 검토",
+    overflow: "콘텐츠가 넘침 — 디자이너 검토",
+    process: "검토 프로세스 관련 — 팀 리드 확인",
+  };
+  // Plain-language file location.
+  const where = b.file ? plainFileLocation(b.file, b.line) : "";
+  // Look up category — exact, then prefix-match for design-/ui-/visual-.
+  let label = "";
+  let action = "";
+  if (KOREAN[cat]) {
+    label = KOREAN[cat];
+    action = ACTION[cat] ?? "";
+  } else {
+    for (const k of Object.keys(KOREAN)) {
+      if (k.endsWith("-") && cat.startsWith(k)) {
+        label = KOREAN[k]!;
+        action = ACTION[k] ?? "";
+        break;
+      }
+    }
   }
-  // Unknown category — surface a generic phrase + file + message head.
-  return `${cat || "기타"}${file}${tail}`;
+  if (!label) {
+    label = "기타";
+    action = "개발자 확인 필요";
+  }
+  // Build: "[label]: [where] — [action]"
+  const parts: string[] = [label];
+  if (where) parts.push(`: ${where}`);
+  if (action) parts.push(` — ${action}`);
+  return parts.join("");
+}
+
+/**
+ * Translate a repo-relative file path into a non-developer-friendly
+ * location. Maps common conventions:
+ *   frontend/src/components/Foo.jsx → "Foo 컴포넌트"
+ *   frontend/src/pages/Home.jsx     → "Home 페이지"
+ *   frontend/src/main.jsx           → "앱 시작 파일"
+ *   frontend/src/utils/x.js         → "x 유틸리티"
+ *   else                            → 파일 이름만
+ */
+function plainFileLocation(file: string, line?: number): string {
+  const base = file.split("/").pop() ?? file;
+  const stem = base.replace(/\.(jsx|tsx|ts|js|mjs|cjs|css|scss)$/i, "");
+  const where = file.toLowerCase();
+  let loc = stem;
+  if (where.includes("/components/")) loc = `${stem} 화면 부분`;
+  else if (where.includes("/pages/") || where.includes("/routes/")) loc = `${stem} 페이지`;
+  else if (where.endsWith("main.jsx") || where.endsWith("main.tsx") || where.endsWith("main.js")) loc = "앱 시작 파일";
+  else if (where.endsWith("app.jsx") || where.endsWith("app.tsx")) loc = "앱 루트";
+  else if (where.includes("/utils/") || where.includes("/lib/")) loc = `${stem} 도구`;
+  else if (where.includes("/api/") || where.includes("/services/")) loc = `${stem} 서버 통신`;
+  else if (where.endsWith(".css") || where.endsWith(".scss")) loc = `${stem} 스타일`;
+  if (typeof line === "number" && line > 0) loc += ` ${line}번 줄`;
+  return loc;
 }
 
 /**

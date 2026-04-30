@@ -33,7 +33,7 @@ import {
   type WorkerContext,
 } from "@conclave-ai/agent-worker";
 import { formatFinding, scanPatch, type ScanResult } from "@conclave-ai/secret-guard";
-import { fetchPrState, fetchDeployStatus as defaultFetchDeployStatus, type DeployStatus, type GhRunner, type PullRequestState } from "@conclave-ai/scm-github";
+import { fetchPrState, fetchDeployStatus as defaultFetchDeployStatus, fetchPreviewUrl, type DeployStatus, type GhRunner, type PullRequestState } from "@conclave-ai/scm-github";
 import { loadConfig, resolveMemoryRoot, type ConclaveConfig } from "../lib/config.js";
 import { runPerBlocker, type GitLike, type WorkerLike } from "../lib/autofix-worker.js";
 import { renderBailSummary, shouldPostSummary } from "../lib/bail-summary.js";
@@ -566,8 +566,19 @@ export async function runAutofix(args: AutofixArgs, deps: AutofixDeps = {}): Pro
       cyclesRun: Math.max(args.reworkCycle ?? 0, 1),
       deployOutcome: probedDeploy,
     });
+    // UX-15 — surface the live preview URL + PR URL so non-devs can click
+    // and see the rendered result directly. Best-effort.
+    let previewUrl: string | null = null;
+    if (repoSlug && headSha) {
+      try {
+        previewUrl = await fetchPreviewUrl(repoSlug, headSha);
+      } catch { /* best-effort */ }
+    }
+    const prUrl = repoSlug && typeof pr === "number"
+      ? `https://github.com/${repoSlug}/pull/${pr}`
+      : undefined;
     stdout(
-      `autofix: emitting review-finished (status=${statusTag}, cycles=${report.cyclesRun}, found=${report.totalBlockersFound}, fixed=${report.blockersAutofixed}, outstanding=${report.blockersOutstanding}, recommendation=${report.recommendation})\n`,
+      `autofix: emitting review-finished (status=${statusTag}, cycles=${report.cyclesRun}, found=${report.totalBlockersFound}, fixed=${report.blockersAutofixed}, outstanding=${report.blockersOutstanding}, recommendation=${report.recommendation}, preview=${previewUrl ? "yes" : "no"})\n`,
     );
     await emitProgress(progressNotifiers, {
       episodicId: progressEpisodicId,
@@ -576,6 +587,8 @@ export async function runAutofix(args: AutofixArgs, deps: AutofixDeps = {}): Pro
         ...report,
         ...(repoSlug ? { repo: repoSlug } : {}),
         ...(typeof pr === "number" ? { pullNumber: pr } : {}),
+        ...(previewUrl ? { previewUrl } : {}),
+        ...(prUrl ? { prUrl } : {}),
       },
     });
   };
