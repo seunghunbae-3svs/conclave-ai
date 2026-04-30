@@ -6,6 +6,10 @@ import {
   type HandlerResult,
 } from "./binary-encoding.js";
 import { tryMissingImportFix } from "./missing-import.js";
+import { tryContrastFix } from "./contrast.js";
+import { tryInlineStyleToTailwindFix } from "./inline-style-to-tailwind.js";
+import { tryDebugCodeFix } from "./debug-code.js";
+import { tryFocusVisibleFix } from "./focus-visible.js";
 
 /**
  * v0.7.3 — autofix special-handler layer.
@@ -40,10 +44,16 @@ export type SpecialHandler = (
 /** Ordered list — first handler to `claimed: true` wins. */
 export const SPECIAL_HANDLERS: readonly SpecialHandler[] = [
   tryBinaryEncodingFix,
-  // AF-4 — mechanical missing-import wrap. Runs before the worker so
-  // missing-module blockers don't go through the unreliable
-  // unified-diff path that keeps producing build-failing patches.
+  // AF-4 — missing-import → no-op stub
   tryMissingImportFix,
+  // AF-5 — contrast → AA-safe pair
+  tryContrastFix,
+  // AF-6 — inline-style drift → strip
+  tryInlineStyleToTailwindFix,
+  // AF-7/8 — debug-code + dead-code → strip
+  tryDebugCodeFix,
+  // AF-9 — focus-visible → inject classes
+  tryFocusVisibleFix,
 ];
 
 /**
