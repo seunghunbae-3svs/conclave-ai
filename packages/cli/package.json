@@ -1,6 +1,6 @@
 {
   "name": "@conclave-ai/cli",
-  "version": "0.14.7",
+  "version": "0.14.8",
   "description": "Conclave AI CLI — the `conclave` binary.",
   "license": "MIT",
   "type": "module",
