@@ -1110,13 +1110,25 @@ export async function runAutofix(args: AutofixArgs, deps: AutofixDeps = {}): Pro
         }
       }
     }
-    const stillReady = fixes.filter((f) => f.status === "ready" && f.patch);
-    // v0.7.3 — handler-staged ready fixes count toward "something got
-    // applied" but have no patch to feed `git apply`. Tracked
-    // separately so the diff-budget, dry-run, and apply loops can
-    // skip them.
+    // Handler-staged ready fixes count toward "something got applied"
+    // but the file edit is already on disk + staged via `git add`;
+    // there is no unified diff to feed `git apply`. The single signal
+    // for that lane is `handlerStagedFixes.has(f)` — NOT the absence
+    // of `f.patch`. Some handlers (AF-4/5/6/7/8/9) populate `patch`
+    // with a comment-header sentinel for human-readable terminal
+    // reporting; if we treat those as worker patches and feed them to
+    // `git apply`, the apply rejects on "No valid patches in input"
+    // and AF-1's partial-restore (`git checkout HEAD -- <file>`)
+    // wipes the in-place edit the handler already made — silently
+    // reverting the fix and stalling the autonomy loop. Live-caught
+    // on eventbadge#57 v19 cycle 1 where AF-5/6/7/8/9 all rewrote
+    // AddressSearch.jsx + colorExtractor.js correctly, then got
+    // reverted by partial-restore, leaving only AF-4's new-file stub.
+    const stillReady = fixes.filter(
+      (f) => f.status === "ready" && f.patch && !handlerStagedFixes.has(f),
+    );
     const stillReadyHandlerStaged = fixes.filter(
-      (f) => f.status === "ready" && !f.patch && handlerStagedFixes.has(f),
+      (f) => f.status === "ready" && handlerStagedFixes.has(f),
     );
 
     // --- Diff-budget guard ---------------------------------------------
