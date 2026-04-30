@@ -338,15 +338,27 @@ jobs:
           if [ "${{ steps.verdict.outputs.have_verdict }}" = "true" ]; then
             EXTRA="$EXTRA --verdict /tmp/verdict.json"
           fi
-          # max-iterations=1 — the loop is driven by GitHub re-triggering
-          # review.yml on push, NOT by autofix's internal review-spawn.
+          # max-iterations=3 — autofix runs UP TO 3 internal iterations
+          # within ONE cycle dispatch. Each iteration re-prompts the
+          # worker with the prior iteration's build/test failure tail
+          # (autofix.ts feeds previousBuildErrorTail into the next
+          # WorkerContext.summary), so iter 2 sees "iter 1's patch
+          # broke the build with TS2345" and tries a different fix.
+          #
+          # Pre-this rework.yml passed --max-iterations 1, so a single
+          # build-fail bailed the cycle immediately. With no push, no
+          # cycle 2 ever fired. Bae on PR #46: "배포실패면 그걸 2/3
+          # 사이클에서 작업을 했어야하고" — the loop was supposed to
+          # KEEP TRYING. Bumping internal iters to 3 gives autofix a
+          # chance to recover from build-fail without needing a new
+          # cycle dispatch (which couldn't fire anyway with no push).
           # autonomy=l2 — never auto-merge from the rework loop; final
           # approve still requires Bae's button.
           # shellcheck disable=SC2086
           conclave autofix \
             --pr "${{ inputs.pr-number }}" \
             --rework-cycle "${{ inputs.cycle }}" \
-            --max-iterations 1 \
+            --max-iterations 3 \
             --autonomy l2 \
             $EXTRA
 

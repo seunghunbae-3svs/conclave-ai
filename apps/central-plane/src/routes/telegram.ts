@@ -195,11 +195,31 @@ export function createTelegramRoutes(
 
       // v0.8 — "cancel" is a no-op: the user backed out of the unsafe
       // merge confirmation. Just ack the query so the spinner stops.
+      // UX-7 follow-on — "hold" maps to kind=cancel (no-op ack), but
+      // the user clicked the explicit 보류 button on the review-finished
+      // card and deserves a meaningful Korean ack message + a Telegram
+      // chat reply so they know the click registered. Pre-this they
+      // clicked 보류 and saw nothing change; click felt broken.
       if (classified.kind === "cancel") {
+        const isHold = parsed.outcome === "hold";
+        const ackText = isHold ? "⏸ 보류됨 — 나중에 다시 검토해주세요." : "Cancelled";
         await telegram.answerCallbackQuery({
           id: cq.id!,
-          text: "Cancelled",
+          text: ackText,
         });
+        if (isHold) {
+          // Also drop a chat message so the chat history shows the
+          // decision (callback acks are ephemeral toast pop-ups).
+          try {
+            await telegram.sendMessage({
+              chatId,
+              text: "⏸ <b>보류 처리되었습니다.</b>\n남은 항목은 사람 검토가 필요합니다. PR을 다시 보시고 결정되면 Telegram에서 ✅ 승인 / ❌ 거부 버튼을 누르거나 PR 페이지에서 직접 처리해주세요.",
+              parseMode: "HTML",
+            });
+          } catch (err) {
+            console.warn("hold ack chat message failed:", err);
+          }
+        }
         return c.json({ ok: true });
       }
 

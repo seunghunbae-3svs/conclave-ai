@@ -172,6 +172,31 @@ export const ConclaveConfigSchema = z.object({
        * latency to every outcome write.
        */
       autoPush: z.boolean().default(false),
+      /**
+       * UX-10 / self-evolve — fire-and-forget background pull of the
+       * federated baseline at `conclave review` startup. Refreshes
+       * the local cache so EVERY review benefits from patterns OTHER
+       * installs have learned, without the user having to remember
+       * to run `conclave sync`. Pre-this, federated learning was
+       * opt-in AND required manual sync — 99% of installs never
+       * opted in or ran sync, so the self-evolve flywheel never
+       * spun. With autoPull=true (the new default), the moment a
+       * user installs the CLI they start receiving the baseline
+       * other installs have shaped — answer-keys + failure-catalog
+       * — tier-0 of the self-evolve loop.
+       *
+       * Privacy: pull is ANONYMOUS — no user identity, no repo slug,
+       * no diff content leaves OR returns to the install. The wire
+       * format is documented in docs/federated-sync.md. Disable with
+       * `federated.autoPull = false`.
+       */
+      autoPull: z.boolean().default(true),
+      /**
+       * UX-10 — staleness threshold for autoPull. Skipped when the
+       * local cache is younger than this (default 1h). Prevents
+       * hammering the central plane on every review.
+       */
+      autoPullMaxAgeMs: z.number().int().positive().default(3600_000),
     })
     .optional(),
   visual: z
@@ -317,6 +342,28 @@ export const DEFAULT_CONFIG: ConclaveConfig = {
     root: ".conclave",
     activeFailureGate: true,
     activeFailureGateMinOverlap: 2,
+  },
+  // UX-10 / self-evolve flywheel — federated learning is ON by default
+  // for new installs. Anonymous baselines (kind+domain+category+
+  // severity+tag-hash, NEVER code/diff/repo names/usernames) flow
+  // bidirectionally through the central plane:
+  //   - autoPull (default true): fetches the latest aggregated baseline
+  //     at every `conclave review` start (1h staleness threshold) so
+  //     the install benefits from patterns ALL other installs have
+  //     learned. No setup; just install and review.
+  //   - autoPush (default false, opt-in): pushes THIS install's
+  //     deltas at record-outcome time. Stays opt-in because pushing
+  //     contributes user data; users should consciously join the
+  //     federation.
+  // Endpoint defaults to the production central plane; self-hosters
+  // override `federated.endpoint` in `.conclaverc.json`.
+  // Privacy model: see docs/federated-sync.md.
+  federated: {
+    enabled: true,
+    endpoint: "https://conclave-ai.seunghunbae.workers.dev",
+    autoPush: false,
+    autoPull: true,
+    autoPullMaxAgeMs: 3600_000,
   },
 };
 

@@ -43,6 +43,7 @@ import { LangfuseMetricsSink } from "@conclave-ai/observability-langfuse";
 import type { Notifier } from "@conclave-ai/core";
 import { buildNotifiers } from "../lib/notifier-factory.js";
 import { emitProgress } from "../lib/progress-emit.js";
+import { autoPullFederatedBaselineInBackground } from "../lib/auto-pull-federated.js";
 import { pushEpisodicAnchor } from "../lib/episodic-anchor.js";
 import { fetchDeployStatus } from "@conclave-ai/scm-github";
 import { loadConfig, resolveMemoryRoot } from "../lib/config.js";
@@ -266,6 +267,30 @@ export async function review(argv: string[]): Promise<void> {
     const baselineStore = new FileSystemFederatedBaselineStore({
       root: path.join(memoryRoot, "federated"),
     });
+    // UX-10 / self-evolve — autoPull refresh. Fire-and-forget at the
+    // start of review so subsequent retrieve() picks up newer
+    // patterns every install has shaped. Skipped when:
+    //   - autoPull config opt-out
+    //   - cache is fresher than autoPullMaxAgeMs (default 1h)
+    //   - endpoint not set (already enforced by HttpFederatedSyncTransport
+    //     ctor — falls back to no-op silently)
+    //   - CONCLAVE_TOKEN missing (transport bails out gracefully)
+    // The pull runs IN PARALLEL with retrieve() — we don't await it
+    // before reading the cache, because:
+    //   1. cache from a prior review may already be fresh enough
+    //   2. blocking on the pull adds 200-500ms to every review cold-
+    //      start; the next review picks up the just-pulled data
+    if (config.federated.autoPull !== false) {
+      const cachePath = path.join(memoryRoot, "federated", "baselines.jsonl");
+      void autoPullFederatedBaselineInBackground({
+        cwd: configDir,
+        endpoint: config.federated.endpoint,
+        token: process.env["CONCLAVE_TOKEN"],
+        maxAgeMs: config.federated.autoPullMaxAgeMs ?? 3_600_000,
+        baselineStore,
+        baselineCachePath: cachePath,
+      });
+    }
     const cached = await baselineStore.read();
     if (cached.length > 0) federatedFrequency = buildFrequencyMap(cached);
   }
