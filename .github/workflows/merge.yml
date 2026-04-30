@@ -42,7 +42,7 @@ on:
         description: 'npm version tag for @conclave-ai/cli (record-outcome step). Keep in lockstep with review.yml/rework.yml default.'
         required: false
         type: string
-        default: 0.14.17
+        default: 0.14.18
       central-url:
         description: 'Override the central-plane base URL. Leave blank for production.'
         required: false
