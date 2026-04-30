@@ -520,8 +520,8 @@ export async function runAutofix(args: AutofixArgs, deps: AutofixDeps = {}): Pro
     remainingBlockers: Blocker[],
     cost: number,
     deployHint: DeployOutcome,
-  ) => {
-    if (!progressEpisodicId) return;
+  ): Promise<{ emitted: boolean; deferredForRetry: boolean }> => {
+    if (!progressEpisodicId) return { emitted: false, deferredForRetry: false };
     const terminal = isAutonomyTerminal({
       status: statusTag,
       pushedThisRun,
@@ -532,7 +532,7 @@ export async function runAutofix(args: AutofixArgs, deps: AutofixDeps = {}): Pro
       stdout(
         `autofix: NOT emitting review-finished — autonomy not terminal (status=${statusTag}, pushed=${pushedThisRun}, cycle=${args.reworkCycle ?? 0}/3)\n`,
       );
-      return;
+      return { emitted: false, deferredForRetry: false };
     }
     // UX-14 — actively probe deploy state at terminal time. Pre-UX-14 we
     // used a hardcoded mapping (merged → success, build-fail → failure,
@@ -566,6 +566,29 @@ export async function runAutofix(args: AutofixArgs, deps: AutofixDeps = {}): Pro
       cyclesRun: Math.max(args.reworkCycle ?? 0, 1),
       deployOutcome: probedDeploy,
     });
+    // UX-16 — defer review-finished when only machine-fixable items
+    // remain AND we haven't hit the cycle ceiling. Bae's words:
+    //   "auto-fix limit reached에 open PR이 아니고 rework이 들어가야지.
+    //    또 고쳐서 결국 고쳐질때까지 작동하는게 핵심이잖아"
+    //
+    // Right — categories like contrast / style-drift / focus-visible /
+    // missing-import are exactly what AF-4..AF-9 mechanical handlers
+    // cover. If they show up at terminal time it means autofix's
+    // pipeline didn't get a chance to run them this cycle (e.g., bail
+    // before SPECIAL_HANDLERS fired, or AF-1 dropped them mid-iter).
+    // Re-dispatch instead of surfacing them as user-action items.
+    //
+    // Skip the emit; AF-2 in rework.yml dispatches the next cycle on
+    // autofix-step.outcome == 'failure' (caller flips exit code to 1
+    // when this returns deferredForRetry=true).
+    const currentCycle = args.reworkCycle ?? 0;
+    const maxCycles = 3;
+    if (report.machineFixableCount > 0 && currentCycle < maxCycles) {
+      stdout(
+        `autofix: DEFERRING review-finished — ${report.machineFixableCount} machine-fixable item(s) remain at cycle ${currentCycle}/${maxCycles}; AF-2 will dispatch retry\n`,
+      );
+      return { emitted: false, deferredForRetry: true };
+    }
     // UX-15 — surface the live preview URL + PR URL so non-devs can click
     // and see the rendered result directly. Best-effort.
     let previewUrl: string | null = null;
@@ -578,7 +601,7 @@ export async function runAutofix(args: AutofixArgs, deps: AutofixDeps = {}): Pro
       ? `https://github.com/${repoSlug}/pull/${pr}`
       : undefined;
     stdout(
-      `autofix: emitting review-finished (status=${statusTag}, cycles=${report.cyclesRun}, found=${report.totalBlockersFound}, fixed=${report.blockersAutofixed}, outstanding=${report.blockersOutstanding}, recommendation=${report.recommendation}, preview=${previewUrl ? "yes" : "no"})\n`,
+      `autofix: emitting review-finished (status=${statusTag}, cycles=${report.cyclesRun}, found=${report.totalBlockersFound}, fixed=${report.blockersAutofixed}, outstanding=${report.blockersOutstanding}, machineFixable=${report.machineFixableCount}, recommendation=${report.recommendation}, preview=${previewUrl ? "yes" : "no"})\n`,
     );
     await emitProgress(progressNotifiers, {
       episodicId: progressEpisodicId,
@@ -591,6 +614,7 @@ export async function runAutofix(args: AutofixArgs, deps: AutofixDeps = {}): Pro
         ...(prUrl ? { prUrl } : {}),
       },
     });
+    return { emitted: true, deferredForRetry: false };
   };
 
   const postBailSummary = async (
@@ -1852,7 +1876,7 @@ export async function runAutofix(args: AutofixArgs, deps: AutofixDeps = {}): Pro
   // review, bailed-max-iterations, bailed-budget).
   let tailDeploy: DeployOutcome = "unknown";
   if (mergeStatus === "merged") tailDeploy = "success";
-  await emitReviewFinishedIfTerminal(
+  const tailEmit = await emitReviewFinishedIfTerminal(
     prNumber,
     repo,
     status,
@@ -1862,6 +1886,17 @@ export async function runAutofix(args: AutofixArgs, deps: AutofixDeps = {}): Pro
     totalCost,
     tailDeploy,
   );
+  // UX-16 — when emitReviewFinished deferred for AF-2 retry (machine-
+  // fixable items remain at non-final cycle), flip exit code so the
+  // workflow's "Dispatch next cycle on autofix failure" step fires and
+  // re-runs autofix on the next cycle. Without this the tail-block
+  // would return code=0 (success-shaped) and AF-2 wouldn't dispatch.
+  if (tailEmit.deferredForRetry && code === 0) {
+    stdout(
+      `autofix: flipping exit code 0 → 1 to trigger AF-2 retry dispatch (UX-16: machine-fixable items remain)\n`,
+    );
+    code = 1;
+  }
 
   return {
     code,

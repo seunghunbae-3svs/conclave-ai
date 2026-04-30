@@ -180,9 +180,24 @@ export interface ProgressPayload {
    */
   fixedItems?: string[];
   /**
-   * Short non-dev summary lines describing what's still outstanding.
+   * Short non-dev summary lines describing what's still outstanding
+   * (HUMAN-NEEDED only — machine-fixable items live on the
+   * `machineFixableItems` field below).
    */
   outstandingItems?: string[];
+  /**
+   * UX-16 — count of outstanding blockers whose category is mechanically
+   * handled by AF-4..AF-9 (contrast / style-drift / focus / debug-code /
+   * missing-import). These don't require human review — the system can
+   * retry them on the next cycle. Notifier renders them as
+   * "🔁 다시 시도 가능" rather than "사람 검토 필요".
+   */
+  machineFixableCount?: number;
+  /**
+   * UX-16 — non-dev summary lines describing the machine-fixable items.
+   * Mirrors `outstandingItems` shape but rendered in a separate bucket.
+   */
+  machineFixableItems?: string[];
   /**
    * Deploy outcome at terminal time: "success" | "failure" | "pending"
    * | "unknown". Used to pick the verdict glyph.

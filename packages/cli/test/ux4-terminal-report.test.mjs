@@ -158,15 +158,18 @@ test("UX-4 buildTerminalReport: synthesizes payload from iterations + remaining"
   // total = 4 distinct issues. The conflict fix doesn't count as autofixed.
   assert.equal(report.totalBlockersFound, 4);
   assert.equal(report.blockersAutofixed, 2);
-  assert.equal(report.blockersOutstanding, 2);
+  // UX-16 — outstanding splits into machine-fixable + human-needed.
+  // runtime-safety → AF-4 territory (machine-fixable bucket).
+  // process → not handled by any handler (human-needed bucket).
+  assert.equal(report.blockersOutstanding, 1, "human-needed only");
+  assert.equal(report.machineFixableCount, 1, "runtime-safety is machine-fixable");
   assert.equal(report.deployOutcome, "success");
   // Fixed items use Korean.
   assert.ok(report.fixedItems.some((s) => /디버그 로그/.test(s)));
   assert.ok(report.fixedItems.some((s) => /글자 가독성/.test(s)));
-  // Outstanding items use Korean.
-  assert.ok(report.outstandingItems.some((s) => /앱 시작 안전성/.test(s)));
-  // Recommendation: bail-free + outstanding > 0 + deploy=success → still hold
-  // (per pickRecommendation rules — outstanding > 0 prevents approve).
+  // Machine-fixable items: 앱 시작 안전성 = runtime-safety in Korean.
+  assert.ok(report.machineFixableItems.some((s) => /앱 시작 안전성/.test(s)));
+  // Recommendation: bail-free + outstanding > 0 + deploy=success → still hold.
   assert.equal(report.recommendation, "hold");
 });
 
@@ -224,7 +227,59 @@ test("UX-4 buildTerminalReport: unverified iteration's fixes don't count as auto
     deployOutcome: "failure",
   });
   assert.equal(report.blockersAutofixed, 0, "unverified iteration's fixes do NOT count");
-  assert.equal(report.blockersOutstanding, 3);
+  // UX-16 — logging + contrast → machine-fixable bucket (AF-7/AF-5).
+  // type-error → not handled by any AF-4..9 handler → human-needed.
+  assert.equal(report.blockersOutstanding, 1, "type-error is human-needed");
+  assert.equal(report.machineFixableCount, 2, "logging + contrast are machine-fixable");
   assert.equal(report.recommendation, "hold");
   assert.equal(report.fixedItems.length, 0);
+});
+
+test("UX-16 buildTerminalReport: machine-fixable categories don't pollute human-needed bucket", () => {
+  // Bae on PR #57: "가독성 대비, 시스템 일관성, 호버 상태 접근성 이런걸
+  // 왜 사람이 봐야하냐? 에이전트들이 충분히 다 잡고 고칠수있는거잖아".
+  // Every category in this fixture maps to one of AF-4..AF-9; none should
+  // surface in outstandingItems / blockersOutstanding.
+  const machineFixableRemaining = [
+    blocker({ category: "contrast", file: "src/Btn.jsx", message: "low contrast" }),
+    blocker({ category: "style-drift", file: "src/Form.jsx", message: "inline style" }),
+    blocker({ category: "missing-state", file: "src/Btn.jsx", message: "no focus ring" }),
+    blocker({ category: "logging", file: "src/util.js", message: "stray log" }),
+    blocker({ category: "missing-import", file: "src/main.jsx", message: "missing import" }),
+  ];
+  const report = buildTerminalReport({
+    status: "bailed-no-patches",
+    iterations: [],
+    remainingBlockers: machineFixableRemaining,
+    totalCostUsd: 0,
+    cyclesRun: 1,
+    deployOutcome: "failure",
+  });
+  assert.equal(report.blockersOutstanding, 0, "no human-needed items");
+  assert.equal(report.outstandingItems.length, 0, "outstandingItems empty");
+  assert.equal(report.machineFixableCount, 5, "all five are machine-fixable");
+  assert.equal(report.machineFixableItems.length, 5);
+});
+
+test("UX-16 buildTerminalReport: mixed bucket — human-needed + machine-fixable", () => {
+  const remaining = [
+    blocker({ category: "contrast", file: "a.jsx", message: "low contrast" }),
+    blocker({ category: "secrets-leak", file: "b.ts", message: "API key in source" }),
+    blocker({ category: "type-error", file: "c.ts", message: "bad type" }),
+    blocker({ category: "logging", file: "d.js", message: "stray log" }),
+  ];
+  const report = buildTerminalReport({
+    status: "awaiting-approval",
+    iterations: [],
+    remainingBlockers: remaining,
+    totalCostUsd: 0.1,
+    cyclesRun: 2,
+    deployOutcome: "success",
+  });
+  // contrast, logging → machine-fixable. secrets-leak, type-error → human.
+  assert.equal(report.machineFixableCount, 2);
+  assert.equal(report.blockersOutstanding, 2);
+  assert.ok(report.machineFixableItems.some((s) => /글자 가독성/.test(s)));
+  assert.ok(report.machineFixableItems.some((s) => /디버그 로그/.test(s)));
+  assert.ok(report.outstandingItems.some((s) => /비밀 키/.test(s)));
 });

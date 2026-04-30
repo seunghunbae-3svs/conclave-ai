@@ -37,6 +37,12 @@ export interface TerminalReportPayload {
   blockersOutstanding: number;
   fixedItems: string[];
   outstandingItems: string[];
+  /** UX-16 — outstanding categories the mechanical handlers cover (AF-4..AF-9).
+   * Surfaced separately as "다시 시도 가능" so non-devs see the system *can*
+   * fix these, just hasn't yet this run. AF-2 uses the count to decide
+   * whether to retry one more cycle vs. genuinely terminate. */
+  machineFixableCount: number;
+  machineFixableItems: string[];
   deployOutcome: DeployOutcome;
   recommendation: Recommendation;
 }
@@ -140,6 +146,72 @@ export function describeBlockerForUser(b: Blocker): string {
 }
 
 /**
+ * UX-16 — does AF-4..AF-9 mechanically handle this blocker's category?
+ *
+ * Bae on PR #57: "가독성 대비, 시스템 일관성, 호버 상태 접근성 이런걸 왜
+ * 사람이 봐야하냐? 에이전트들이 충분히 다 잡고 고칠수있는거잖아".
+ * Right — these categories are precisely what the special handlers cover.
+ * If they show up in the user-facing "사람 검토 필요" bucket it means
+ * the autofix pipeline didn't get a chance to run them this run, NOT
+ * that they need human eyes.
+ *
+ * This list is the union of the categories matched by the SPECIAL_HANDLERS
+ * in packages/cli/src/lib/autofix-handlers/index.ts:
+ *   AF-4 missing-import       → missing-import, import-error, runtime-safety, …
+ *   AF-5 contrast              → contrast, accessibility, a11y, wcag
+ *   AF-6 inline-style-to-tailwind → style-drift, design-drift, design-system, …
+ *   AF-7/8 debug-code          → debug-code, logging, regression, dead-code, …
+ *   AF-9 focus-visible         → missing-state, focus, focus-visible, keyboard
+ *
+ * Keep in sync with autofix-handlers when new categories are added.
+ */
+const MACHINE_FIXABLE_EXACT = new Set<string>([
+  // AF-4 — missing-import / boot stability
+  "missing-import",
+  "import-error",
+  "import-missing",
+  "missing-module",
+  "module-missing",
+  "runtime-safety",
+  "regression-risk",
+  "stability",
+  "bootstrapping",
+  "boot",
+  "app-boot",
+  // AF-5 — contrast / accessibility
+  "contrast",
+  "accessibility",
+  "a11y",
+  "wcag",
+  // AF-6 — style drift / design system
+  "style-drift",
+  "design-drift",
+  "design-system",
+  "design-token",
+  "tailwind",
+  "token-system",
+  // AF-7/8 — debug code / dead code
+  "debug-code",
+  "logging",
+  "regression",
+  "dead-code",
+  "code-quality",
+  "cleanliness",
+  "unused",
+  // AF-9 — focus / keyboard states
+  "missing-state",
+  "focus",
+  "focus-visible",
+  "keyboard",
+]);
+
+export function isMachineFixable(b: Blocker): boolean {
+  const cat = (b.category ?? "").toLowerCase().trim();
+  if (!cat) return false;
+  return MACHINE_FIXABLE_EXACT.has(cat);
+}
+
+/**
  * Translate a repo-relative file path into a non-developer-friendly
  * location. Maps common conventions:
  *   frontend/src/components/Foo.jsx → "Foo 컴포넌트"
@@ -165,24 +237,26 @@ function plainFileLocation(file: string, line?: number): string {
 }
 
 /**
- * Pick a verdict recommendation based on terminal status + deploy +
- * outstanding count. Conservative — defaults to "hold" when in doubt.
+ * Pick a verdict recommendation. Conservative — defaults to "hold" when
+ * in doubt. Note: `outstandingCount` here is HUMAN-NEEDED only (machine-
+ * fixable items are tracked separately and don't gate approval — they
+ * imply "system can retry"). When deploy is success AND no human items
+ * remain, approval is safe even if machine-fixable items are queued for
+ * the next cycle.
  */
 export function pickRecommendation(input: {
   status: AutofixResultStatus;
   deployOutcome: DeployOutcome;
   outstandingCount: number;
+  machineFixableCount?: number;
+  cyclesRun?: number;
 }): Recommendation {
   if (input.status === "approved" || input.status === "awaiting-approval") {
     if (input.deployOutcome === "success" && input.outstandingCount === 0) return "approve";
-    if (input.deployOutcome === "failure") return "hold";
     return "hold";
   }
   if (input.status === "deferred-to-next-review") return "hold";
-  if (input.status.startsWith("bailed-")) {
-    if (input.outstandingCount > 5 || input.deployOutcome === "failure") return "hold";
-    return "hold";
-  }
+  if (input.status.startsWith("bailed-")) return "hold";
   return "hold";
 }
 
@@ -201,13 +275,23 @@ export function buildTerminalReport(input: TerminalReportInput): TerminalReportP
       if (f.status === "ready") verifiedReadyFixes.push(f);
     }
   }
-  // UX-12 — dedup outstanding blockers BEFORE counting + describing.
-  // Multiple agents (claude + design + openai) flag the same underlying
-  // bug under different category labels — pre-UX-12 the report showed
-  // "9 사람 검토 필요" when in reality there were 4 distinct issues.
-  // Bae on PR #47: "사람 검토가 필요한것도 너무 많아 진짜 그걸 다
-  // 사람이 봐야해?". Key on (file + first 60 chars of message) so the
-  // user sees the real count of distinct issues.
+  // UX-12 — dedup. UX-16 — separate "human-needed" from "machine-needed".
+  //
+  // Bae on PR #57: "가독성 대비, 시스템 일관성, 호버 상태 접근성 이런걸
+  // 왜 사람이 봐야하냐? 에이전트들이 충분히 다 잡고 고칠 수 있는거잖아".
+  // Right — these are exactly the categories AF-5/6/7/8/9 mechanically
+  // handle. If they show up in "사람 손 필요" it means autofix's
+  // pipeline didn't get a chance to run them this cycle (e.g., bail
+  // before special handlers fired, or AF-1 dropped them mid-iter).
+  // The system should retry, not surface them as user-action items.
+  //
+  // Strategy:
+  //   - Tag each outstanding blocker as "machine-fixable" or "human-needed"
+  //   - "Machine-fixable" goes into a SEPARATE bucket "다시 시도 가능"
+  //     (not "사람 검토 필요"). Notifier renders these distinctly.
+  //   - "Human-needed" goes into the original "사람 검토 필요" bucket.
+  //   - The recommendation logic + AF-2 dispatch use machineFixableCount
+  //     to decide whether to retry vs. genuinely terminate.
   const dedupeKey = (b: Blocker): string =>
     `${b.file ?? "<unscoped>"}::${(b.message ?? "").slice(0, 60).toLowerCase().trim()}`;
   const seenOutstanding = new Set<string>();
@@ -226,15 +310,26 @@ export function buildTerminalReport(input: TerminalReportInput): TerminalReportP
     seenFixed.add(k);
     dedupedFixed.push(f);
   }
+  // Categorize outstanding into machine-fixable vs human-needed.
+  const machineFixable: Blocker[] = [];
+  const humanNeeded: Blocker[] = [];
+  for (const b of dedupedOutstanding) {
+    if (isMachineFixable(b)) machineFixable.push(b);
+    else humanNeeded.push(b);
+  }
   const totalBlockersFound = dedupedFixed.length + dedupedOutstanding.length;
   const blockersAutofixed = dedupedFixed.length;
-  const blockersOutstanding = dedupedOutstanding.length;
+  const blockersOutstanding = humanNeeded.length;
   const fixedItems = dedupedFixed.map((f) => describeBlockerForUser(f.blocker));
-  const outstandingItems = dedupedOutstanding.map(describeBlockerForUser);
+  const outstandingItems = humanNeeded.map(describeBlockerForUser);
+  const machineFixableCount = machineFixable.length;
+  const machineFixableItems = machineFixable.map(describeBlockerForUser);
   const recommendation = pickRecommendation({
     status: input.status,
     deployOutcome: input.deployOutcome,
     outstandingCount: blockersOutstanding,
+    machineFixableCount,
+    cyclesRun: input.cyclesRun,
   });
   return {
     bailStatus: input.status,
@@ -247,6 +342,8 @@ export function buildTerminalReport(input: TerminalReportInput): TerminalReportP
     blockersOutstanding,
     fixedItems,
     outstandingItems,
+    machineFixableCount,
+    machineFixableItems,
     deployOutcome: input.deployOutcome,
     recommendation,
   };

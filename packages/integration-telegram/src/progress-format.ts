@@ -180,15 +180,25 @@ export function renderProgressLine(input: NotifyProgressInput): ProgressLine {
       const cost = typeof p.totalCostUsd === "number" ? p.totalCostUsd.toFixed(4) : "0.00";
       const deploy = p.deployOutcome ?? "unknown";
       const rec = p.recommendation ?? "hold";
+      const machineFixable = typeof p.machineFixableCount === "number" ? p.machineFixableCount : 0;
       const fixedList = (p.fixedItems ?? []).slice(0, 8).map((s) => `  • ${escapeHtml(s)}`).join("\n");
       const outstandingList = (p.outstandingItems ?? []).slice(0, 8).map((s) => `  • ${escapeHtml(s)}`).join("\n");
+      const machineFixableList = (p.machineFixableItems ?? []).slice(0, 8).map((s) => `  • ${escapeHtml(s)}`).join("\n");
       const deployGlyph = deploy === "success" ? "✅" : deploy === "failure" ? "❌" : deploy === "pending" ? "⏳" : "❔";
       const recHeadline = rec === "approve" ? "✅ <b>승인 권장</b>" : rec === "reject" ? "❌ <b>거부 권장</b>" : "⏸ <b>보류 권장</b>";
+      // UX-16 — counts line. "사람 손 필요" only counts human-needed
+      // items now; machine-fixable get their own bucket.
+      const countsParts = [
+        `자동 수정: ${fixed}건`,
+        `사람 손 필요: ${outstanding}건`,
+      ];
+      if (machineFixable > 0) countsParts.push(`다시 시도 가능: ${machineFixable}건`);
+      countsParts.push(`비용: $${cost}`);
       const lines = [
         `<b>🤖 Conclave 검토 완료</b>`,
         ``,
         `${cycles}회의 검토 사이클을 거쳐 총 ${found}건의 문제를 발견했습니다.`,
-        `자동 수정: ${fixed}건 · 사람 손 필요: ${outstanding}건 · 비용: $${cost}`,
+        countsParts.join(" · "),
         `배포 상태: ${deployGlyph} ${escapeHtml(deploy)}`,
       ];
       // UX-15 — clickable preview + PR links.
@@ -204,7 +214,9 @@ export function renderProgressLine(input: NotifyProgressInput): ProgressLine {
       }
       lines.push(``);
       if (fixedList) lines.push(`<b>고친 내용</b>`, fixedList, ``);
-      if (outstandingList) lines.push(`<b>남은 항목 (사람 검토 필요)</b>`, outstandingList, ``);
+      // UX-16 — machine-fixable bucket renders BEFORE the human bucket.
+      if (machineFixableList) lines.push(`<b>🔁 다시 시도 가능 (시스템이 자동으로 처리할 수 있는 항목)</b>`, machineFixableList, ``);
+      if (outstandingList) lines.push(`<b>👤 사람 검토 필요</b>`, outstandingList, ``);
       lines.push(`${recHeadline}`);
       return { stage: input.stage, text: lines.join("\n") };
     }
