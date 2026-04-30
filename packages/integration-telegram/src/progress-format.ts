@@ -26,6 +26,7 @@ export interface ProgressLine {
 
 const IN_PROGRESS_STAGES: readonly ProgressStage[] = [
   "review-started",
+  "rework-cycle-started",
   "visual-capture-started",
   "escalating-to-tier2",
   "autofix-iter-started",
@@ -85,6 +86,12 @@ export function renderProgressLine(input: NotifyProgressInput): ProgressLine {
       const tail = agents ? ` — agents: ${escapeHtml(agents)}` : "";
       const head = target ? ` on ${target}` : "";
       return { stage: input.stage, text: `Review starting${head}${tail}` };
+    }
+    // UX-13 — fresh Telegram message per rework cycle.
+    case "rework-cycle-started": {
+      const it = typeof p.iteration === "number" ? p.iteration : 0;
+      const head = target ? ` on ${target}` : "";
+      return { stage: input.stage, text: `🔄 Rework cycle ${it} starting${head} — auto-fixing remaining blockers` };
     }
     case "visual-capture-started": {
       const routes = p.routes && p.routes.length > 0

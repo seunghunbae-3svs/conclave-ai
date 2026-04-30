@@ -34,7 +34,9 @@ export type ProgressStage =
   // UX-4 — terminal user-facing report. Sent as a SEPARATE Telegram
   // message (new sendMessage, not editMessageText) at the end of the
   // autonomy loop, AFTER deploy status has settled.
-  | "review-finished";
+  | "review-finished"
+  // UX-13 — fresh Telegram message per rework cycle.
+  | "rework-cycle-started";
 
 export interface ProgressPayload {
   repo?: string;
@@ -79,6 +81,7 @@ export interface ProgressLine {
 
 const IN_PROGRESS_STAGES: readonly ProgressStage[] = [
   "review-started",
+  "rework-cycle-started",
   "visual-capture-started",
   "escalating-to-tier2",
   "autofix-iter-started",
@@ -116,6 +119,12 @@ export function renderProgressLine(stage: ProgressStage, payload: ProgressPayloa
       const tail = agents ? ` — agents: ${escapeHtml(agents)}` : "";
       const head = target ? ` on ${target}` : "";
       return { stage, text: `Review starting${head}${tail}` };
+    }
+    // UX-13 — fresh Telegram message per rework cycle.
+    case "rework-cycle-started": {
+      const it = typeof p.iteration === "number" ? p.iteration : 0;
+      const head = target ? ` on ${target}` : "";
+      return { stage, text: `🔄 Rework cycle ${it} starting${head} — auto-fixing remaining blockers` };
     }
     case "visual-capture-started": {
       const routes = p.routes && p.routes.length > 0

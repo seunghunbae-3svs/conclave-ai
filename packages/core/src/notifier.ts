@@ -84,6 +84,21 @@ export type ProgressStage =
   | "autofix-blocker-started"
   | "autofix-blocker-done"
   /**
+   * UX-13 — emitted when a rework dispatch starts a new autonomy cycle
+   * (cycle 2, 3, ...). Pre-UX-13, only cycle 1's `conclave review` emitted
+   * `review-started`, which is what the central plane uses to create a
+   * fresh Telegram message. Subsequent cycles dispatched by AF-2 ran
+   * `conclave autofix` directly (no review.ts), so no new message ever
+   * landed — all per-cycle progress collapsed back into cycle 1's
+   * message and the user only saw "1/3" forever.
+   *
+   * The central plane treats `rework-cycle-started` like `review-started`:
+   * always create a NEW Telegram message anchored on (episodicId + the
+   * implicit chat row's most-recent semantics), so each cycle gets its
+   * own running log and the cycle counter in the header advances.
+   */
+  | "rework-cycle-started"
+  /**
    * UX-4 — terminal user-facing report. Fires ONCE at the end of the
    * autonomy loop (approve / awaiting-approval / cycle-ceiling / bail-
    * with-no-recovery), AFTER deploy status has settled. Renderer writes

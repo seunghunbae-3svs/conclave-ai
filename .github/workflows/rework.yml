@@ -313,6 +313,49 @@ jobs:
             fi
           done
 
+      # UX-13 — emit rework-cycle-started so the central plane creates
+      # a NEW Telegram message for THIS cycle. Pre-UX-13 cycle 2/3
+      # progress collapsed into cycle 1's message because no fresh
+      # review-started ever fired (review.ts isn't invoked from rework.yml).
+      # Best-effort: emit failure logs ::warning:: but doesn't fail the run.
+      - name: Emit rework-cycle-started (UX-13)
+        if: steps.guard.outputs.skip != 'true' && inputs.episodic != ''
+        env:
+          CONCLAVE_TOKEN: ${{ secrets.CONCLAVE_TOKEN }}
+          CONCLAVE_CENTRAL_URL: ${{ vars.CONCLAVE_CENTRAL_URL || '' }}
+          EPISODIC: ${{ inputs.episodic }}
+          CYCLE: ${{ inputs.cycle }}
+          PR: ${{ inputs.pr-number }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          BASE="${CONCLAVE_CENTRAL_URL:-https://conclave-ai.seunghunbae.workers.dev}"
+          BASE="${BASE%/}"
+          if [ -z "${CONCLAVE_TOKEN:-}" ]; then
+            echo "::warning::CONCLAVE_TOKEN unset — skipping rework-cycle-started emit (Telegram cycle separation degraded)"
+            exit 0
+          fi
+          PAYLOAD=$(jq -n \
+            --arg repo "$REPO" \
+            --argjson pr "${PR:-0}" \
+            --argjson cycle "${CYCLE:-0}" \
+            '{
+              repo_slug: $repo,
+              episodic_id: env.EPISODIC,
+              stage: "rework-cycle-started",
+              payload: {
+                repo: $repo,
+                pullNumber: $pr,
+                iteration: $cycle
+              }
+            }')
+          curl -fsS -X POST \
+            -H "Authorization: Bearer ${CONCLAVE_TOKEN}" \
+            -H "Content-Type: application/json" \
+            -d "$PAYLOAD" \
+            "${BASE}/review/notify-progress" | head -c 200 || \
+            echo "::warning::rework-cycle-started emit failed (non-fatal)"
+
       - name: Run autofix (single-iteration; CI re-triggers next cycle)
         if: steps.guard.outputs.skip != 'true'
         env:

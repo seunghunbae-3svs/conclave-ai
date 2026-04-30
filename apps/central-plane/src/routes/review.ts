@@ -475,6 +475,8 @@ export function createReviewRoutes(
     "autofix-blocker-done",
     // UX-4 — terminal user-facing report.
     "review-finished",
+    // UX-13 — fresh Telegram message per rework cycle.
+    "rework-cycle-started",
   ];
 
   app.post("/review/notify-progress", async (c) => {
@@ -589,15 +591,15 @@ export function createReviewRoutes(
           sent += 1;
           continue;
         }
-        // UX-5 — review-started ALWAYS creates a fresh message in this
-        // chat (no findProgressMessage lookup). Each cycle's review.yml
-        // run emits its own review-started, so each cycle gets its own
-        // Telegram message. Subsequent stages within the cycle update
-        // the most recent message via the standard find→edit path.
-        // Pre-UX-5, all cycles' progress collapsed into ONE long edited
-        // message — Bae could see "blocker 1/10..10/10" but had no
-        // separation between cycle 1 and cycle 2 events.
-        const existing = stage === "review-started"
+        // UX-5 + UX-13 — review-started AND rework-cycle-started ALWAYS
+        // create a fresh message in this chat (no findProgressMessage
+        // lookup). Cycle 1 emits review-started from `conclave review`;
+        // cycles 2+ are dispatched by AF-2 → run autofix directly (no
+        // review.ts) → rework.yml emits rework-cycle-started before
+        // autofix runs. Each cycle gets its own Telegram message.
+        // Pre-UX-13 only review-started fired, so cycle 2/3 progress
+        // collapsed into cycle 1's message ("1/3만 왔어").
+        const existing = (stage === "review-started" || stage === "rework-cycle-started")
           ? null
           : await findProgressMessage(c.env, install.id, body.episodic_id, chatId);
         if (!existing) {
