@@ -1,6 +1,6 @@
 {
   "name": "@conclave-ai/agent-gemini",
-  "version": "0.8.10",
+  "version": "0.8.11",
   "description": "Conclave AI Gemini agent — wraps @google/genai with responseSchema structured output. Long-context slot per decision #10.",
   "license": "MIT",
   "type": "module",
