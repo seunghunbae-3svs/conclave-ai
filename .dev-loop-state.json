@@ -138,6 +138,12 @@
       "shippedAt": "2026-04-29T18:00Z",
       "commit": "c216c48",
       "note": "operational issues root-cause closure (53 tests across 6 files). OP-1 dev-loop null-exit diagnostic (5-way classifier + maxBuffer 50→200MB) — direct cause of cron-disable resolved. OP-2 per-item retry ceiling — H1.5 B-style 5-retry-on-same-item now hard-stops at 3. OP-3 workflow YAML contract (review/rework/merge.yml + dispatch types + skip-guard ordering + lockstep cli-version). OP-4 workflow ↔ central-plane route shape contract. OP-5 secret-guard E2E on autofix patches. OP-6 episodic anchor concurrency + UPSERT idempotency. Phase A+B+OP grand total: 184 integration tests, 7 production bugs fixed."
+    },
+    {
+      "item": "UX-16",
+      "shippedAt": "2026-04-30T08:38Z",
+      "commit": "7f4675c",
+      "note": "user-driven mid-loop interrupt — separate machine-fixable from human-needed in review-finished card. Categories AF-4..AF-9 cover (contrast/style-drift/focus/missing-import/etc.) now go in '🔁 다시 시도 가능' bucket, not '사람 검토 필요'. Added isMachineFixable export, machineFixableCount/Items on ProgressPayload, dual-renderer parity (central-plane + integration-telegram). When autofix would terminate but only machine-fixable items remain at non-final cycle, defer review-finished + flip exit code → 1 so AF-2 retry dispatches the next cycle. 18 buildTerminalReport tests (2 new UX-16 cases) all pass. Bae's call: 'auto-fix limit reached에 open PR이 아니고 rework이 들어가야지 — 또 고쳐서 결국 고쳐질때까지 작동하는게 핵심이잖아'."
     }
   ]
 }
