@@ -96,6 +96,40 @@ test("AF-4: creates no-op stub when imported module file is missing", async () =
   });
 });
 
+test("AF-4: claims runtime-safety blocker without 'missing'/'not in diff' phrase (PR #55 LIVE)", async () => {
+  // Council labels the same defect inconsistently across runs.
+  // PR #54: (missing-import) "module not in this diff"
+  // PR #55: (runtime-safety) "init...Runtime() runs before React renders
+  //          with no error handling; if it throws, the app fails to mount"
+  // The PR #55 prose has no "missing" or "not in diff" phrase, so the
+  // pre-fix detection declined and the worker pipeline ran instead.
+  // With the fix, runtime-safety + "init" or "import" mention is enough.
+  await withTempDir(async (dir) => {
+    const file = "src/main.jsx";
+    await fs.mkdir(path.join(dir, "src"), { recursive: true });
+    await fs.writeFile(
+      path.join(dir, file),
+      "import { initFeatureFlagsRuntime } from './config/feature-flags-runtime.js'\n" +
+        "initFeatureFlagsRuntime()\n",
+    );
+    const r = await tryMissingImportFix(
+      "claude",
+      {
+        severity: "major",
+        category: "runtime-safety",
+        message: "initFeatureFlagsRuntime() runs before React renders with no error handling; if it throws, the app fails to mount",
+        file,
+      },
+      { cwd: dir, git: stubGit() },
+    );
+    assert.equal(r.claimed, true);
+    // Stub created.
+    const stubAbs = path.join(dir, "src/config/feature-flags-runtime.js");
+    const stubContent = await fs.readFile(stubAbs, "utf8");
+    assert.match(stubContent, /export function initFeatureFlagsRuntime/);
+  });
+});
+
 test("AF-4: declines when imported module file ALREADY exists (false-alarm blocker)", async () => {
   await withTempDir(async (dir) => {
     const file = "src/main.jsx";

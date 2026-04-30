@@ -77,12 +77,30 @@ function looksLikeMissingImportBlocker(b: Blocker): boolean {
   const msg = b.message ?? "";
   const catHit = MISSING_IMPORT_CATEGORIES.some((c) => cat.includes(c));
   const phraseHit = MISSING_PHRASES.some((re) => re.test(msg));
-  // Either signal alone is too weak. Need a phrase hit (the strong
-  // signal) AND ALSO either a category hit OR explicit "import" /
-  // "module" mention so we don't grab unrelated bugs.
-  if (!phraseHit) return false;
-  if (catHit) return true;
-  return /\b(import|module)\b/i.test(msg);
+  // Strong category match (the council labeled this exactly as a
+  // missing-import) — claim immediately, no phrase check.
+  // Live-caught on PR #55: council labeled the same defect as
+  // (runtime-safety) with message "no error handling around
+  // init…Runtime" — neither phrase pattern matched, AF-4 declined,
+  // worker pipeline ran, all 3 cycles bailed. Council prose is non-
+  // deterministic across runs (PR #54 said "module not in this diff",
+  // PR #55 said "no error handling") so the gate must NOT rely on
+  // message text alone. Strong category names are sufficient.
+  const STRONG_CATEGORIES = ["missing-import", "import-error", "import-missing", "missing-module", "module-missing"];
+  if (STRONG_CATEGORIES.some((c) => cat.includes(c))) return true;
+  // Looser categories (runtime-safety, regression-risk, stability,
+  // bootstrapping, regression) PLUS some import/module hint. The
+  // hint patterns are SUBSTRING-matched (no \b word boundaries)
+  // because camelCase names like `initFeatureFlagsRuntime` don't
+  // have a word boundary between "init" and the next char — \binit\b
+  // misses them. Weaker pre-filter; the disk check inside
+  // tryMissingImportFix is the actual decision (file missing → claim,
+  // file exists → decline).
+  if (catHit) {
+    if (phraseHit) return true;
+    return /(init|import|module|boot|require|load|throws?\b|fails to mount|app.+(?:bootstrap|render|mount))/i.test(msg);
+  }
+  return phraseHit && /(import|module)/i.test(msg);
 }
 
 interface ImportSite {
