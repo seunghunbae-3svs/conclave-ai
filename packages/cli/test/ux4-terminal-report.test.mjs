@@ -78,8 +78,11 @@ test("UX-4 isAutonomyTerminal: deferred-to-next-review → false (next cycle exp
   assert.equal(isAutonomyTerminal({ status: "deferred-to-next-review", pushedThisRun: true, reworkCycle: 0, maxCycles: 3 }), false);
 });
 
-test("UX-4 isAutonomyTerminal: bail with no push at cycle 0 → true (no commit = no next review.yml)", () => {
-  assert.equal(isAutonomyTerminal({ status: "bailed-build-failed", pushedThisRun: false, reworkCycle: 0, maxCycles: 3 }), true);
+test("UX-4 isAutonomyTerminal: bail at cycle 0 with no push → false (AF-2 next-cycle dispatch will fire)", () => {
+  // AF-2 follow-on changed semantics — even with no push, the rework
+  // workflow fires the next cycle dispatch directly, so bail-with-no-push
+  // is NO LONGER terminal until cycle == max.
+  assert.equal(isAutonomyTerminal({ status: "bailed-build-failed", pushedThisRun: false, reworkCycle: 0, maxCycles: 3 }), false);
 });
 
 test("UX-4 isAutonomyTerminal: bail with push mid-cycle → false (next cycle will fire on the push)", () => {
@@ -94,9 +97,9 @@ test("UX-4 buildTerminalReport: synthesizes payload from iterations + remaining"
   const fixedIter = {
     index: 0,
     fixes: [
-      { agent: "claude", blocker: blocker({ category: "logging" }), status: "ready" },
-      { agent: "design", blocker: blocker({ category: "contrast", file: "src/Button.jsx" }), status: "ready" },
-      { agent: "openai", blocker: blocker({ category: "type-error" }), status: "conflict" },
+      { agent: "claude", blocker: blocker({ category: "logging", message: "Stray console.log", file: "src/util.ts" }), status: "ready" },
+      { agent: "design", blocker: blocker({ category: "contrast", message: "Low contrast button", file: "src/Button.jsx" }), status: "ready" },
+      { agent: "openai", blocker: blocker({ category: "type-error", message: "Bad TS type", file: "src/types.ts" }), status: "conflict" },
     ],
     appliedCount: 2,
     verified: true,
@@ -105,7 +108,7 @@ test("UX-4 buildTerminalReport: synthesizes payload from iterations + remaining"
   };
   const remaining = [
     blocker({ category: "runtime-safety", file: "src/main.jsx", message: "Init may throw" }),
-    blocker({ category: "process", file: "src/x.ts", message: "tripwire" }),
+    blocker({ category: "process", file: "src/y.ts", message: "tripwire flagged" }),
   ];
   const report = buildTerminalReport({
     status: "awaiting-approval",
@@ -117,8 +120,10 @@ test("UX-4 buildTerminalReport: synthesizes payload from iterations + remaining"
   });
   assert.equal(report.bailStatus, "awaiting-approval");
   assert.equal(report.cyclesRun, 1);
-  assert.equal(report.totalBlockersFound, 5); // 3 fixes + 2 remaining
-  assert.equal(report.blockersAutofixed, 2);  // 2 ready in verified iter
+  // UX-12 — 2 ready fixes (deduped by file+message), 2 remaining (deduped),
+  // total = 4 distinct issues. The conflict fix doesn't count as autofixed.
+  assert.equal(report.totalBlockersFound, 4);
+  assert.equal(report.blockersAutofixed, 2);
   assert.equal(report.blockersOutstanding, 2);
   assert.equal(report.deployOutcome, "success");
   // Fixed items use Korean.
@@ -161,9 +166,9 @@ test("UX-4 buildTerminalReport: unverified iteration's fixes don't count as auto
   const failedIter = {
     index: 0,
     fixes: [
-      { agent: "claude", blocker: blocker({ category: "logging" }), status: "ready" },
-      { agent: "design", blocker: blocker({ category: "contrast" }), status: "ready" },
-      { agent: "openai", blocker: blocker({ category: "type-error" }), status: "ready" },
+      { agent: "claude", blocker: blocker({ category: "logging", message: "msg-a", file: "a.ts" }), status: "ready" },
+      { agent: "design", blocker: blocker({ category: "contrast", message: "msg-b", file: "b.ts" }), status: "ready" },
+      { agent: "openai", blocker: blocker({ category: "type-error", message: "msg-c", file: "c.ts" }), status: "ready" },
     ],
     appliedCount: 3,
     verified: false, // revert happened
@@ -172,9 +177,9 @@ test("UX-4 buildTerminalReport: unverified iteration's fixes don't count as auto
     buildOk: false,
   };
   const remaining = [
-    blocker({ category: "logging" }),
-    blocker({ category: "contrast" }),
-    blocker({ category: "type-error" }),
+    blocker({ category: "logging", message: "msg-a", file: "a.ts" }),
+    blocker({ category: "contrast", message: "msg-b", file: "b.ts" }),
+    blocker({ category: "type-error", message: "msg-c", file: "c.ts" }),
   ];
   const report = buildTerminalReport({
     status: "bailed-build-failed",

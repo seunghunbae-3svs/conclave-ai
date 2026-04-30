@@ -129,11 +129,36 @@ export function buildTerminalReport(input: TerminalReportInput): TerminalReportP
       if (f.status === "ready") verifiedReadyFixes.push(f);
     }
   }
-  const totalBlockersFound = allFixes.length + input.remainingBlockers.length;
-  const blockersAutofixed = verifiedReadyFixes.length;
-  const blockersOutstanding = input.remainingBlockers.length;
-  const fixedItems = verifiedReadyFixes.map((f) => describeBlockerForUser(f.blocker));
-  const outstandingItems = input.remainingBlockers.map(describeBlockerForUser);
+  // UX-12 — dedup outstanding blockers BEFORE counting + describing.
+  // Multiple agents (claude + design + openai) flag the same underlying
+  // bug under different category labels — pre-UX-12 the report showed
+  // "9 사람 검토 필요" when in reality there were 4 distinct issues.
+  // Bae on PR #47: "사람 검토가 필요한것도 너무 많아 진짜 그걸 다
+  // 사람이 봐야해?". Key on (file + first 60 chars of message) so the
+  // user sees the real count of distinct issues.
+  const dedupeKey = (b: Blocker): string =>
+    `${b.file ?? "<unscoped>"}::${(b.message ?? "").slice(0, 60).toLowerCase().trim()}`;
+  const seenOutstanding = new Set<string>();
+  const dedupedOutstanding: Blocker[] = [];
+  for (const b of input.remainingBlockers) {
+    const k = dedupeKey(b);
+    if (seenOutstanding.has(k)) continue;
+    seenOutstanding.add(k);
+    dedupedOutstanding.push(b);
+  }
+  const seenFixed = new Set<string>();
+  const dedupedFixed: BlockerFix[] = [];
+  for (const f of verifiedReadyFixes) {
+    const k = dedupeKey(f.blocker);
+    if (seenFixed.has(k)) continue;
+    seenFixed.add(k);
+    dedupedFixed.push(f);
+  }
+  const totalBlockersFound = dedupedFixed.length + dedupedOutstanding.length;
+  const blockersAutofixed = dedupedFixed.length;
+  const blockersOutstanding = dedupedOutstanding.length;
+  const fixedItems = dedupedFixed.map((f) => describeBlockerForUser(f.blocker));
+  const outstandingItems = dedupedOutstanding.map(describeBlockerForUser);
   const recommendation = pickRecommendation({
     status: input.status,
     deployOutcome: input.deployOutcome,
@@ -181,6 +206,16 @@ export function isAutonomyTerminal(input: {
   if (input.status === "awaiting-approval") return true;
   if (input.status === "deferred-to-next-review") return false;
   if (input.reworkCycle + 1 >= input.maxCycles) return true;
-  if (input.status.startsWith("bailed-") && !input.pushedThisRun) return true;
+  // AF-2 follow-on — bail-with-no-push USED to be terminal because no
+  // commit meant no review.yml retrigger. The rework.yml workflow now
+  // fires a fresh repository_dispatch on autofix non-zero exit, so
+  // even bail-with-no-push gets a next-cycle attempt as long as
+  // cycles remain. Match that behavior here so we don't double-emit
+  // the terminal review-finished card before the autonomy loop has
+  // genuinely given up.
+  // (Kept: cycle+1 >= max already handled above — that path IS terminal.)
+  if (input.status.startsWith("bailed-")) {
+    return false; // not terminal; next cycle dispatch will fire
+  }
   return false;
 }
