@@ -37,6 +37,18 @@ import type { HandlerResult, BinaryEncodingHandlerDeps } from "./binary-encoding
 export interface MissingImportHandlerDeps extends BinaryEncodingHandlerDeps {}
 
 const MISSING_IMPORT_CATEGORIES = [
+  // The most direct signal — when the council labels the blocker
+  // exactly "missing-import". Live-caught on PR #54 where the council
+  // (correctly) emitted (missing-import) but AF-4 didn't recognize
+  // that category and let the worker pipeline run instead, which
+  // generated unappliable patches and let the build stay broken
+  // through 3 cycles.
+  "missing-import",
+  "import-error",
+  "import-missing",
+  "missing-module",
+  "module-missing",
+  // Adjacent labels that often carry the same root issue.
   "runtime-safety",
   "regression-risk",
   "stability",

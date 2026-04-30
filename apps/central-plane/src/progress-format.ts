@@ -120,11 +120,14 @@ export function renderProgressLine(stage: ProgressStage, payload: ProgressPayloa
       const head = target ? ` on ${target}` : "";
       return { stage, text: `Review starting${head}${tail}` };
     }
-    // UX-13 — fresh Telegram message per rework cycle.
+    // UX-13 — fresh Telegram message per rework cycle. Same wording as
+    // the integration-telegram side (drift-checked by stage-drift-invariant).
     case "rework-cycle-started": {
       const it = typeof p.iteration === "number" ? p.iteration : 0;
+      const max = typeof p.iterationsAttempted === "number" ? p.iterationsAttempted : null;
+      const counter = max ? `${it}/${max}` : `${it}`;
       const head = target ? ` on ${target}` : "";
-      return { stage, text: `🔄 Rework cycle ${it} starting${head} — auto-fixing remaining blockers` };
+      return { stage, text: `🔄 Conclave is auto-fixing (${counter})${head}` };
     }
     case "visual-capture-started": {
       const routes = p.routes && p.routes.length > 0

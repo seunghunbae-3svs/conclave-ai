@@ -87,11 +87,15 @@ export function renderProgressLine(input: NotifyProgressInput): ProgressLine {
       const head = target ? ` on ${target}` : "";
       return { stage: input.stage, text: `Review starting${head}${tail}` };
     }
-    // UX-13 — fresh Telegram message per rework cycle.
+    // UX-13 — fresh Telegram message per rework cycle. Wording matches
+    // the per-cycle counter Bae sees ("auto-fixing 1/3, 2/3, 3/3") so
+    // every dispatch reads the same way.
     case "rework-cycle-started": {
       const it = typeof p.iteration === "number" ? p.iteration : 0;
+      const max = typeof p.iterationsAttempted === "number" ? p.iterationsAttempted : null;
+      const counter = max ? `${it}/${max}` : `${it}`;
       const head = target ? ` on ${target}` : "";
-      return { stage: input.stage, text: `🔄 Rework cycle ${it} starting${head} — auto-fixing remaining blockers` };
+      return { stage: input.stage, text: `🔄 Conclave is auto-fixing (${counter})${head}` };
     }
     case "visual-capture-started": {
       const routes = p.routes && p.routes.length > 0

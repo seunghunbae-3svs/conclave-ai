@@ -325,6 +325,7 @@ jobs:
           CONCLAVE_CENTRAL_URL: ${{ vars.CONCLAVE_CENTRAL_URL || '' }}
           EPISODIC: ${{ inputs.episodic }}
           CYCLE: ${{ inputs.cycle }}
+          MAX_CYCLES: ${{ inputs.max-cycles }}
           PR: ${{ inputs.pr-number }}
           REPO: ${{ github.repository }}
         run: |
@@ -339,6 +340,7 @@ jobs:
             --arg repo "$REPO" \
             --argjson pr "${PR:-0}" \
             --argjson cycle "${CYCLE:-0}" \
+            --argjson maxCycles "${MAX_CYCLES:-3}" \
             '{
               repo_slug: $repo,
               episodic_id: env.EPISODIC,
@@ -346,7 +348,8 @@ jobs:
               payload: {
                 repo: $repo,
                 pullNumber: $pr,
-                iteration: $cycle
+                iteration: $cycle,
+                iterationsAttempted: $maxCycles
               }
             }')
           curl -fsS -X POST \
