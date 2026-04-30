@@ -99,7 +99,7 @@ on:
         description: 'npm version tag for @conclave-ai/cli. Pinned default; override to a specific semver for reproducible reviews.'
         required: false
         type: string
-        default: 0.14.11
+        default: 0.14.12
       force-max-cycles:
         description: 'v0.8 — override the configured autonomy.maxReworkCycles for this run (clamped to 5). Empty string uses config.'
         required: false

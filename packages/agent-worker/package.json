@@ -1,6 +1,6 @@
 {
   "name": "@conclave-ai/agent-worker",
-  "version": "0.10.11",
+  "version": "0.10.12",
   "description": "Conclave AI Worker agent — turns Council blockers into a unified-diff patch ready to commit back to the PR branch.",
   "license": "MIT",
   "type": "module",
