@@ -59,7 +59,7 @@ test("OP-3 review.yml: skip-guard runs BEFORE secret-bearing steps (no key expos
   );
 });
 
-test("OP-3 rework.yml: workflow refuses to run when cycle >= max_cycles (hard ceiling)", () => {
+test("OP-3 rework.yml: workflow refuses to run when cycle exceeds max_cycles (hard ceiling)", () => {
   const body = readWf("rework.yml");
   // Look for the cycle-cap gate.
   assert.match(
@@ -72,11 +72,13 @@ test("OP-3 rework.yml: workflow refuses to run when cycle >= max_cycles (hard ce
     /CYCLE\s*[><=!]/,
     "rework.yml must compare CYCLE to a ceiling",
   );
-  // Must mention that >= max bails (either bash -ge / -gt or `>=`).
+  // Post-fence-post-fix: skip only when CYCLE > MAX (genuinely past the
+  // ceiling). Pre-fix used >= which rejected cycle == max as well, cutting
+  // the loop one cycle short. Match either bash -gt or > comparison.
   assert.match(
     body,
-    /(-ge\s+["']?\$?\{?MAX\}?["']?)|>=\s*\$?\{?MAX\}?/,
-    "rework.yml must compare cycle >= MAX",
+    /(-gt\s+["']?\$?\{?MAX\}?["']?)|>\s*\$?\{?MAX\}?/,
+    "rework.yml must skip when cycle > MAX (post fence-post fix)",
   );
 });
 
