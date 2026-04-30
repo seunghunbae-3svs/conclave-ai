@@ -361,6 +361,50 @@ jobs:
             --max-iterations 3 \
             --autonomy l2 \
             $EXTRA
+        id: autofix-step
+        continue-on-error: true
+
+      # AF-2 follow-on — if the autofix step ran (skip != true) and exited
+      # non-zero AND we didn't push (no commit means no automatic re-trigger),
+      # dispatch the NEXT cycle directly so the autonomy loop keeps trying.
+      # With no push, the only way for cycle N+1 to fire is via a fresh
+      # repository_dispatch — which we fire here from the workflow itself.
+      # Gated by `cycle + 1 < max-cycles` so we don't loop past the ceiling.
+      # Best-effort: dispatch failure logs ::warning:: but doesn't fail
+      # the workflow.
+      - name: Dispatch next cycle on autofix failure (no push)
+        if: steps.guard.outputs.skip != 'true' && steps.autofix-step.outcome == 'failure'
+        env:
+          GH_TOKEN: ${{ secrets.ORCHESTRATOR_PAT || secrets.GITHUB_TOKEN }}
+          CYCLE: ${{ inputs.cycle }}
+          MAX: ${{ inputs.max-cycles }}
+          PR: ${{ inputs.pr-number }}
+          EPISODIC: ${{ inputs.episodic }}
+        run: |
+          set -euo pipefail
+          NEXT=$(( CYCLE + 1 ))
+          if [ "$NEXT" -ge "$MAX" ]; then
+            echo "::notice::Autofix failed at cycle $CYCLE; next cycle ($NEXT) would hit the ceiling — letting cycle ceiling skip emit review-finished"
+            exit 0
+          fi
+          echo "::notice::Autofix failed at cycle $CYCLE; dispatching cycle $NEXT (max $MAX) so the loop keeps trying"
+          # Dispatch via repository_dispatch on the consumer's repo. The
+          # consumer's wrapper workflow (conclave-rework.yml) listens for
+          # event_type=conclave-rework and re-invokes this reusable.
+          jq -n \
+            --argjson pr "$PR" \
+            --argjson cycle "$NEXT" \
+            --argjson max "$MAX" \
+            --arg ep "$EPISODIC" \
+            '{event_type: "conclave-rework", client_payload: {pr_number: $pr, cycle: $cycle, max_cycles: $max, episodic: $ep}}' \
+            | gh api "repos/${{ github.repository }}/dispatches" \
+                -X POST \
+                --input - || \
+            echo "::warning::failed to dispatch next cycle (autofix already bailed; user will see review-finished bail card on Telegram)"
+          # Re-fail the workflow so the GitHub Actions UI shows red on
+          # bail. The dispatch above is the loop continuation; the
+          # workflow's own status reflects THIS cycle's outcome.
+          exit 1
 
       - name: Skipped notice
         if: steps.guard.outputs.skip == 'true'
