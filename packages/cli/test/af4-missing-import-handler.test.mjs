@@ -45,7 +45,7 @@ test("AF-4: declines when blocker has no `file`", async () => {
   assert.equal(r.claimed, false);
 });
 
-test("AF-4: claims when category=runtime-safety + message says 'not in this diff' + import exists", async () => {
+test("AF-4: creates no-op stub when imported module file is missing", async () => {
   await withTempDir(async (dir) => {
     const file = "src/main.jsx";
     await fs.mkdir(path.join(dir, "src"), { recursive: true });
@@ -71,25 +71,54 @@ test("AF-4: claims when category=runtime-safety + message says 'not in this diff
       {
         cwd: dir,
         git: async (_bin, args) => {
-          calls.push(args[0]);
+          calls.push({ args: [...args] });
           return { stdout: "", stderr: "" };
         },
       },
     );
     assert.equal(r.claimed, true);
     assert.equal(r.fix.status, "ready");
-    assert.deepEqual(r.fix.appliedFiles, [file]);
+    const stubRel = "src/config/feature-flags-runtime.js";
+    assert.deepEqual(r.fix.appliedFiles, [stubRel]);
     assert.equal(r.fix.costUsd, 0);
-    // git add ran.
-    assert.ok(calls.includes("add"));
-    // File was rewritten — original static import should be commented out.
+    // git add ran on the stub path.
+    const adds = calls.filter((c) => c.args[0] === "add");
+    assert.ok(adds.some((c) => c.args.includes(stubRel)));
+    // Stub file exists with no-op exports.
+    const stubAbs = path.join(dir, stubRel);
+    const stubContent = await fs.readFile(stubAbs, "utf8");
+    assert.match(stubContent, /AF-4 stub/);
+    assert.match(stubContent, /export function initFeatureFlagsRuntime\(\)/);
+    assert.match(stubContent, /export default __af4Default/);
+    // Importer file UNCHANGED.
     const after = await fs.readFile(path.join(dir, file), "utf8");
-    assert.ok(after.includes("// AF-4"), "marker comment present");
-    assert.ok(!/^\s*import\s+\{\s*initFeatureFlagsRuntime\s*\}/m.test(after), "static import line replaced");
-    // Top-level call was wrapped in IIFE.
-    assert.ok(after.includes("await import('./config/feature-flags-runtime.js')"));
-    assert.ok(after.includes("try { const m = await import"));
-    assert.ok(after.includes("catch {}"));
+    assert.equal(after, original);
+  });
+});
+
+test("AF-4: declines when imported module file ALREADY exists (false-alarm blocker)", async () => {
+  await withTempDir(async (dir) => {
+    const file = "src/main.jsx";
+    await fs.mkdir(path.join(dir, "src", "config"), { recursive: true });
+    await fs.writeFile(
+      path.join(dir, "src/config/feature-flags-runtime.js"),
+      "export function initFeatureFlagsRuntime() {}\n",
+    );
+    await fs.writeFile(
+      path.join(dir, file),
+      "import { initFeatureFlagsRuntime } from './config/feature-flags-runtime.js'\ninitFeatureFlagsRuntime()\n",
+    );
+    const r = await tryMissingImportFix(
+      "claude",
+      {
+        severity: "blocker",
+        category: "runtime-safety",
+        message: "module './config/feature-flags-runtime.js' is not in this diff",
+        file,
+      },
+      { cwd: dir, git: stubGit() },
+    );
+    assert.equal(r.claimed, false);
   });
 });
 
@@ -141,14 +170,12 @@ test("AF-4: leaves source intact except the targeted import + call site", async 
       { cwd: dir, git: stubGit() },
     );
     assert.equal(r.claimed, true);
+    // Importer source is now LEFT INTACT (post-stub-strategy fix).
+    // The stub at ./x.js makes the import resolve at build time.
     const after = await fs.readFile(path.join(dir, file), "utf8");
-    // React import untouched.
-    assert.ok(after.includes("import React from 'react'"));
-    // Header function untouched.
-    assert.ok(after.includes("function Header() { return <h1>Hello</h1> }"));
-    assert.ok(after.includes("export default Header;"));
-    // initX import + call mechanically wrapped.
-    assert.ok(after.includes("AF-4"));
-    assert.ok(after.includes("await import('./x.js')"));
+    assert.equal(after, original);
+    // Stub at ./x.js exists with no-op export for initX.
+    const stubContent = await fs.readFile(path.join(dir, "src/x.js"), "utf8");
+    assert.match(stubContent, /export function initX\(\)/);
   });
 });

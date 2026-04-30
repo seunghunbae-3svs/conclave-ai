@@ -205,17 +205,20 @@ export function isAutonomyTerminal(input: {
   if (input.status === "approved") return true;
   if (input.status === "awaiting-approval") return true;
   if (input.status === "deferred-to-next-review") return false;
-  if (input.reworkCycle + 1 >= input.maxCycles) return true;
-  // AF-2 follow-on — bail-with-no-push USED to be terminal because no
-  // commit meant no review.yml retrigger. The rework.yml workflow now
-  // fires a fresh repository_dispatch on autofix non-zero exit, so
-  // even bail-with-no-push gets a next-cycle attempt as long as
-  // cycles remain. Match that behavior here so we don't double-emit
-  // the terminal review-finished card before the autonomy loop has
-  // genuinely given up.
-  // (Kept: cycle+1 >= max already handled above — that path IS terminal.)
+  // Fence-post: max=3 → cycles 1, 2, 3 all valid. THIS cycle is terminal
+  // only when reworkCycle >= maxCycles (i.e., we're AT the last valid
+  // cycle right now and there's no cycle+1 to dispatch). Pre-fix used
+  // `reworkCycle + 1 >= maxCycles` which fired terminal at cycle 2 of 3
+  // — premature, because AF-2 was about to dispatch cycle 3 with the
+  // post-fence-post-fix rework.yml. LIVE-caught on PR #53: review-finished
+  // arrived BEFORE the cycle 3 message, then cycle 3 ran anyway and the
+  // user saw the terminal report sandwiched mid-flow.
+  if (input.reworkCycle >= input.maxCycles) return true;
+  // Bail at non-final cycle: AF-2 will dispatch the next cycle. Not
+  // terminal yet — the next cycle's autofix (or its cycle-ceiling
+  // skip step) is responsible for the eventual review-finished emit.
   if (input.status.startsWith("bailed-")) {
-    return false; // not terminal; next cycle dispatch will fire
+    return false;
   }
   return false;
 }

@@ -89,8 +89,19 @@ test("UX-4 isAutonomyTerminal: bail with push mid-cycle → false (next cycle wi
   assert.equal(isAutonomyTerminal({ status: "bailed-no-patches", pushedThisRun: true, reworkCycle: 0, maxCycles: 3 }), false);
 });
 
-test("UX-4 isAutonomyTerminal: bail at cycle == max-1 → true (last possible cycle)", () => {
-  assert.equal(isAutonomyTerminal({ status: "bailed-build-failed", pushedThisRun: true, reworkCycle: 2, maxCycles: 3 }), true);
+test("UX-4 isAutonomyTerminal: bail at cycle == max-1 → false (cycle == max will still run)", () => {
+  // Post-UX-12-fence-post-fix: max=3 means cycles 1, 2, 3 are all valid.
+  // At cycle 2, AF-2 will dispatch cycle 3, so cycle 2 is NOT terminal.
+  // Pre-fix this fired terminal at cycle 2 → premature review-finished
+  // BEFORE cycle 3 ran → out-of-order Telegram messages on PR #53.
+  assert.equal(isAutonomyTerminal({ status: "bailed-build-failed", pushedThisRun: true, reworkCycle: 2, maxCycles: 3 }), false);
+});
+
+test("UX-4 isAutonomyTerminal: bail at cycle == max → true (this IS the last cycle)", () => {
+  // cycle=3 with max=3 — the actual last cycle. No cycle+1 to dispatch.
+  // Terminal regardless of pushedThisRun.
+  assert.equal(isAutonomyTerminal({ status: "bailed-build-failed", pushedThisRun: false, reworkCycle: 3, maxCycles: 3 }), true);
+  assert.equal(isAutonomyTerminal({ status: "bailed-build-failed", pushedThisRun: true, reworkCycle: 3, maxCycles: 3 }), true);
 });
 
 test("UX-4 buildTerminalReport: synthesizes payload from iterations + remaining", () => {
